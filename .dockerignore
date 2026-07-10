@@ -1,0 +1,15 @@
+# Docker 빌드 컨텍스트 축소 (Dockerfile.python의 컨텍스트 = 저장소 루트)
+.git
+node_modules
+**/node_modules
+.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+.next
+**/.next
+.turbo
+**/.turbo
+dist
+docs
+data

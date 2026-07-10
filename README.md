@@ -59,13 +59,20 @@ uv run --package lf-schemas python packages/schemas/scripts/generate.py
 pnpm --filter @livingfeed/schemas generate
 ```
 
-Docker Compose 개발환경은 로드맵 3단계에서 추가된다 (`infra/compose/`).
+```bash
+# 개발환경 (저장소 6종: PostgreSQL/Redis/NATS/Qdrant/OpenSearch/MinIO)
+cd infra/compose
+docker compose --profile core up -d          # 저장소만 (권장)
+docker compose --profile full up -d --build  # + gateway, feed-api
+```
+
+상세: [infra/compose/README.md](infra/compose/README.md)
 
 ## Roadmap
 
 1. ✅ ADR-001~020 작성
 2. ✅ Monorepo 스캐폴드
-3. ⬜ Docker Compose 개발환경
+3. ✅ Docker Compose 개발환경
 4. ⬜ CI/CD (GitHub Actions)
 5. ⬜ Core Engine (이벤트 스토어 + outbox + dispatcher → tick)
 6. ⬜ 첫 번째 AI Actor 실행

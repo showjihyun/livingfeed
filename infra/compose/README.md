@@ -1,7 +1,39 @@
 # infra/compose — Docker Compose 개발환경
 
-**로드맵 3단계에서 작성된다** (ADR-019).
+로컬 개발용 전체 스택 (ADR-019). prod와 동형(같은 저장소 6종, 같은 이벤트 백본).
 
-계획:
-- `--profile core`: 저장소만 (PostgreSQL, Redis, NATS, Qdrant, OpenSearch, MinIO) — 서비스는 호스트에서 직접 실행
-- `--profile full`: 전체 (저장소 + 서비스 + 엔진)
+## 사용법
+
+```bash
+cd infra/compose
+
+docker compose --profile core up -d          # 저장소만 — 서비스는 호스트에서 실행 (권장)
+docker compose --profile full up -d --build  # + gateway, feed-api 컨테이너
+docker compose ps                            # 상태/헬스 확인
+docker compose down                          # 중지 (데이터 볼륨 유지)
+docker compose down -v                       # 데이터까지 완전 삭제
+```
+
+자격증명 재정의(선택): `.env.example` → `.env` 복사 후 수정. 기본값은 개발 전용.
+
+## 포트 맵
+
+| 서비스 | 포트 | 용도 |
+|--------|------|------|
+| PostgreSQL | 5432 | SoT — 이벤트 스토어(`es.*`) + 읽기 프로젝션(`read.*`) (ADR-005) |
+| Redis | 6379 | Working memory / hot state / 타임라인 캐시 (ADR-008/014) |
+| NATS | 4222, 8222(모니터링) | JetStream 이벤트 백본, 단일 노드 (ADR-004) |
+| Qdrant | 6333(HTTP), 6334(gRPC) | Semantic memory (ADR-007) |
+| OpenSearch | 9200 | 피드 검색 인덱스, 보안 플러그인 off (ADR-014) |
+| MinIO | 9000(S3), 9001(콘솔) | Archive 계층 (ADR-008) |
+| gateway | 8000 | `full` 프로파일만 |
+| feed-api | 8001 | `full` 프로파일만 |
+
+## 구성 메모
+
+- **initdb/**: 첫 기동 시 `es`/`read` 스키마 생성. 볼륨이 이미 있으면 실행되지 않는다 (`down -v` 후 재기동).
+- **Dockerfile.python**: 전 Python 서비스 공용. 빌드 컨텍스트는 저장소 루트(uv workspace 때문),
+  `PACKAGE`/`APP_MODULE` build arg로 서비스를 선택한다.
+- **Qdrant 헬스체크 없음**: 이미지에 shell/curl이 없다. 호스트에서 `GET :6333/readyz`로 확인.
+- **JetStream 스트림(LF_ACTOR 등) 프로비저닝**은 Core Engine 단계(로드맵 5)에서 dispatcher가 담당한다.
+- Kuzu는 여기 없다 — 임베디드라 projector 프로세스 안에 산다 (ADR-006).

@@ -1,0 +1,27 @@
+# syntax=docker/dockerfile:1
+# 공용 Python 서비스 이미지 (ADR-019).
+# 빌드 컨텍스트는 저장소 루트다 — uv workspace 멤버(lf-schemas 등)를 포함해야 하기 때문.
+#   docker compose -f infra/compose/docker-compose.yml build gateway
+
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+ARG PACKAGE
+ARG APP_MODULE
+
+WORKDIR /app
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+
+# 워크스페이스 정의 + 전체 멤버 소스 (멤버 glob이 전부 존재해야 uv sync가 가능)
+COPY pyproject.toml uv.lock .python-version ./
+COPY packages/schemas ./packages/schemas
+COPY services ./services
+COPY engine ./engine
+
+RUN uv sync --frozen --no-dev --package "${PACKAGE}"
+
+ENV PATH="/app/.venv/bin:${PATH}" \
+    APP_MODULE=${APP_MODULE}
+
+EXPOSE 8000
+CMD ["sh", "-c", "uvicorn ${APP_MODULE} --host 0.0.0.0 --port 8000"]

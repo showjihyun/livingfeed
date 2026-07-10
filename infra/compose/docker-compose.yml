@@ -1,0 +1,173 @@
+# Living Feed 개발환경 (ADR-019 §환경 구성)
+#
+#   docker compose --profile core up -d          # 저장소 6종만 — 서비스는 호스트에서 실행
+#   docker compose --profile full up -d --build  # + gateway, feed-api 컨테이너
+#   docker compose down                          # 중지 (데이터 볼륨 유지)
+#   docker compose down -v                       # 데이터까지 삭제
+#
+# 자격증명 기본값은 개발 전용이다. 재정의: .env.example → .env 복사 후 수정.
+
+name: livingfeed
+
+services:
+  # ── 저장소 (profile: core) ───────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    profiles: [core, full]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-livingfeed}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-livingfeed}
+      POSTGRES_DB: ${POSTGRES_DB:-livingfeed}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-livingfeed} -d ${POSTGRES_DB:-livingfeed}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    profiles: [core, full]
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  nats:
+    # dev는 단일 노드, prod는 3-node R3 클러스터 (ADR-004)
+    image: nats:2.10-alpine
+    profiles: [core, full]
+    restart: unless-stopped
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    ports:
+      - "4222:4222"   # client
+      - "8222:8222"   # monitoring
+    volumes:
+      - nats_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    profiles: [core, full]
+    restart: unless-stopped
+    ports:
+      - "6333:6333"   # HTTP
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    # 이미지에 shell/curl이 없어 컨테이너 내부 healthcheck 불가 — 호스트에서 GET /readyz 로 확인
+
+  opensearch:
+    image: opensearchproject/opensearch:2.19.0
+    profiles: [core, full]
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+
+  minio:
+    image: minio/minio:latest   # TODO: 첫 배포 전 RELEASE 태그로 고정
+    profiles: [core, full]
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-livingfeed}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-livingfeed}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"           # S3 API
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"   # console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # ── 서비스 (profile: full) ───────────────────────────────────────────
+  gateway:
+    profiles: [full]
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: infra/compose/Dockerfile.python
+      args:
+        PACKAGE: lf-gateway
+        APP_MODULE: lf_gateway.main:app
+    ports:
+      - "8000:8000"
+    environment:
+      NATS_URL: nats://nats:4222
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  feed-api:
+    profiles: [full]
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: infra/compose/Dockerfile.python
+      args:
+        PACKAGE: lf-feed-api
+        APP_MODULE: lf_feed_api.main:app
+    ports:
+      - "8001:8000"
+    environment:
+      OPENSEARCH_URL: http://opensearch:9200
+      REDIS_URL: redis://redis:6379/1
+    depends_on:
+      redis:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  # dispatcher / projector / ai-runtime / tick 워커는 Core Engine 구현(로드맵 5단계)에서
+  # full 프로파일에 추가된다 — 현재는 스캐폴드(NotImplementedError)라 기동 대상이 아니다.
+
+volumes:
+  pg_data:
+  redis_data:
+  nats_data:
+  qdrant_data:
+  opensearch_data:
+  minio_data:
