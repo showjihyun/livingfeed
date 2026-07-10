@@ -1,0 +1,25 @@
+# 발행 권한 매트릭스 (ADR-017 §2)
+# dispatcher가 outbox 적재/발행 시점에 검증한다.
+# 규칙: principal(발행 주체) → 허용 이벤트 타입 패턴 목록 (접두 와일드카드만 허용)
+#
+# ★ engine.director 에 actor.* / relationship.* 이 없는 것은 의도된 것이다 —
+#   Director는 간접 개입만 가능하다 (ADR-013 hard rule).
+
+principals:
+  engine.tick:
+    - "system.tick.*"
+  engine.actor:
+    - "actor.*"
+  engine.relationship:
+    - "relationship.*"
+  engine.emotion:
+    - "actor.emotion.*"
+  engine.director:
+    - "world.*"
+    - "system.director.*"
+  engine.feed:
+    - "feed.*"
+  services.gateway:
+    - "player.*"
+  services.ai-runtime: []        # AI Runtime은 이벤트를 발행하지 않는다 (ADR-018)
+  services.projector: []         # 프로젝터는 절대 발행하지 않는다 (ADR-003 계약 4)

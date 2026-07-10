@@ -1,0 +1,23 @@
+[project]
+name = "lf-feed-api"
+version = "0.1.0"
+description = "Feed 조회 API — ADR-014 (배치/랭킹 읽기 경로)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "lf-schemas",
+]
+
+[tool.uv.sources]
+lf-schemas = { workspace = true }
+
+[dependency-groups]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lf_feed_api"]

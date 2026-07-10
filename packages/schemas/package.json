@@ -1,0 +1,16 @@
+{
+  "name": "@livingfeed/schemas",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "typescript/src/index.ts",
+  "types": "typescript/src/index.ts",
+  "scripts": {
+    "generate": "json2ts -i \"events/*.schema.json\" -o typescript/src/generated",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "json-schema-to-typescript": "^15.0.4",
+    "typescript": "^5.8.0"
+  }
+}

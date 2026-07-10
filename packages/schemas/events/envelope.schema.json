@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/envelope.schema.json",
+  "title": "EventEnvelope",
+  "description": "모든 Living Feed 도메인 이벤트의 공통 봉투 (ADR-002)",
+  "type": "object",
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "description": "ULID — 시간순 정렬 가능",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "stream": {
+      "type": "string",
+      "enum": ["actor", "world", "relationship", "feed", "player", "system"]
+    },
+    "type": {
+      "type": "string",
+      "description": "<stream>.<entity>.<past-tense-verb>",
+      "pattern": "^[a-z_]+(\\.[a-z_]+){2,}$"
+    },
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1
+    },
+    "world_id": {
+      "type": "string",
+      "pattern": "^w_[a-z0-9_]+$"
+    },
+    "actor_id": {
+      "type": ["string", "null"],
+      "description": "주체 액터 (없으면 null)"
+    },
+    "tick": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "발생 시점의 세계 tick (ADR-011)"
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "causation_id": {
+      "type": ["string", "null"],
+      "description": "이 이벤트를 유발한 직전 이벤트의 event_id (체인 시작이면 null)"
+    },
+    "correlation_id": {
+      "type": "string",
+      "description": "하나의 서사적 사건 단위 — 드라마 추적용 (ADR-013)"
+    },
+    "payload": {
+      "type": "object",
+      "description": "타입별 payload — events/<type>.schema.json 으로 검증"
+    }
+  },
+  "required": [
+    "event_id",
+    "stream",
+    "type",
+    "schema_version",
+    "world_id",
+    "actor_id",
+    "tick",
+    "occurred_at",
+    "causation_id",
+    "correlation_id",
+    "payload"
+  ],
+  "additionalProperties": false
+}

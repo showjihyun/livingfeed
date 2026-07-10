@@ -1,0 +1,21 @@
+[project]
+name = "lf-actor"
+version = "0.1.0"
+description = "Actor Runtime — asyncio 워커 풀 + 해시 샤딩 (ADR-012)"
+requires-python = ">=3.12"
+dependencies = [
+    "lf-schemas",
+]
+
+[tool.uv.sources]
+lf-schemas = { workspace = true }
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lf_actor"]

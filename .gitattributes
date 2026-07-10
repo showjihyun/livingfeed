@@ -1,0 +1,8 @@
+# 저장소는 LF로 통일한다 (.editorconfig와 정합)
+* text=auto eol=lf
+
+# 바이너리
+*.png binary
+*.jpg binary
+*.webp binary
+*.woff2 binary

@@ -1,0 +1,19 @@
+# Context Fabric purpose 프로파일 (ADR-009)
+# 섹션 순서는 ADR-009에서 고정 — 여기서는 "예산"만 조정한다.
+purpose: decide_action
+token_budget:
+  input_total: 6000
+  output: 600
+sections:
+  identity_core: 800
+  standing_beliefs: 600
+  relationship_context: 800
+  recalled_episodes: 1600
+  working_memory: 1200
+  world_context: 400
+  task_frame: 600
+truncation_priority:    # 예산 초과 시 절단 순서 (ADR-009 규칙 2)
+  - world_context
+  - working_memory
+  - recalled_episodes
+  - relationship_context

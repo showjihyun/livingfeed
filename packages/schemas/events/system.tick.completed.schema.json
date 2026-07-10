@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/system.tick.completed.schema.json",
+  "title": "SystemTickCompleted",
+  "description": "tick 파이프라인 완주 신호 (ADR-011). 프로젝터/엔진의 동기화 경계.",
+  "type": "object",
+  "properties": {
+    "tick": { "type": "integer", "minimum": 0 },
+    "started_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "예산: < 60000ms (ADR-020 §1)"
+    },
+    "actors_decided": {
+      "type": "object",
+      "description": "티어별 DECIDE 수행 수 (ADR-011 LOD)",
+      "properties": {
+        "hot": { "type": "integer", "minimum": 0 },
+        "warm": { "type": "integer", "minimum": 0 },
+        "cold": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["hot", "warm", "cold"]
+    },
+    "events_emitted": { "type": "integer", "minimum": 0 }
+  },
+  "required": ["tick", "started_at", "completed_at", "duration_ms", "actors_decided", "events_emitted"],
+  "additionalProperties": false
+}

@@ -1,0 +1,21 @@
+# Living Feed — uv workspace root (virtual, ADR-001)
+# Python 멤버: services/*, engine/*, packages/schemas/python
+
+[tool.uv.workspace]
+members = [
+    "services/*",
+    "engine/*",
+    "packages/schemas/python",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.pytest.ini_options]
+testpaths = ["services", "engine", "packages/schemas/python"]
+# importlib 모드: 워크스페이스 멤버들이 같은 테스트 파일명을 써도 충돌하지 않는다
+addopts = "-q --import-mode=importlib"

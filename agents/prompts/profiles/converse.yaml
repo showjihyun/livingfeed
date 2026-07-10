@@ -1,0 +1,19 @@
+# Context Fabric purpose 프로파일 (ADR-009) — 플레이어/액터 간 대화
+# converse는 working_memory(대화 버퍼)를 확대하고 world_context를 축소한다.
+purpose: converse
+token_budget:
+  input_total: 6000
+  output: 600
+sections:
+  identity_core: 800
+  standing_beliefs: 600
+  relationship_context: 1000
+  recalled_episodes: 1200
+  working_memory: 1800
+  world_context: 200
+  task_frame: 400
+truncation_priority:
+  - world_context
+  - recalled_episodes
+  - relationship_context
+  - working_memory
