@@ -1,0 +1,44 @@
+/* Living Feed — 디자인 핸드오프 전역 스타일 (docs/design-handoff, 프로토타입 기준).
+   주의: 프로토타입은 box-sizing 리셋 없이(content-box) 렌더링되었다 — 리셋을 넣으면 픽셀이 어긋난다. */
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #f4f8fe;
+  color: #3a4256;
+}
+
+a {
+  color: #5f7ec9;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+input {
+  font-family: inherit;
+}
+
+@keyframes lf-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+
+@keyframes lf-pop {
+  0% {
+    transform: translateY(-8px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}

@@ -1,0 +1,46 @@
+/* 프로토타입의 style-hover / style-active 대응 인터랙션 클래스 */
+
+.press97:active {
+  transform: scale(0.97);
+}
+
+.press95:active {
+  transform: scale(0.95);
+}
+
+.press94:active {
+  transform: scale(0.94);
+}
+
+.press92:active {
+  transform: scale(0.92);
+}
+
+/* 온보딩 '세계로 들어가기' 버튼 */
+.enterBtn {
+  background: #6d8dd6;
+}
+
+.enterBtn:hover {
+  background: #5f7ec9;
+}
+
+/* 사이드바 내비게이션 — 비활성은 투명, 호버 시 흰 배경 */
+.navItem {
+  background: transparent;
+}
+
+.navItem:hover {
+  background: #ffffff;
+}
+
+/* 피드의 DM 바로가기 pill */
+.dmPill {
+  background: #f2f6fc;
+  color: #6b7691;
+}
+
+.dmPill:hover {
+  background: #edf3fd;
+  color: #5f7ec9;
+}
