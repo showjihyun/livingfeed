@@ -37,7 +37,7 @@ services/      # FastAPI 서비스 — gateway, feed-api, dispatcher, projector,
 engine/        # 시뮬레이션 코어 — tick, actor, director, emotion, relationship, feed
 agents/        # AI Actor 정의 — personas, prompts, MCP tools
 packages/      # 공유 — schemas(★ 스키마 단일 원천), ui, api-client
-infra/         # compose, ci, k8s
+infra/         # compose, ci (k8s는 Phase 2 예정)
 docs/          # ADR, 기획(plan)
 ```
 
@@ -73,7 +73,7 @@ docker compose --profile full up -d --build  # + gateway, feed-api
 1. ✅ ADR-001~020 작성
 2. ✅ Monorepo 스캐폴드
 3. ✅ Docker Compose 개발환경
-4. ⬜ CI/CD (GitHub Actions)
+4. ✅ CI/CD (GitHub Actions — 경로 필터 + 스키마 게이트, [infra/ci](infra/ci/README.md))
 5. ⬜ Core Engine (이벤트 스토어 + outbox + dispatcher → tick)
 6. ⬜ 첫 번째 AI Actor 실행
 7. ⬜ Living Feed MVP

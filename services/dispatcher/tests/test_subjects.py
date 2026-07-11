@@ -1,5 +1,4 @@
 import pytest
-
 from lf_dispatcher.subjects import dlq_subject, subject
 
 

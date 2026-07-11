@@ -1,9 +1,8 @@
 """envelope 코드젠 산출물의 스모크 테스트 — 스키마↔모델 정합의 최소 검증."""
 
 import pytest
-from pydantic import ValidationError
-
 from lf_schemas import EventEnvelope
+from pydantic import ValidationError
 
 VALID = {
     "event_id": "01JZK7Q3W0000000000000000A",

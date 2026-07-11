@@ -4,6 +4,7 @@ node_modules/
 dist/
 .turbo/
 *.tsbuildinfo
+next-env.d.ts
 
 # Python
 __pycache__/
@@ -23,6 +24,9 @@ __pycache__/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# 내부 문서 — 원격 저장소에 올리지 않는다 (ADR/기획/디자인 핸드오프)
+/docs/
 
 # Local data (compose volumes 등)
 data/

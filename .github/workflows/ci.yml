@@ -1,0 +1,195 @@
+# Living Feed CI (로드맵 4단계 — ADR-001 §툴링, ADR-017 §5, ADR-019 §CI/CD)
+#
+# PR:   경로 필터 → 영향 범위만 lint/test/build (Turborepo·uv)
+#       + 스키마 게이트 (코드젠 드리프트 + 샘플 이벤트 하위 호환 재검증)
+#       + 이미지 빌드 (push 없음)
+# main: 전체 검증 + 이미지 GHCR 발행 (커밋 SHA 태그)
+#       staging 자동 배포는 K8s/staging 환경 구축 후 추가된다 (infra/ci/README.md)
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # ── 경로 필터 (ADR-001: affected-only 실행) ──────────────────────────
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      js: ${{ steps.filter.outputs.js }}
+      python: ${{ steps.filter.outputs.python }}
+      schemas: ${{ steps.filter.outputs.schemas }}
+      docker: ${{ steps.filter.outputs.docker }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            js:
+              - 'apps/**'
+              - 'packages/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'turbo.json'
+              - 'tsconfig.base.json'
+            python:
+              - 'services/**'
+              - 'engine/**'
+              - 'packages/schemas/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - '.python-version'
+            schemas:
+              - 'packages/schemas/**'
+            docker:
+              - 'infra/compose/Dockerfile.python'
+              - 'services/**'
+              - 'engine/**'
+              - 'packages/schemas/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+
+  # ── JS/TS — pnpm + Turborepo ─────────────────────────────────────────
+  js:
+    needs: changes
+    if: needs.changes.outputs.js == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4   # 버전은 package.json packageManager 필드에서
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  # ── Python — uv + ruff + pytest ──────────────────────────────────────
+  python:
+    needs: changes
+    if: needs.changes.outputs.python == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.2"
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run pytest
+
+  # ── 스키마 게이트 (ADR-001 규칙 1, ADR-017 §5) ───────────────────────
+  schema-gate:
+    needs: changes
+    if: needs.changes.outputs.schemas == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.2"
+          enable-cache: true
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: uv sync --frozen
+      - run: pnpm install --frozen-lockfile
+
+      - name: 코드젠 재생성 (Python + TypeScript)
+        run: |
+          uv run --package lf-schemas python packages/schemas/scripts/generate.py
+          pnpm --filter @livingfeed/schemas generate
+
+      - name: 드리프트 검사 — 산출물은 커밋되어 있어야 한다
+        run: |
+          git add -N packages/schemas
+          git diff --exit-code -- \
+            packages/schemas/python/src/lf_schemas/generated \
+            packages/schemas/typescript/src/generated
+
+      - name: 하위 호환성 게이트 — 기존 샘플 이벤트 재검증
+        run: uv run --package lf-schemas python packages/schemas/scripts/check_compat.py
+
+  # ── 이미지 빌드 (ADR-019: PR은 빌드만, main은 GHCR 발행) ─────────────
+  docker:
+    needs: changes
+    if: needs.changes.outputs.docker == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - service: gateway
+            package: lf-gateway
+            app_module: lf_gateway.main:app
+          - service: feed-api
+            package: lf-feed-api
+            app_module: lf_feed_api.main:app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: GHCR 로그인 (main 푸시만)
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/${{ matrix.service }}
+          tags: |
+            type=sha,prefix=sha-,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/compose/Dockerfile.python
+          build-args: |
+            PACKAGE=${{ matrix.package }}
+            APP_MODULE=${{ matrix.app_module }}
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── 집계 — branch protection 의 단일 required check ──────────────────
+  ci-ok:
+    needs: [changes, js, python, schema-gate, docker]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 실패/취소된 job 확인 (skipped 는 경로 필터 결과이므로 허용)
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+      - run: echo "CI OK"

@@ -1,0 +1,25 @@
+{
+  "event_id": "01JZK7Q3W0000000000000000A",
+  "stream": "actor",
+  "type": "actor.action.performed",
+  "schema_version": 1,
+  "world_id": "w_main",
+  "actor_id": "a_aria_kim",
+  "tick": 42,
+  "occurred_at": "2026-07-11T09:00:41Z",
+  "causation_id": null,
+  "correlation_id": "01JZK7Q3W0000000000000000B",
+  "payload": {
+    "action_kind": "speak",
+    "intent": "카페에서 준호에게 어제의 오해를 풀자고 말을 건다",
+    "target_actor_id": "a_junho_park",
+    "location_id": "loc_cafe_luna",
+    "params": {
+      "tone": "apologetic"
+    },
+    "decision_trace": {
+      "trace_id": "01JZK7Q3W0000000000000000C",
+      "tier": "hot"
+    }
+  }
+}

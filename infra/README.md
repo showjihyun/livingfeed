@@ -6,7 +6,7 @@
 infra/
 ├── compose/    # Docker Compose 개발환경 — 로드맵 3단계 (--profile core|full)
 ├── ci/         # GitHub Actions 워크플로 정의 — 로드맵 4단계
-└── k8s/        # Helm 차트 — staging/prod (values만 분기, 매니페스트 분기 금지)
+└── k8s/        # (Phase 2 예정 — 아직 없음) Helm 차트 — staging/prod (values만 분기, 매니페스트 분기 금지)
 ```
 
 원칙 (ADR-019):

@@ -8,9 +8,17 @@ members = [
     "packages/schemas/python",
 ]
 
+# 워크스페이스 공용 개발 도구 (CI lint가 사용)
+[dependency-groups]
+dev = [
+    "ruff>=0.8",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# 코드젠 산출물은 lint 대상이 아니다 — 수정은 generate.py 재실행으로만 (ADR-001)
+extend-exclude = ["packages/schemas/python/src/lf_schemas/generated"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]

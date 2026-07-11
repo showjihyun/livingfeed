@@ -1,10 +1,9 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
-
 from lf_tick.clock import TickClock
 
-GENESIS = datetime(2026, 1, 1, tzinfo=timezone.utc)
+GENESIS = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def test_one_tick_is_four_world_minutes() -> None:
