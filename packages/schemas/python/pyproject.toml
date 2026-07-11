@@ -5,14 +5,14 @@ description = "Living Feed 이벤트/API 스키마 — 코드젠 산출물 패�
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.7",
+    "jsonschema>=4.23",
+    "pyyaml>=6",
 ]
 
 [dependency-groups]
 dev = [
     "datamodel-code-generator>=0.26",
     "pytest>=8",
-    "jsonschema>=4.23",
-    "pyyaml>=6",
 ]
 
 [build-system]

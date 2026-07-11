@@ -80,12 +80,29 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
-  # ── Python — uv + ruff + pytest ──────────────────────────────────────
+  # ── Python — uv + ruff + pytest (+ PostgreSQL: 이벤트 스토어 통합 테스트) ──
   python:
     needs: changes
     if: needs.changes.outputs.python == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: livingfeed
+          POSTGRES_PASSWORD: livingfeed
+          POSTGRES_DB: livingfeed
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U livingfeed"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      # 명시 설정이므로 접속 실패는 skip이 아니라 fail로 처리된다 (conftest 참고)
+      LF_TEST_DATABASE_URL: postgresql://livingfeed:livingfeed@localhost:5432/livingfeed
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

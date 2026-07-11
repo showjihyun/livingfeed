@@ -9,12 +9,14 @@ CI는 이 스크립트 실행 후 `git diff --exit-code` 로 드리프트를 검
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 SCHEMAS_ROOT = Path(__file__).resolve().parents[1]
 EVENTS_DIR = SCHEMAS_ROOT / "events"
+PERMISSIONS_FILE = SCHEMAS_ROOT / "permissions.yaml"
 PY_OUT = SCHEMAS_ROOT / "python" / "src" / "lf_schemas" / "generated"
 
 
@@ -49,6 +51,17 @@ def main() -> int:
     init_lines = ['"""codegen 산출물 — 수동 편집 금지 (scripts/generate.py 로 재생성)."""\n']
     init_lines += [f"from lf_schemas.generated import {m} as {m}\n" for m in modules]
     (PY_OUT / "__init__.py").write_text("".join(init_lines), encoding="utf-8")
+
+    # 런타임 검증용 원천 사본 — 설치된 패키지(휠/이미지)에서도 JSON Schema와
+    # 권한 매트릭스에 접근할 수 있도록 패키지 데이터로 복사한다 (ADR-017 §2).
+    # 드리프트는 CI의 generated/ diff 게이트가 잡는다.
+    schemas_out = PY_OUT / "schemas"
+    schemas_out.mkdir(exist_ok=True)
+    for schema in sorted(EVENTS_DIR.glob("*.schema.json")):
+        shutil.copyfile(schema, schemas_out / schema.name)
+        print(f"copied: schemas/{schema.name}")
+    shutil.copyfile(PERMISSIONS_FILE, schemas_out / "permissions.yaml")
+    print("copied: schemas/permissions.yaml")
     return 0
 
 

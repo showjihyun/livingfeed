@@ -1,0 +1,35 @@
+"""마이그레이션 멱등성 + ULID 생성 검증."""
+
+import re
+
+from lf_eventstore.migrate import migrate, migration_files
+from lf_eventstore.ulid import new_ulid
+
+ULID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
+
+
+async def test_migrate_is_idempotent(conn):
+    # conftest가 이미 한 번 적용했다 — 재실행은 no-op이어야 한다
+    assert await migrate(conn) == []
+
+
+def test_migration_files_sorted():
+    names = [name for name, _ in migration_files()]
+    assert names == sorted(names)
+    assert names[0] == "0001_event_store.sql"
+
+
+def test_ulid_format():
+    for _ in range(200):
+        assert ULID_RE.match(new_ulid())
+
+
+def test_ulid_timestamp_ordering():
+    earlier = new_ulid(timestamp_ms=1_000_000)
+    later = new_ulid(timestamp_ms=2_000_000)
+    assert earlier < later  # Crockford base32는 사전순 = 시간순
+
+
+def test_ulid_uniqueness():
+    batch = {new_ulid() for _ in range(10_000)}
+    assert len(batch) == 10_000
