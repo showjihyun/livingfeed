@@ -107,7 +107,9 @@ class FeedComposer:
                 while not stop.is_set():
                     try:
                         msgs = await psub.fetch(cfg.batch_size, timeout=cfg.fetch_timeout_s)
-                    except nats.errors.TimeoutError:
+                    except (TimeoutError, nats.errors.TimeoutError):
+                        # nats-py fetch는 경로에 따라 asyncio.TimeoutError(=내장
+                        # TimeoutError)도 던진다 — 유휴 타임아웃은 정상 흐름이다
                         continue
                     for msg in msgs:
                         await self._handle(msg, conn, js)

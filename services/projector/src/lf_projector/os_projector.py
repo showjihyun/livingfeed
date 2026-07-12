@@ -107,7 +107,8 @@ class OsProjector:
             while not stop.is_set():
                 try:
                     msgs = await psub.fetch(cfg.batch_size, timeout=cfg.fetch_timeout_s)
-                except nats.errors.TimeoutError:
+                except (TimeoutError, nats.errors.TimeoutError):
+                    # nats-py fetch는 경로에 따라 asyncio.TimeoutError도 던진다
                     continue
                 projected = await self.project_batch(msgs, index, js)
                 if projected:

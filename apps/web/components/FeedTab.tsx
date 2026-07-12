@@ -1,13 +1,17 @@
 import type { KeyboardEvent } from "react";
 
 import { ICON } from "@/lib/data";
+import type { LivePost, LiveStatus } from "@/lib/live-feed";
 import type { FeedComment } from "@/lib/types";
 
 import { Face } from "./Face";
 import { Icon } from "./Icon";
+import { LivePosts } from "./LivePosts";
 import styles from "./lf.module.css";
 
 interface FeedTabProps {
+  livePosts: LivePost[];
+  liveStatus: LiveStatus;
   showCoach: boolean;
   onDismissCoach: () => void;
   streaming: boolean;
@@ -74,6 +78,8 @@ function TypingDots({ size, radius }: { size: number; radius: string }) {
 }
 
 export function FeedTab({
+  livePosts,
+  liveStatus,
   showCoach,
   onDismissCoach,
   streaming,
@@ -204,6 +210,9 @@ export function FeedTab({
             </div>
           </div>
         )}
+
+        {/* 라이브 피드 — 실 백엔드 (feed.post.published), 미가용이면 오프라인 칩만 */}
+        <LivePosts posts={livePosts} status={liveStatus} />
 
         {/* 민지 스트리밍 포스트 */}
         <div

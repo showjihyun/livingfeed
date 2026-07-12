@@ -13,6 +13,8 @@ from dataclasses import dataclass
 class Config:
     opensearch_url: str
     redis_url: str
+    #: 브라우저 오리진 허용 목록 (fetch CORS) — 쉼표 구분
+    cors_origins: tuple[str, ...] = ("http://localhost:3000",)
     index: str = "lf-feed-posts"
     #: fan-out-on-read 결과 캐시 TTL (ADR-014 §2단)
     cache_ttl_s: int = 30
@@ -29,7 +31,9 @@ class Config:
 
     @classmethod
     def from_env(cls) -> Config:
+        origins = os.environ.get("LF_CORS_ORIGINS", "http://localhost:3000")
         return cls(
             opensearch_url=os.environ.get("OPENSEARCH_URL", "http://localhost:9200"),
             redis_url=os.environ.get("REDIS_URL", "redis://localhost:6379/1"),
+            cors_origins=tuple(o.strip() for o in origins.split(",") if o.strip()),
         )

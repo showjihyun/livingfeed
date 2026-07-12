@@ -23,6 +23,7 @@ from contextlib import asynccontextmanager
 import nats
 import nats.errors
 from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from lf_gateway.config import Config
@@ -72,6 +73,13 @@ def create_app(cfg: Config | None = None, nc: nats.NATS | None = None) -> FastAP
                 await connection.drain()
 
     app = FastAPI(title="lf-gateway", lifespan=lifespan)
+    # 브라우저 EventSource/fetch — 웹 앱(기본 localhost:3000)의 교차 출처 허용
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(cfg.cors_origins),
+        allow_methods=["GET"],
+        allow_headers=["*"],
+    )
     if not owned_nc:
         app.state.js = nc.jetstream()
 
@@ -116,7 +124,7 @@ def create_app(cfg: Config | None = None, nc: nats.NATS | None = None) -> FastAP
                 timeout = 0.2 if items else max(deadline - loop.time(), 0.05)
                 try:
                     msg = await sub.next_msg(timeout=timeout)
-                except nats.errors.TimeoutError:
+                except (TimeoutError, nats.errors.TimeoutError):
                     if items or loop.time() >= deadline:
                         break
                     continue

@@ -73,7 +73,8 @@ async def sse_frames(js: JetStreamContext, cfg: Config, flt: FeedFilter) -> Asyn
         while True:
             try:
                 msg = await sub.next_msg(timeout=cfg.heartbeat_s)
-            except nats.errors.TimeoutError:
+            except (TimeoutError, nats.errors.TimeoutError):
+                # nats-py는 경로에 따라 asyncio.TimeoutError(=내장)도 던진다
                 yield ": hb\n\n"  # 유휴 하트비트 — 프록시 idle 종료 방지
                 continue
             parsed = parse_feed_event(msg.data, flt)

@@ -12,6 +12,7 @@ import {
   WORLD_MIN_START,
   formatWorldTime,
 } from "@/lib/data";
+import { useLiveFeed } from "@/lib/live-feed";
 import type { DmMessage, FeedComment, RelKey, Screen, Tab, Toast } from "@/lib/types";
 
 import { Curating } from "./Curating";
@@ -234,6 +235,9 @@ export function LivingFeedApp() {
     setToasts((list) => list.filter((x) => x.id !== id));
   }, []);
 
+  // 실 백엔드 라이브 피드 — 세계 입장 후에만 구독 (미가용이면 데모만 동작)
+  const { posts: livePosts, status: liveStatus } = useLiveFeed(screen === "app");
+
   const worldTime = formatWorldTime(worldMin);
   const goProfile = useCallback(() => setTab("profile"), []);
   const goDm = useCallback(() => setTab("dm"), []);
@@ -272,6 +276,8 @@ export function LivingFeedApp() {
       >
         {tab === "feed" && (
           <FeedTab
+            livePosts={livePosts}
+            liveStatus={liveStatus}
             showCoach={screen === "app" && !coachDismissed}
             onDismissCoach={() => setCoachDismissed(true)}
             streaming={screen === "app" && !streamDone}

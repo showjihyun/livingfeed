@@ -15,6 +15,7 @@ import re
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from redis.asyncio import Redis
 
 from lf_feed_api.config import Config
@@ -52,6 +53,13 @@ def create_app(
                 await app.state.cache.aclose()
 
     app = FastAPI(title="lf-feed-api", lifespan=lifespan)
+    # 브라우저 fetch — 웹 앱(기본 localhost:3000)의 교차 출처 허용
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(cfg.cors_origins),
+        allow_methods=["GET"],
+        allow_headers=["*"],
+    )
     # 주입분(테스트)은 즉시 배선 — lifespan은 소유분만 만들고 닫는다
     if not owned_search:
         app.state.search = search

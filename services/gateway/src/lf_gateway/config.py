@@ -10,6 +10,8 @@ from dataclasses import dataclass
 class Config:
     nats_url: str
     env: str
+    #: 브라우저 오리진 허용 목록 (EventSource/fetch CORS) — 쉼표 구분
+    cors_origins: tuple[str, ...] = ("http://localhost:3000",)
     stream: str = "LF_FEED"
     #: SSE 유휴 하트비트 — 프록시의 idle 종료 방지 (ADR-010)
     heartbeat_s: float = 15.0
@@ -22,7 +24,9 @@ class Config:
 
     @classmethod
     def from_env(cls) -> Config:
+        origins = os.environ.get("LF_CORS_ORIGINS", "http://localhost:3000")
         return cls(
             nats_url=os.environ.get("NATS_URL", "nats://localhost:4222"),
             env=os.environ.get("LF_ENV", "dev"),
+            cors_origins=tuple(o.strip() for o in origins.split(",") if o.strip()),
         )
