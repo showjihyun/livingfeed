@@ -40,6 +40,8 @@ async def run() -> None:
     nats_url = os.environ.get("NATS_URL", "nats://localhost:4222")
     redis_url = os.environ.get("LF_REDIS_URL", "redis://localhost:6379/0")
     personas_dir = Path(os.environ.get("LF_PERSONAS_DIR", "agents/personas"))
+    # LLM decide 응답 예산 — reasoning 모델은 더 오래 걸릴 수 있다 (tick 예산 안에서)
+    ai_timeout_s = float(os.environ.get("LF_AI_TIMEOUT_S", "10"))
 
     personas = load_personas(personas_dir)
     logger.info("페르소나 %d명 로드: %s", len(personas), ", ".join(p.id for p in personas))
@@ -49,7 +51,7 @@ async def run() -> None:
     try:
         phases = ActorPhases(
             personas,
-            ai=AiRuntimeClient(nc, env),
+            ai=AiRuntimeClient(nc, env, timeout_s=ai_timeout_s),
             memory=WorkingMemory(redis),
         )
         await run_tick_loop(cfg, phases, stop=stop)

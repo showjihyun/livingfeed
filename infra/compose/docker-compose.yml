@@ -194,9 +194,16 @@ services:
     environment:
       NATS_URL: nats://nats:4222
       LF_ENV: dev
-      # 기본은 규칙 프로바이더 — LLM 사용 시: LF_AI_PROVIDER=anthropic + ANTHROPIC_API_KEY
+      # 기본은 규칙 프로바이더 — LLM 사용 시 LF_AI_PROVIDER + 해당 API 키 (.env)
+      # 지원: rule | anthropic | openai | gemini | deepseek | glm (services/ai-runtime/README.md)
       LF_AI_PROVIDER: ${LF_AI_PROVIDER:-rule}
+      LF_MODEL_ROUTES: ${LF_MODEL_ROUTES:-}
+      LF_OPENAI_REASONING_EFFORT: ${LF_OPENAI_REASONING_EFFORT:-low}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      GLM_API_KEY: ${GLM_API_KEY:-}
     depends_on:
       nats:
         condition: service_healthy
@@ -219,6 +226,7 @@ services:
       LF_ENV: dev
       LF_WORLD_ID: w_main
       LF_PERSONAS_DIR: /app/agents/personas
+      LF_AI_TIMEOUT_S: ${LF_AI_TIMEOUT_S:-18}
     depends_on:
       postgres:
         condition: service_healthy

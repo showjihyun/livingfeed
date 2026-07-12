@@ -8,30 +8,77 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 
 import nats
 
 from lf_ai_runtime.config import Config
 from lf_ai_runtime.model import InferenceRequest, InferenceResponse, infer_subject
-from lf_ai_runtime.providers import AnthropicProvider, Provider, RuleBasedProvider
-from lf_ai_runtime.runtime import AiRuntime
+from lf_ai_runtime.providers import (
+    AnthropicProvider,
+    OpenAICompatProvider,
+    Provider,
+    RuleBasedProvider,
+)
+from lf_ai_runtime.runtime import AiRuntime, build_default_routes
 
 logger = logging.getLogger("lf.ai_runtime.service")
 
 QUEUE_GROUP = "ai-runtime"
 
+#: OpenAI 호환 벤더 스펙: (키 env 후보, 기본 base_url, 토큰 파라미터, 토큰 예산)
+#: base_url env(LF_<NAME>_BASE_URL)로 재정의 가능 — GLM 해외 리전(z.ai) 등.
+_COMPAT_SPECS: dict[str, tuple[tuple[str, ...], str | None, str, int]] = {
+    # gpt-5 계열은 max_tokens를 받지 않고, reasoning 토큰이 예산을 공유한다 → 넉넉히
+    "openai": (("OPENAI_API_KEY",), None, "max_completion_tokens", 4096),
+    "gemini": (
+        ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+        "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "max_tokens", 2048,
+    ),
+    "deepseek": (("DEEPSEEK_API_KEY",), "https://api.deepseek.com", "max_tokens", 2048),
+    "glm": (
+        ("GLM_API_KEY", "ZHIPU_API_KEY"),
+        "https://open.bigmodel.cn/api/paas/v4", "max_tokens", 2048,
+    ),
+}
 
-def make_provider(cfg: Config) -> Provider:
-    if cfg.provider == "anthropic":
-        return AnthropicProvider()
-    if cfg.provider == "rule":
-        return RuleBasedProvider()
-    raise ValueError(f"알 수 없는 프로바이더: {cfg.provider}")
+
+def make_providers(cfg: Config) -> dict[str, Provider]:
+    """키가 존재하는 프로바이더를 전부 등록한다. rule은 항상 사용 가능."""
+    providers: dict[str, Provider] = {"rule": RuleBasedProvider()}
+    if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+        providers["anthropic"] = AnthropicProvider()
+    for name, (key_envs, base_url, token_param, max_tokens) in _COMPAT_SPECS.items():
+        api_key = next((os.environ[e] for e in key_envs if os.environ.get(e)), None)
+        if api_key is None:
+            continue
+        providers[name] = OpenAICompatProvider(
+            name,
+            api_key,
+            base_url=os.environ.get(f"LF_{name.upper()}_BASE_URL", base_url),
+            token_param=token_param,
+            max_tokens=max_tokens,
+            # gpt-5/o 계열의 reasoning 지연 통제 (해당 모델에만 적용됨)
+            reasoning_effort=os.environ.get("LF_OPENAI_REASONING_EFFORT", "low")
+            if name == "openai"
+            else None,
+        )
+    return providers
 
 
 async def serve(cfg: Config, *, stop: asyncio.Event | None = None) -> None:
     stop = stop or asyncio.Event()
-    runtime = AiRuntime(provider=make_provider(cfg), routes=cfg.routes)
+    providers = make_providers(cfg)
+    if cfg.provider not in providers:
+        raise RuntimeError(
+            f"기본 프로바이더 '{cfg.provider}'가 구성되지 않았다 — API 키 환경변수를 확인하라"
+        )
+    runtime = AiRuntime(
+        providers=providers,
+        default_provider=cfg.provider,
+        routes=cfg.routes or build_default_routes(cfg.provider),
+    )
 
     nc = await nats.connect(cfg.nats_url)
     try:
@@ -48,7 +95,8 @@ async def serve(cfg: Config, *, stop: asyncio.Event | None = None) -> None:
         subject = infer_subject(cfg.env)
         await nc.subscribe(subject, queue=QUEUE_GROUP, cb=handle)
         logger.info(
-            "ai-runtime 대기 — subject=%s provider=%s", subject, cfg.provider
+            "ai-runtime 대기 — subject=%s 기본=%s 등록=%s",
+            subject, cfg.provider, ",".join(sorted(providers)),
         )
         await stop.wait()
     finally:

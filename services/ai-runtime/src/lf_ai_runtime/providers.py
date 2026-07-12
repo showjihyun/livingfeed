@@ -1,7 +1,10 @@
 """모델 프로바이더 — SDK 사용은 이 모듈에만 존재한다 (ADR-018: 엔진의 SDK 직접 사용 금지).
 
 RuleBasedProvider: 결정적 스텁 — dev/CI 기본값. LLM 비용·키 없이 세계가 돈다.
-AnthropicProvider: 실제 LLM. 구조화 출력(output_config.format)으로 스키마를 강제한다.
+AnthropicProvider: Claude. 구조화 출력(output_config.format)으로 스키마를 강제한다.
+OpenAICompatProvider: OpenAI 호환 API 공용 어댑터 — OpenAI/Gemini/DeepSeek/GLM.
+  JSON mode + 프롬프트 내 스키마 지시로 출력하고, 검증은 AI Runtime이 원본
+  스키마로 수행한다 (벤더별 구조화 출력 지원 편차를 흡수하는 최소공배수 경로).
 """
 
 from __future__ import annotations
@@ -168,3 +171,103 @@ class AnthropicProvider:
         if not isinstance(output, dict):
             raise ProviderError("구조화 출력이 객체가 아니다")
         return output
+
+
+def extract_json_object(text: str) -> dict[str, Any]:
+    """모델 응답 텍스트에서 JSON 객체를 꺼낸다 — 코드펜스/잡텍스트 허용."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        first_newline = stripped.find("\n")
+        closing = stripped.rfind("```")
+        if first_newline != -1 and closing > first_newline:
+            stripped = stripped[first_newline + 1 : closing].strip()
+    if not stripped.startswith("{"):
+        start = stripped.find("{")
+        end = stripped.rfind("}")
+        if start == -1 or end <= start:
+            raise ProviderError("응답에서 JSON 객체를 찾지 못했다")
+        stripped = stripped[start : end + 1]
+    try:
+        output = json.loads(stripped)
+    except json.JSONDecodeError as e:
+        raise ProviderError(f"JSON 파싱 실패: {e}") from e
+    if not isinstance(output, dict):
+        raise ProviderError("구조화 출력이 객체가 아니다")
+    return output
+
+
+class OpenAICompatProvider:
+    """OpenAI 호환 chat.completions 어댑터 — OpenAI/Gemini/DeepSeek/GLM 공용.
+
+    구조화 출력은 벤더 편차가 커서 최소공배수 경로를 쓴다:
+    JSON mode(response_format=json_object) + 프롬프트 내 스키마 지시.
+    스키마 검증·수정 재시도는 AI Runtime 공통 정책이 담당한다 (ADR-018 §1).
+    """
+
+    def __init__(
+        self,
+        name: str,
+        api_key: str,
+        *,
+        base_url: str | None = None,
+        json_mode: bool = True,
+        token_param: str = "max_tokens",
+        max_tokens: int = 1024,
+        reasoning_effort: str | None = None,
+    ) -> None:
+        import openai
+
+        self.name = name
+        self._openai = openai
+        self._client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
+        self._json_mode = json_mode
+        self._token_param = token_param
+        self._max_tokens = max_tokens
+        self._reasoning_effort = reasoning_effort
+
+    async def complete(
+        self,
+        request: InferenceRequest,
+        model: str,
+        *,
+        repair_errors: list[str] | None = None,
+    ) -> dict[str, Any]:
+        schema_text = json.dumps(request.output_schema, ensure_ascii=False)
+        user_content = (
+            f"{request.bundle.user}\n\n"
+            "## 출력 형식\n"
+            "다음 JSON Schema를 정확히 따르는 JSON 객체 하나만 출력하라. "
+            "설명·코드펜스·기타 텍스트 금지.\n"
+            f"{schema_text}"
+        )
+        if repair_errors:
+            user_content += (
+                "\n\n[수정 요청] 직전 응답이 출력 스키마를 위반했다. 위반 사항을 고쳐 "
+                "스키마에 맞는 JSON만 다시 출력하라:\n- " + "\n- ".join(repair_errors)
+            )
+        kwargs: dict[str, Any] = {self._token_param: self._max_tokens}
+        if self._json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        # reasoning 모델의 지연 통제 — decide류는 깊은 추론이 불필요하다 (tick 예산, ADR-020)
+        if self._reasoning_effort and model.startswith(("gpt-5", "o1", "o3", "o4")):
+            kwargs["reasoning_effort"] = self._reasoning_effort
+        try:
+            response = await self._client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": request.bundle.system},
+                    {"role": "user", "content": user_content},
+                ],
+                **kwargs,
+            )
+        except self._openai.APIStatusError as e:
+            raise ProviderError(f"{self.name} API 오류 ({e.status_code}): {e.message}") from e
+        except self._openai.APIConnectionError as e:
+            raise ProviderError(f"{self.name} 연결 실패: {e}") from e
+
+        choice = response.choices[0] if response.choices else None
+        text = choice.message.content if choice and choice.message else None
+        if not text:
+            reason = choice.finish_reason if choice else "no-choice"
+            raise ProviderError(f"{self.name}: 텍스트 응답이 없다 (finish_reason={reason})")
+        return extract_json_object(text)

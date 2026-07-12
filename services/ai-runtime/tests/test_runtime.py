@@ -2,9 +2,15 @@
 
 from typing import Any
 
+import pytest
 from lf_ai_runtime.model import ContextBundle, InferenceRequest
-from lf_ai_runtime.providers import RuleBasedProvider, _sanitize_schema
-from lf_ai_runtime.runtime import AiRuntime
+from lf_ai_runtime.providers import (
+    ProviderError,
+    RuleBasedProvider,
+    _sanitize_schema,
+    extract_json_object,
+)
+from lf_ai_runtime.runtime import AiRuntime, build_default_routes
 from lf_schemas import registry
 
 ACTION_SCHEMA = registry.payload_schema("actor.action.performed")
@@ -37,6 +43,50 @@ async def test_unknown_route_is_explicit_error():
     response = await runtime.infer(request())
     assert not response.ok
     assert "라우팅 없음" in response.error
+
+
+async def test_provider_prefixed_route_to_unconfigured_provider_is_explicit():
+    """"provider:model" 라우트 — 미구성 프로바이더는 명시적 오류 (ADR-018 §4)."""
+    runtime = AiRuntime(
+        providers={"rule": RuleBasedProvider()},
+        default_provider="rule",
+        routes={("decide_action", "hot"): "gemini:gemini-2.5-pro"},
+    )
+    response = await runtime.infer(request())
+    assert not response.ok
+    assert "프로바이더 미구성: gemini" in response.error
+
+
+async def test_provider_prefixed_route_dispatches_to_named_provider():
+    runtime = AiRuntime(
+        providers={"rule": RuleBasedProvider(), "other": RuleBasedProvider()},
+        default_provider="other",
+        routes={("decide_action", "hot"): "rule:whatever-model"},
+    )
+    response = await runtime.infer(request())
+    assert response.ok
+    assert response.model == "whatever-model"
+
+
+def test_default_routes_per_provider():
+    assert build_default_routes("openai")[("decide_action", "hot")] == "gpt-5"
+    assert build_default_routes("deepseek")[("decide_action", "warm")] == "deepseek-chat"
+    assert build_default_routes("glm")[("decide_action", "hot")] == "glm-4.6"
+    assert build_default_routes("gemini")[("summarize", "system")] == "gemini-2.5-flash"
+    # anthropic의 reflect 특례는 유지 (ADR-018 표)
+    assert build_default_routes("anthropic")[("reflect", "warm")] == "claude-sonnet-5"
+    with pytest.raises(ValueError):
+        build_default_routes("unknown")
+
+
+def test_extract_json_object_tolerates_fences_and_prose():
+    assert extract_json_object('{"a": 1}') == {"a": 1}
+    assert extract_json_object('```json\n{"a": 1}\n```') == {"a": 1}
+    assert extract_json_object('결과는 다음과 같다:\n{"a": {"b": 2}} 이상.') == {"a": {"b": 2}}
+    with pytest.raises(ProviderError):
+        extract_json_object("JSON 없음")
+    with pytest.raises(ProviderError):
+        extract_json_object("[1, 2]")  # 객체가 아니다
 
 
 class SchemaViolatingProvider:

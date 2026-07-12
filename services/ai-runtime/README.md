@@ -6,35 +6,48 @@
 
 ## 프로바이더
 
-| 프로바이더 | 활성화 | 용도 |
-|-----------|--------|------|
-| `rule` (기본) | 설정 불요 | 결정적 규칙 행동 — dev/CI, LLM 비용·키 없음 |
-| `anthropic` | `LF_AI_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` | 실제 LLM (구조화 출력, 정체성 프리픽스 캐싱) |
+키가 설정된 프로바이더는 전부 등록된다. `LF_AI_PROVIDER`는 프리픽스 없는
+라우트가 속하는 **기본** 프로바이더를 고른다.
+
+| 프로바이더 | 키 환경변수 | tier 기본 모델 (hot / warm·system) |
+|-----------|------------|-----------------------------------|
+| `rule` (기본) | 불요 | 결정적 규칙 행동 — dev/CI, LLM 비용·키 없음 |
+| `anthropic` | `ANTHROPIC_API_KEY` | claude-opus-4-8 / claude-haiku-4-5 (reflect: claude-sonnet-5) |
+| `openai` | `OPENAI_API_KEY` | gpt-5 / gpt-5-mini |
+| `gemini` | `GEMINI_API_KEY` (또는 `GOOGLE_API_KEY`) | gemini-2.5-pro / gemini-2.5-flash |
+| `deepseek` | `DEEPSEEK_API_KEY` | deepseek-chat |
+| `glm` | `GLM_API_KEY` (또는 `ZHIPU_API_KEY`) | glm-4.6 / glm-4-flash |
+
+- Gemini/DeepSeek/GLM은 각 사의 OpenAI 호환 엔드포인트를 쓴다.
+  base URL 재정의: `LF_GEMINI_BASE_URL`, `LF_DEEPSEEK_BASE_URL`,
+  `LF_GLM_BASE_URL` (GLM 해외 리전 등).
+- gpt-5/o 계열의 reasoning 지연은 `LF_OPENAI_REASONING_EFFORT`(기본 low)로
+  통제한다 — decide류는 깊은 추론이 불필요하고, tick 예산 안에 응답해야 한다.
+  actor 쪽 대기 예산은 `LF_AI_TIMEOUT_S`(기본 10초).
 
 **주의**: 아리아의 행동 intent에 "(규칙 행동)"이 보이면 그것은 오류가 아니라
-rule 프로바이더로 돌고 있다는 뜻이다. LLM을 쓰려면 위 두 환경변수를 설정하라.
+rule 프로바이더로 돌고 있거나(키 미설정), LLM 응답이 `LF_AI_TIMEOUT_S`를
+초과해 규칙 폴백이 발동한 것이다 (`params.fallback: true`로 구분).
 
 ```bash
-# compose (infra/compose/.env 에 추가)
-LF_AI_PROVIDER=anthropic
-ANTHROPIC_API_KEY=sk-ant-...
+# compose (infra/compose/.env 에 추가 — .env는 gitignore 대상)
+LF_AI_PROVIDER=openai
+OPENAI_API_KEY=sk-...
 
 # 호스트 실행
-LF_AI_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... \
+LF_AI_PROVIDER=openai OPENAI_API_KEY=sk-... \
   uv run --package lf-ai-runtime python -m lf_ai_runtime.main
 ```
 
-## task × tier → 모델 (기본값, ADR-018 표)
+## task × tier → 모델 라우팅
 
-`LF_MODEL_ROUTES='{"decide_action/hot": "claude-...", ...}'` 로 재정의 — 코드 변경 없이 교체.
+기본 라우팅 표는 기본 프로바이더의 tier 모델로 채워진다 (ADR-018 표 준수).
+`LF_MODEL_ROUTES`로 라우트별 재정의 — **"프로바이더:모델" 프리픽스로 혼용 가능**:
 
-| task | tier | 모델 |
-|------|------|------|
-| decide_action, converse | hot | claude-opus-4-8 |
-| decide_action, converse | warm | claude-haiku-4-5 |
-| narrate, summarize | system | claude-haiku-4-5 |
-| reflect | warm | claude-sonnet-5 |
-| director_plan | system | claude-opus-4-8 |
+```bash
+# hot은 Claude, warm은 DeepSeek, 나머지는 기본 프로바이더
+LF_MODEL_ROUTES='{"decide_action/hot": "anthropic:claude-opus-4-8", "decide_action/warm": "deepseek:deepseek-chat"}'
+```
 
 ## 구조화 출력 스키마 변환
 
