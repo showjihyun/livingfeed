@@ -5,13 +5,16 @@ description = "Tick Engine — 이산 tick + LOD 스케줄링 (ADR-011)"
 requires-python = ">=3.12"
 dependencies = [
     "lf-schemas",
+    "lf-eventstore",
+    "psycopg[binary]>=3.2",
 ]
 
 [tool.uv.sources]
 lf-schemas = { workspace = true }
+lf-eventstore = { workspace = true }
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "pytest-asyncio>=0.25"]
 
 [build-system]
 requires = ["hatchling"]

@@ -74,7 +74,7 @@ docker compose --profile full up -d --build  # + gateway, feed-api
 2. ✅ Monorepo 스캐폴드
 3. ✅ Docker Compose 개발환경
 4. ✅ CI/CD (GitHub Actions — 경로 필터 + 스키마 게이트, [infra/ci](infra/ci/README.md))
-5. ⬜ Core Engine (이벤트 스토어 + outbox + dispatcher → tick)
+5. ✅ Core Engine (이벤트 스토어 + outbox → dispatcher relay → tick engine)
 6. ⬜ 첫 번째 AI Actor 실행
 7. ⬜ Living Feed MVP
 

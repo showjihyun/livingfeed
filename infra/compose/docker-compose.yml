@@ -181,8 +181,25 @@ services:
       nats:
         condition: service_healthy
 
-  # projector / ai-runtime / tick 워커는 Core Engine 구현(로드맵 5단계)에서
-  # full 프로파일에 추가된다 — 현재는 스캐폴드(NotImplementedError)라 기동 대상이 아니다.
+  tick:
+    profiles: [full]
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: infra/compose/Dockerfile.python
+      args:
+        PACKAGE: lf-tick
+        APP_MODULE: unused   # uvicorn 대상이 아니다 — command로 대체
+    command: ["python", "-m", "lf_tick.main"]
+    environment:
+      LF_PG_DSN: postgresql://${POSTGRES_USER:-livingfeed}:${POSTGRES_PASSWORD:-livingfeed}@postgres:5432/${POSTGRES_DB:-livingfeed}
+      LF_WORLD_ID: w_main
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # projector / ai-runtime 은 이후 로드맵 단계에서 full 프로파일에 추가된다 —
+  # 현재는 스캐폴드(NotImplementedError)라 기동 대상이 아니다.
 
 volumes:
   pg_data:

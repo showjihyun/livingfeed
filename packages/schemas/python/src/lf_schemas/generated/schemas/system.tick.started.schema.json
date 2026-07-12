@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/system.tick.started.schema.json",
+  "title": "SystemTickStarted",
+  "description": "tick 파이프라인 시작 신호 (ADR-011). scheduled는 이번 tick의 DECIDE 대상 수.",
+  "type": "object",
+  "properties": {
+    "tick": { "type": "integer", "minimum": 0 },
+    "started_at": { "type": "string", "format": "date-time" },
+    "scheduled": {
+      "type": "object",
+      "description": "티어별 DECIDE 예정 수 (ADR-011 LOD)",
+      "properties": {
+        "hot": { "type": "integer", "minimum": 0 },
+        "warm": { "type": "integer", "minimum": 0 },
+        "cold": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["hot", "warm", "cold"]
+    }
+  },
+  "required": ["tick", "started_at", "scheduled"],
+  "additionalProperties": false
+}
