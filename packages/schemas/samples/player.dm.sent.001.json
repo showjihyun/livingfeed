@@ -1,0 +1,17 @@
+{
+  "event_id": "01JZK7Q3W0000000000000000G",
+  "stream": "player",
+  "type": "player.dm.sent",
+  "schema_version": 1,
+  "world_id": "w_main",
+  "actor_id": null,
+  "tick": 43,
+  "occurred_at": "2026-07-11T09:01:10Z",
+  "causation_id": null,
+  "correlation_id": "01JZK7Q3W0000000000000000G",
+  "payload": {
+    "player_id": "p_observer_0417",
+    "target_actor_id": "a_aria_kim",
+    "text": "기획안 얘기 봤어요. 그거 아리님 아이디어인 거 다들 알 거예요."
+  }
+}

@@ -3,7 +3,9 @@
 - GET /stream/feed : SSE. Last-Event-ID(또는 cursor 파라미터)로 이어받기.
   이벤트 id = 피드 커서(ULID) — 놓친 이벤트 문제는 페이지네이션과 같은 메커니즘.
 - GET /poll/feed   : SSE 불가 환경의 롱폴링 자동 강등 대상.
-- WSS /session     : 상호작용 세션 — 메일박스 상호작용 경로(ADR-012 후속)와 함께 구현된다.
+- WSS /session     : 상호작용 세션 — {type, seq, payload} 봉투로 dm.send /
+  comment.post / reaction.add 커맨드를 받아 player.* 이벤트로 적재하고,
+  액터 응답(actor.message.sent)을 push한다 (session.py, ADR-012 메일박스 경로).
 
 gateway는 무상태다: 연결당 임시 JetStream consumer만 만들고, 재개 좌표는
 전적으로 클라이언트 커서에 있다 (수평 확장 자유, ADR-010/019).
@@ -15,6 +17,8 @@ gateway는 무상태다: 연결당 임시 JetStream consumer만 만들고, 재�
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import hmac
 import json
 import logging
 import re
@@ -22,9 +26,11 @@ from contextlib import asynccontextmanager
 
 import nats
 import nats.errors
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from psycopg import AsyncConnection
+from redis.asyncio import Redis
 
 from lf_gateway.config import Config
 from lf_gateway.feed_stream import (
@@ -33,6 +39,14 @@ from lf_gateway.feed_stream import (
     open_feed_subscription,
     parse_feed_event,
     sse_frames,
+)
+from lf_gateway.session import (
+    PLAYER_RE,
+    handle_command,
+    open_reply_subscription,
+    presence_key,
+    presence_value,
+    reply_frame_for,
 )
 
 logger = logging.getLogger("lf.gateway.main")
@@ -66,9 +80,11 @@ def create_app(cfg: Config | None = None, nc: nats.NATS | None = None) -> FastAP
     async def lifespan(app: FastAPI):
         connection = nc if nc is not None else await nats.connect(cfg.nats_url)
         app.state.js = connection.jetstream()
+        app.state.redis = Redis.from_url(cfg.redis_url)
         try:
             yield
         finally:
+            await app.state.redis.aclose()
             if owned_nc:
                 await connection.drain()
 
@@ -137,6 +153,65 @@ def create_app(cfg: Config | None = None, nc: nats.NATS | None = None) -> FastAP
 
         # items는 봉투 JSON 원문 — 파싱 1회로 반환 구조에 싣는다
         return {"items": [json.loads(i) for i in items], "next_cursor": next_cursor}
+
+    @app.websocket("/session")
+    async def session(ws: WebSocket) -> None:
+        # ⚠️ 인증 경계: player_id는 아직 클라이언트 주장 값이다 — 계정 체계(후속)가
+        # 생기면 검증된 신원에서 도출한다. 그전에 로컬 밖에 노출하려면
+        # LF_SESSION_TOKEN(공유 토큰 게이트)을 반드시 설정하라 (config.py).
+        if cfg.session_token is not None:
+            supplied = ws.query_params.get("token", "")
+            if not hmac.compare_digest(supplied, cfg.session_token):
+                await ws.close(code=4401, reason="세션 토큰이 필요하다 (LF_SESSION_TOKEN)")
+                return
+        player_id = ws.query_params.get("player_id", "")
+        world_id = ws.query_params.get("world_id", "w_main")
+        if not PLAYER_RE.match(player_id) or not re.match(r"^w_[a-z0-9_]+$", world_id):
+            await ws.close(code=4400, reason="player_id(p_*)와 world_id(w_*)가 필요하다")
+            return
+        await ws.accept()
+
+        send_lock = asyncio.Lock()  # 커맨드 응답과 push가 같은 소켓을 쓴다
+
+        async def push_replies() -> None:
+            sub = await open_reply_subscription(app.state.js, cfg, world_id)
+            server_seq = 0
+            try:
+                while True:
+                    try:
+                        msg = await sub.next_msg(timeout=cfg.heartbeat_s)
+                    except (TimeoutError, nats.errors.TimeoutError):
+                        continue
+                    frame = reply_frame_for(msg.data, player_id, server_seq)
+                    if frame is not None:
+                        server_seq += 1
+                        async with send_lock:
+                            await ws.send_json(frame)
+            finally:
+                await sub.unsubscribe()
+
+        push_task = asyncio.create_task(push_replies())
+        conn = await AsyncConnection.connect(cfg.pg_dsn, autocommit=True)
+        try:
+            while True:
+                raw = await ws.receive_json()
+                response = await handle_command(conn, world_id, player_id, raw)
+                async with send_lock:
+                    await ws.send_json(response)
+                try:  # 프레즌스는 최적화 — Redis 장애가 세션을 죽이면 안 된다
+                    await app.state.redis.set(
+                        presence_key(world_id, player_id), presence_value(raw.get("seq")),
+                        ex=3600,
+                    )
+                except Exception as e:
+                    logger.warning("프레즌스 저장 실패(무시): %s", e)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            push_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await push_task
+            await conn.close()
 
     return app
 

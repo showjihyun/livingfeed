@@ -21,6 +21,8 @@ from lf_tick.engine import run_tick_loop
 from redis.asyncio import Redis
 
 from lf_actor.client import AiRuntimeClient
+from lf_actor.emotion import EmotionAdapter
+from lf_actor.mailbox import Mailbox, run_mailbox_router
 from lf_actor.memory import WorkingMemory
 from lf_actor.persona import load_personas
 from lf_actor.phases import ActorPhases
@@ -49,12 +51,19 @@ async def run() -> None:
     nc = await nats.connect(nats_url)
     redis = Redis.from_url(redis_url)
     try:
+        mailbox = Mailbox(redis)
         phases = ActorPhases(
             personas,
             ai=AiRuntimeClient(nc, env, timeout_s=ai_timeout_s),
             memory=WorkingMemory(redis),
+            mailbox=mailbox,
+            emotion=EmotionAdapter(redis),
         )
-        await run_tick_loop(cfg, phases, stop=stop)
+        # tick 루프와 메일박스 라우터(LF_PLAYER → Redis)가 나란히 돈다 (ADR-012)
+        await asyncio.gather(
+            run_tick_loop(cfg, phases, stop=stop),
+            run_mailbox_router(nc, mailbox, env, stop=stop),
+        )
     finally:
         await redis.aclose()
         await nc.drain()

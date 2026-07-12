@@ -1,0 +1,103 @@
+"""Emotion Engine 순수 로직 검증 — 결정성·개인차·감쇠 (ADR-015)."""
+
+from lf_emotion import (
+    EmotionState,
+    appraise_interaction,
+    baseline_from_ocean,
+    decay,
+    describe,
+)
+
+OPTIMIST = {  # 낮은 신경성, 높은 외향 — 밝고 회복 빠름
+    "openness": 0.6, "conscientiousness": 0.6, "extraversion": 0.8,
+    "agreeableness": 0.7, "neuroticism": 0.2,
+}
+NEUROTIC = {  # 높은 신경성 — 예민하고 회복 느림
+    "openness": 0.6, "conscientiousness": 0.6, "extraversion": 0.4,
+    "agreeableness": 0.5, "neuroticism": 0.9,
+}
+
+
+def dm(event_id: str = "01JZK7Q3W0000000000000000G") -> dict:
+    return {
+        "event_id": event_id,
+        "type": "player.dm.sent",
+        "payload": {"player_id": "p_observer_0417", "target_actor_id": "a_x", "text": "응원해요"},
+    }
+
+
+def test_baseline_reflects_personality():
+    sunny = baseline_from_ocean(OPTIMIST)
+    gloomy = baseline_from_ocean(NEUROTIC)
+    assert sunny.pleasure > gloomy.pleasure  # 낙천가의 기본 기분이 더 밝다
+    assert gloomy.arousal > sunny.arousal  # 신경성은 각성 기준선을 올린다
+
+
+def test_appraisal_is_deterministic_and_targeted():
+    a = appraise_interaction(EmotionState(), dm(), OPTIMIST)
+    b = appraise_interaction(EmotionState(), dm(), OPTIMIST)
+    assert a == b  # 리플레이 재현성 (ADR-015 요구 1)
+
+    [instance] = a.state.emotions
+    assert instance.type == "gratitude"
+    assert instance.target_id == "p_observer_0417"  # '누구 때문에'가 남는다
+    assert instance.source_event == dm()["event_id"]
+    assert a.significant  # DM 강도는 발행 임계 이상
+    assert a.state.mood.pleasure > 0
+
+
+def test_same_event_different_person():
+    sensitive = appraise_interaction(EmotionState(), dm(), NEUROTIC)
+    steady = appraise_interaction(EmotionState(), dm(), OPTIMIST)
+    # 신경성 민감도 vs 외향 사회 증폭 — 어느 쪽이든 개인차가 존재해야 한다
+    assert sensitive.state.emotions[0].intensity != steady.state.emotions[0].intensity
+
+
+def test_repeated_interaction_reinforces_not_duplicates():
+    first = appraise_interaction(EmotionState(), dm("01JZK7Q3W0000000000000000G"), OPTIMIST)
+    second = appraise_interaction(first.state, dm("01JZK7Q3W0000000000000000H"), OPTIMIST)
+    assert len(second.state.emotions) == 1  # 같은 (type, target)은 강화
+    assert second.state.emotions[0].intensity > first.state.emotions[0].intensity
+
+
+def test_unknown_event_type_is_neutral():
+    result = appraise_interaction(
+        EmotionState(), {"event_id": "x", "type": "player.unknown.thing", "payload": {}}, OPTIMIST
+    )
+    assert result.state == EmotionState()
+    assert not result.significant
+
+
+def test_decay_fades_instances_and_regresses_mood():
+    shifted = appraise_interaction(EmotionState(), dm(), NEUROTIC).state
+    later = decay(shifted, NEUROTIC, ticks=200)
+    assert later.emotions == () or later.emotions[0].intensity < shifted.emotions[0].intensity
+    baseline = baseline_from_ocean(NEUROTIC)
+    # mood가 baseline 쪽으로 움직였다
+    assert later.mood.l1_distance(baseline) <= shifted.mood.l1_distance(baseline)
+
+
+def test_optimist_recovers_faster():
+    sunny = appraise_interaction(EmotionState(), dm(), OPTIMIST).state
+    gloomy = appraise_interaction(EmotionState(), dm(), NEUROTIC).state
+    sunny_later = decay(sunny, OPTIMIST, ticks=100)
+    gloomy_later = decay(gloomy, NEUROTIC, ticks=100)
+
+    sunny_ratio = (sunny_later.emotions[0].intensity / sunny.emotions[0].intensity
+                   if sunny_later.emotions else 0.0)
+    gloomy_ratio = (gloomy_later.emotions[0].intensity / gloomy.emotions[0].intensity
+                    if gloomy_later.emotions else 0.0)
+    assert sunny_ratio < gloomy_ratio  # 낙천가의 감정이 더 빨리 사그라든다 (resilience)
+
+
+def test_describe_is_human_readable():
+    state = appraise_interaction(EmotionState(), dm(), OPTIMIST).state
+    text = describe(state)
+    assert "지금 기분" in text and "gratitude" in text
+
+
+def test_state_roundtrips_json():
+    # to_json은 4자리 라운딩된 정준형이다 — 왕복은 정준형 기준으로 안정적이어야 한다
+    state = appraise_interaction(EmotionState(), dm(), OPTIMIST).state
+    canonical = state.to_json()
+    assert EmotionState.from_json(canonical).to_json() == canonical

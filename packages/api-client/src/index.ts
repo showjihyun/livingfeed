@@ -23,7 +23,12 @@ export interface FeedSubscription {
 }
 
 export interface SessionHandle {
-  send(message: unknown): void;
+  /** DM 전송 — 반환값은 클라이언트 seq (ack/error 프레임과 대응) */
+  sendDm(targetActorId: string, text: string): number;
+  /** 피드 포스트 댓글 — postId는 feed.post.published의 event_id(ULID) */
+  sendComment(targetActorId: string, postId: string, text: string): number;
+  /** 반응(좋아요) — 응답 의무 없는 개입 */
+  addReaction(targetActorId: string, postId: string, kind?: string): number;
   close(): void;
 }
 
@@ -38,9 +43,9 @@ export interface Transport {
     onError?: (error: unknown) => void;
   }): FeedSubscription;
 
-  /** 상호작용 세션 — WebSocket 또는 POST+SSE 폴백 (ADR-010) */
-  openSession(actorId: string): SessionHandle;
+  /** 상호작용 세션 — WebSocket, 재접속·커맨드 버퍼링은 TAL 책임 (ADR-010 §WS) */
+  openSession(opts: import("./transport").SessionOptions): SessionHandle;
 }
 
 export { createTransport } from "./transport";
-export type { SubscribeOptions, TransportOptions } from "./transport";
+export type { SessionOptions, SessionStatus, SubscribeOptions, TransportOptions } from "./transport";

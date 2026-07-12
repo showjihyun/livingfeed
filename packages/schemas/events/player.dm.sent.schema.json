@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/player.dm.sent.schema.json",
+  "title": "PlayerDmSent",
+  "description": "플레이어가 액터에게 1:1 DM을 보냈다 (ADR-010 §WS 세션). gateway가 세션 커맨드를 검증해 적재한다 — 개입은 흔적을 남긴다 (docs/plan/02). 액터의 응답은 actor.message.sent로, causation_id가 이 이벤트를 가리킨다.",
+  "type": "object",
+  "properties": {
+    "player_id": {
+      "type": "string",
+      "pattern": "^p_[a-z0-9_]+$"
+    },
+    "target_actor_id": {
+      "type": "string",
+      "description": "DM 수신 액터 — 메일박스 라우팅 키 (ADR-012)"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    }
+  },
+  "required": ["player_id", "target_actor_id", "text"],
+  "additionalProperties": false
+}

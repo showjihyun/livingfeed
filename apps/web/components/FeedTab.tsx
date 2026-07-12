@@ -12,6 +12,8 @@ import styles from "./lf.module.css";
 interface FeedTabProps {
   livePosts: LivePost[];
   liveStatus: LiveStatus;
+  likedLive: ReadonlySet<string>;
+  onLikeLive: (post: LivePost) => void;
   showCoach: boolean;
   onDismissCoach: () => void;
   streaming: boolean;
@@ -80,6 +82,8 @@ function TypingDots({ size, radius }: { size: number; radius: string }) {
 export function FeedTab({
   livePosts,
   liveStatus,
+  likedLive,
+  onLikeLive,
   showCoach,
   onDismissCoach,
   streaming,
@@ -212,7 +216,7 @@ export function FeedTab({
         )}
 
         {/* 라이브 피드 — 실 백엔드 (feed.post.published), 미가용이면 오프라인 칩만 */}
-        <LivePosts posts={livePosts} status={liveStatus} />
+        <LivePosts posts={livePosts} status={liveStatus} liked={likedLive} onLike={onLikeLive} />
 
         {/* 민지 스트리밍 포스트 */}
         <div

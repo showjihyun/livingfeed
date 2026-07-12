@@ -1,0 +1,24 @@
+{
+  "event_id": "01JZK7Q3W0000000000000000M",
+  "stream": "actor",
+  "type": "actor.emotion.shifted",
+  "schema_version": 1,
+  "world_id": "w_main",
+  "actor_id": "a_aria_kim",
+  "tick": 44,
+  "occurred_at": "2026-07-11T09:02:00Z",
+  "causation_id": "01JZK7Q3W0000000000000000G",
+  "correlation_id": "01JZK7Q3W0000000000000000G",
+  "payload": {
+    "mood": {
+      "pleasure": 0.34,
+      "arousal": 0.18,
+      "dominance": 0.05
+    },
+    "emotions": [
+      { "type": "gratitude", "intensity": 0.62, "target_id": "p_observer_0417" },
+      { "type": "anger", "intensity": 0.31, "target_id": "a_editor_choi" }
+    ],
+    "reason": "플레이어의 지지 DM — 인정받았다는 감각 (감사 상승, 무드 회복)"
+  }
+}

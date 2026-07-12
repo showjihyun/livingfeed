@@ -6,14 +6,18 @@ import {
   COMMENT_REPLIES,
   DM_REPLIES,
   MINJI_POST_FULL,
-  REPLY_DELAY_MS,
   STREAM_SPEED_MS,
   TOAST_DURATION_MS,
   WORLD_MIN_START,
   formatWorldTime,
 } from "@/lib/data";
+import type { LivePost } from "@/lib/live-feed";
 import { useLiveFeed } from "@/lib/live-feed";
+import { naturalDelayMs, useActorSession } from "@/lib/session";
 import type { DmMessage, FeedComment, RelKey, Screen, Tab, Toast } from "@/lib/types";
+
+/** 데모 DM 상대 — 실제 액터로 존재한다 (agents/personas/minji-kim.yaml) */
+const MINJI_ACTOR_ID = "a_minji_kim";
 
 import { Curating } from "./Curating";
 import { DmTab } from "./DmTab";
@@ -96,6 +100,39 @@ export function LivingFeedApp() {
     [after],
   );
 
+  // 실 백엔드 라이브 피드 — 세계 입장 후에만 구독 (미가용이면 데모만 동작)
+  const { posts: livePosts, status: liveStatus } = useLiveFeed(screen === "app");
+
+  // 상호작용 세션 (WS) — DM/좋아요를 실세계에 꽂는다. 미가용이면 데모 폴백.
+  const session = useActorSession({
+    enabled: screen === "app",
+    onReply: (reply) => {
+      if (reply.channel === "dm") {
+        // 도착 즉시 렌더하지 않는다 — 1~3초 '타이핑'을 거쳐야 사람 같다
+        setDmTyping(true);
+        after(naturalDelayMs(), () => {
+          setDmTyping(false);
+          setDmMsgs((list) => [...list, { from: "minji", text: reply.text }]);
+        });
+      }
+    },
+  });
+  const [likedLive, setLikedLive] = useState<ReadonlySet<string>>(new Set());
+  const likeLivePost = useCallback(
+    (post: LivePost) => {
+      setLikedLive((prev) => {
+        if (prev.has(post.id)) return prev;
+        const next = new Set(prev);
+        next.add(post.id);
+        return next;
+      });
+      setInterventions((n) => n + 1);
+      // 오프라인이면 로컬 하트만 남는다 — 개입은 세계가 살아있을 때만 흔적이 된다
+      session.addReaction(post.authorId, post.id);
+    },
+    [session],
+  );
+
   const startStream = useCallback(() => {
     let i = 0;
     if (streamTimer.current !== undefined) window.clearInterval(streamTimer.current);
@@ -176,7 +213,8 @@ export function LivingFeedApp() {
       body: "민지가 곧 확인해요 — 지금 깨어 있어요",
     });
     const step = Math.min(commentStep.current, COMMENT_REPLIES.length - 1);
-    after(REPLY_DELAY_MS, () => {
+    const replyDelay = naturalDelayMs(); // 즉답 금지 — 1~3초 생각하고 답한다
+    after(replyDelay, () => {
       commentStep.current += 1;
       setMinjiTyping(false);
       setMinjiComments((list) => [
@@ -185,7 +223,7 @@ export function LivingFeedApp() {
       ]);
     });
     if (step === 0) {
-      after(REPLY_DELAY_MS + 2400, () =>
+      after(replyDelay + 2400, () =>
         toast({
           icon: "git-branch",
           iconBg: "#EDF3FD",
@@ -194,7 +232,7 @@ export function LivingFeedApp() {
           body: "민지가 팀장과의 면담을 잡았어요 · 민지↔철수의 긴장이 조금 풀렸어요",
         }),
       );
-      after(REPLY_DELAY_MS + 6500, () =>
+      after(replyDelay + 6500, () =>
         toast({
           icon: "feather",
           iconBg: "#FFF6DE",
@@ -203,7 +241,7 @@ export function LivingFeedApp() {
           body: "오늘 당신의 댓글에서 시작된 사건 연쇄. 이 드라마의 원작자는 당신이에요.",
         }),
       );
-      after(REPLY_DELAY_MS + 10500, () => {
+      after(replyDelay + 10500, () => {
         setHiddenUnlocked(true);
         toast({
           icon: "lock-open",
@@ -223,20 +261,20 @@ export function LivingFeedApp() {
     setDmDraft("");
     setDmTyping(true);
     setInterventions((n) => n + 1);
+    // 실세계 경로 — player.dm.sent 적재, 민지의 응답은 다음 tick에 push로 온다
+    if (session.sendDm(MINJI_ACTOR_ID, text)) return;
+    // 오프라인 데모 폴백 (프로토타입 시나리오) — 즉답 금지, 1~3초 타이핑
     const idx = Math.min(dmIdx.current, DM_REPLIES.length - 1);
-    after(REPLY_DELAY_MS, () => {
+    after(naturalDelayMs(), () => {
       dmIdx.current += 1;
       setDmTyping(false);
       setDmMsgs((list) => [...list, { from: "minji", text: DM_REPLIES[idx] }]);
     });
-  }, [after, dmDraft, dmTyping]);
+  }, [after, dmDraft, dmTyping, session]);
 
   const closeToast = useCallback((id: number) => {
     setToasts((list) => list.filter((x) => x.id !== id));
   }, []);
-
-  // 실 백엔드 라이브 피드 — 세계 입장 후에만 구독 (미가용이면 데모만 동작)
-  const { posts: livePosts, status: liveStatus } = useLiveFeed(screen === "app");
 
   const worldTime = formatWorldTime(worldMin);
   const goProfile = useCallback(() => setTab("profile"), []);
@@ -278,6 +316,8 @@ export function LivingFeedApp() {
           <FeedTab
             livePosts={livePosts}
             liveStatus={liveStatus}
+            likedLive={likedLive}
+            onLikeLive={likeLivePost}
             showCoach={screen === "app" && !coachDismissed}
             onDismissCoach={() => setCoachDismissed(true)}
             streaming={screen === "app" && !streamDone}

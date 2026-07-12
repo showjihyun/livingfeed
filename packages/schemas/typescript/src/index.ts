@@ -5,5 +5,10 @@
  */
 export type { EventEnvelope } from "./generated/envelope.schema";
 export type { ActorActionPerformed } from "./generated/actor.action.performed.schema";
+export type { ActorEmotionShifted } from "./generated/actor.emotion.shifted.schema";
+export type { ActorMessageSent } from "./generated/actor.message.sent.schema";
 export type { FeedPostPublished } from "./generated/feed.post.published.schema";
+export type { PlayerCommentPosted } from "./generated/player.comment.posted.schema";
+export type { PlayerDmSent } from "./generated/player.dm.sent.schema";
+export type { PlayerReactionAdded } from "./generated/player.reaction.added.schema";
 export type { SystemTickCompleted } from "./generated/system.tick.completed.schema";

@@ -44,3 +44,38 @@
   background: #edf3fd;
   color: #5f7ec9;
 }
+
+/* 관계 그래프 — 에지: 호버 시 헤일로가 살아난다 */
+.edgeGroup {
+  cursor: pointer;
+}
+
+.edgeGroup .edgeHalo {
+  opacity: 0.3;
+  transition: opacity 0.25s ease;
+}
+
+.edgeGroup:hover .edgeHalo {
+  opacity: 0.75;
+}
+
+.edgeGroup .edgeLabel {
+  opacity: 0.85;
+  transition: opacity 0.25s ease;
+}
+
+.edgeGroup:hover .edgeLabel {
+  opacity: 1;
+}
+
+/* 관계 그래프 — 노드: 호버 시 살짝 떠오른다 */
+.nodeGroup {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 0.25s ease;
+  cursor: pointer;
+}
+
+.nodeGroup:hover {
+  transform: scale(1.07);
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/player.comment.posted.schema.json",
+  "title": "PlayerCommentPosted",
+  "description": "플레이어가 피드 포스트에 댓글을 남겼다 (ADR-010 §WS 세션). post_id는 feed.post.published의 event_id(ULID)다. 대상 액터의 응답은 actor.message.sent(channel=comment)로 돌아온다.",
+  "type": "object",
+  "properties": {
+    "player_id": {
+      "type": "string",
+      "pattern": "^p_[a-z0-9_]+$"
+    },
+    "target_actor_id": {
+      "type": "string",
+      "description": "포스트 작성 액터 — 메일박스 라우팅 키 (ADR-012)"
+    },
+    "post_id": {
+      "type": "string",
+      "description": "댓글이 달린 피드 포스트 (feed.post.published event_id)",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    }
+  },
+  "required": ["player_id", "target_actor_id", "post_id", "text"],
+  "additionalProperties": false
+}

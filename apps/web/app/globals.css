@@ -42,3 +42,33 @@ input {
     opacity: 1;
   }
 }
+
+/* 관계 그래프 — 에지 대시 흐름(관계의 '방향'과 살아있음) */
+@keyframes lf-dash {
+  to {
+    stroke-dashoffset: -34;
+  }
+}
+
+/* 관계 그래프 — 선택 노드의 소나 펄스 링 */
+@keyframes lf-sonar {
+  from {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  to {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+/* 관계 그래프 — 선택 에지 글로우의 은은한 숨쉬기 */
+@keyframes lf-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}

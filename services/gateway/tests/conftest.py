@@ -2,13 +2,36 @@ import asyncio
 import os
 import sys
 
+import psycopg
 import pytest
+from psycopg import AsyncConnection
 
 # psycopg 계열 규약과 동일 — Windows 로컬 개발 배려 (Selector 이벤트 루프)
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 NATS_URL = os.environ.get("LF_TEST_NATS_URL", "nats://localhost:4222")
+PG_DSN = os.environ.get(
+    "LF_TEST_DATABASE_URL",
+    "postgresql://livingfeed:livingfeed@localhost:5432/livingfeed",
+)
+
+
+@pytest.fixture
+async def conn():
+    """마이그레이션 적용된 깨끗한 es 스키마 연결 (lf-eventstore conftest와 동일 규약)."""
+    from lf_eventstore.migrate import migrate
+
+    try:
+        connection = await AsyncConnection.connect(PG_DSN, connect_timeout=3, autocommit=True)
+    except psycopg.OperationalError:
+        if "LF_TEST_DATABASE_URL" in os.environ:
+            raise
+        pytest.skip(f"PostgreSQL 미가용 ({PG_DSN}) — infra/compose에서 postgres를 켜라")
+    async with connection:
+        await connection.execute("DROP SCHEMA IF EXISTS es CASCADE")
+        await migrate(connection)
+        yield connection
 
 
 @pytest.fixture

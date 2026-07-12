@@ -29,7 +29,15 @@ function initials(post: LivePost): string {
   return name.slice(0, 1).toUpperCase();
 }
 
-function LivePostCard({ post }: { post: LivePost }) {
+function LivePostCard({
+  post,
+  liked,
+  onLike,
+}: {
+  post: LivePost;
+  liked: boolean;
+  onLike: (post: LivePost) => void;
+}) {
   return (
     <div
       style={{
@@ -69,11 +77,46 @@ function LivePostCard({ post }: { post: LivePost }) {
         </div>
       </div>
       <div style={{ fontSize: 15, lineHeight: 1.65, fontWeight: 500 }}>{post.body}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div
+          onClick={() => onLike(post)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 13px",
+            background: liked ? "#C76F93" : "#FDEDF3",
+            color: liked ? "#ffffff" : "#C76F93",
+            borderRadius: 9999,
+            fontSize: 13,
+            fontWeight: 800,
+            cursor: "pointer",
+            userSelect: "none",
+          }}
+        >
+          ♥ {liked ? "전달됨" : "좋아요"}
+        </div>
+        {liked && (
+          <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}>
+            세계가 당신의 반응을 알아차렸어요
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-export function LivePosts({ posts, status }: { posts: LivePost[]; status: LiveStatus }) {
+export function LivePosts({
+  posts,
+  status,
+  liked,
+  onLike,
+}: {
+  posts: LivePost[];
+  status: LiveStatus;
+  liked: ReadonlySet<string>;
+  onLike: (post: LivePost) => void;
+}) {
   const chip = STATUS_CHIP[status];
   return (
     <>
@@ -105,7 +148,7 @@ export function LivePosts({ posts, status }: { posts: LivePost[]; status: LiveSt
         </div>
       </div>
       {posts.map((post) => (
-        <LivePostCard key={post.id} post={post} />
+        <LivePostCard key={post.id} post={post} liked={liked.has(post.id)} onLike={onLike} />
       ))}
     </>
   );

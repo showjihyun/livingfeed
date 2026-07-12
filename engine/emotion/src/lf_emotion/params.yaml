@@ -1,0 +1,48 @@
+# Emotion Engine 파라미터 — 단일 파일 (ADR-015 완화책: 파라미터 산개 금지)
+# 리플레이 기반 A/B 튜닝의 대상이다. 코드에 수치 하드코딩 금지.
+
+mood:
+  # baseline 회귀율 (tick당) — 반감기 ~세계 1일(1440 tick)에 해당
+  regression_per_tick: 0.0005
+  # 감정 인스턴스 → mood 반영 가중치 (인스턴스 강도 × 감정별 PAD 방향 × 이 값)
+  instance_weight: 0.35
+
+instances:
+  # 지수 감쇠율 (tick당) — 반감기 ~세계 90분(90 tick)
+  decay_per_tick: 0.0077
+  # 이 강도 미만이면 소멸
+  cull_threshold: 0.05
+  # 액터당 활성 인스턴스 상한 — 초과 시 최약부터 소멸 (ADR-015 리스크)
+  max_active: 32
+  # 같은 (type, target) 재발화 시: new = max(old, delta) + reinforcement*min(old, delta)
+  reinforcement: 0.3
+
+# actor.emotion.shifted 발행 임계 — 노이즈 방지 (ADR-015: 변화가 임계 이상일 때만)
+shift_thresholds:
+  mood_delta: 0.05        # |Δmood| L1 합
+  instance_intensity: 0.3 # 신규/강화 인스턴스가 이 이상일 때
+
+# 평가 규칙: 플레이어 상호작용 → 감정 (OCC 최소 절단면 — 사건 유형 기반,
+# 목표 일치도·행위자 평가는 Relationship/Goal 상태가 이벤트화되는 단계에서 확장)
+appraisal:
+  player.reaction.added:
+    type: joy
+    base_intensity: 0.25
+    pad: { pleasure: 0.6, arousal: 0.2, dominance: 0.1 }
+  player.comment.posted:
+    type: gratitude
+    base_intensity: 0.45
+    pad: { pleasure: 0.7, arousal: 0.3, dominance: 0.1 }
+  player.dm.sent:
+    type: gratitude
+    base_intensity: 0.55
+    pad: { pleasure: 0.7, arousal: 0.35, dominance: 0.15 }
+
+# 성격 변조 (ADR-015 personality_filter)
+personality:
+  # 민감도 = 1 + neuroticism*sensitivity_neuroticism  (예민할수록 크게 흔들린다)
+  sensitivity_neuroticism: 0.5
+  # 사회적 사건 증폭 = 1 + extraversion*social_extraversion (외향형은 관심에 더 반응)
+  social_extraversion: 0.3
+  # 회복 탄력 = 감쇠·회귀 × (1 + (1-neuroticism)*resilience) (낙천가는 빨리 회복)
+  resilience: 0.6
