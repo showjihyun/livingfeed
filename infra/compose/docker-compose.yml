@@ -1,7 +1,7 @@
 # Living Feed 개발환경 (ADR-019 §환경 구성)
 #
 #   docker compose --profile core up -d          # 저장소 6종만 — 서비스는 호스트에서 실행
-#   docker compose --profile full up -d --build  # + gateway, feed-api 컨테이너
+#   docker compose --profile full up -d --build  # + 서비스 컨테이너 (gateway, feed-api, dispatcher, ai-runtime, tick, feed-composer, projector)
 #   docker compose down                          # 중지 (데이터 볼륨 유지)
 #   docker compose down -v                       # 데이터까지 삭제
 #
@@ -240,8 +240,51 @@ services:
       redis:
         condition: service_healthy
 
-  # projector 는 이후 로드맵 단계에서 full 프로파일에 추가된다 —
-  # 현재는 스캐폴드(NotImplementedError)라 기동 대상이 아니다.
+  feed-composer:
+    # 편집 1단: LF_ACTOR 소비 → feed-worthiness → feed.post.published 적재 (ADR-014)
+    profiles: [full]
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: infra/compose/Dockerfile.python
+      args:
+        PACKAGE: lf-feed
+        APP_MODULE: unused   # uvicorn 대상이 아니다 — command로 대체
+    command: ["python", "-m", "lf_feed.main"]
+    environment:
+      LF_PG_DSN: postgresql://${POSTGRES_USER:-livingfeed}:${POSTGRES_PASSWORD:-livingfeed}@postgres:5432/${POSTGRES_DB:-livingfeed}
+      NATS_URL: nats://nats:4222
+      LF_ENV: dev
+      LF_PERSONAS_DIR: /app/agents/personas
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+
+  projector:
+    # 배치 2단 저장: LF_FEED → OpenSearch 색인 (os-projector, ADR-003/014)
+    # 재구축: docker compose run --rm projector python -m lf_projector.main --kind os --rebuild
+    profiles: [full]
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: infra/compose/Dockerfile.python
+      args:
+        PACKAGE: lf-projector
+        APP_MODULE: unused   # uvicorn 대상이 아니다 — command로 대체
+    command: ["python", "-m", "lf_projector.main", "--kind", "os"]
+    environment:
+      NATS_URL: nats://nats:4222
+      OPENSEARCH_URL: http://opensearch:9200
+      LF_ENV: dev
+    depends_on:
+      nats:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+
+  # pg/kuzu/qdrant/redis 프로젝터는 각자의 로드맵 단계에서 추가된다.
 
 volumes:
   pg_data:

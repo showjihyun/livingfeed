@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/feed.post.published.schema.json",
+  "title": "FeedPostPublished",
+  "description": "FeedComposer의 편집 결정 — feed-worthiness 임계를 통과한 사건이 렌더링 가능한 FeedItem으로 승격되었다 (ADR-014 §1단). 봉투의 event_id가 곧 post id이자 피드 커서(ULID)다 (ADR-010 §SSE). 원본 사건은 봉투 causation_id로, 서사 사슬은 correlation_id로 추적한다.",
+  "type": "object",
+  "properties": {
+    "visibility": {
+      "type": "string",
+      "description": "가시성 등급 — 6가지 피드는 등급이 다른 같은 데이터다 (ADR-014, 파이프라인 복제 금지)",
+      "enum": ["world", "community", "relationship", "personal", "private", "hidden"]
+    },
+    "title": {
+      "type": "string",
+      "description": "피드 카드 제목 (템플릿 생성)",
+      "maxLength": 200
+    },
+    "body": {
+      "type": "string",
+      "description": "서사 본문 — 템플릿 우선, drama 상위 아이템만 LLM 내레이션 (ADR-014 비용 게이트)",
+      "maxLength": 2000
+    },
+    "narration_kind": {
+      "type": "string",
+      "description": "본문 생성 방식 — 비용 게이트 감사용",
+      "enum": ["template", "llm"]
+    },
+    "participants": {
+      "type": "array",
+      "description": "참여 액터 전원 (작성 주체는 봉투 actor_id)",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "community_id": {
+      "type": ["string", "null"],
+      "description": "Community 가시성일 때의 대상 커뮤니티"
+    },
+    "location_id": {
+      "type": ["string", "null"]
+    },
+    "drama_score": {
+      "type": "number",
+      "description": "사건의 드라마 점수 0..1 — 읽기 랭킹의 최대 가중 항 (ADR-014 §2단)",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "worthiness": {
+      "type": "number",
+      "description": "편집 점수 = f(drama, 관계 근접도, 희소성, Director boost) — 임계 통과값 (ADR-014 §1단)",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "source_event_type": {
+      "type": "string",
+      "description": "승격된 원본 사건의 타입 (원본 event_id는 봉투 causation_id)",
+      "pattern": "^[a-z_]+(\\.[a-z_]+){2,}$"
+    },
+    "tags": {
+      "type": "array",
+      "description": "필터·검색용 태그 (action_kind 등)",
+      "items": { "type": "string", "pattern": "^[a-z_]+$" }
+    },
+    "media": {
+      "type": "array",
+      "description": "미디어 슬롯 (ADR-014) — MVP는 빈 배열",
+      "items": { "type": "object" }
+    }
+  },
+  "required": [
+    "visibility",
+    "title",
+    "body",
+    "narration_kind",
+    "participants",
+    "community_id",
+    "location_id",
+    "drama_score",
+    "worthiness",
+    "source_event_type",
+    "tags",
+    "media"
+  ],
+  "additionalProperties": false
+}

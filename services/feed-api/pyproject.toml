@@ -6,14 +6,23 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+    "redis>=5.0",
     "lf-schemas",
 ]
 
 [tool.uv.sources]
 lf-schemas = { workspace = true }
+lf-projector = { workspace = true }
 
 [dependency-groups]
-dev = ["pytest>=8", "httpx>=0.27"]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.25",
+    "httpx>=0.27",
+    # 통합 테스트에서 OpenSearch 인덱스를 시드하기 위한 dev 전용 의존
+    "lf-projector",
+]
 
 [build-system]
 requires = ["hatchling"]

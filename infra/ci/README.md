@@ -9,7 +9,7 @@
 |-----|----------------------|------|
 | `changes` | 항상 | dorny/paths-filter로 영향 영역 산출. main push는 필터 무시하고 전부 실행 |
 | `js` | `apps/`, `packages/`, JS 루트 설정 | pnpm install → lint / typecheck / test / build (Turborepo) |
-| `python` | `services/`, `engine/`, `packages/schemas/`, uv 설정 | uv sync → ruff check → pytest |
+| `python` | `services/`, `engine/`, `packages/schemas/`, uv 설정 | uv sync → ruff check → pytest (통합 테스트용 서비스 컨테이너: PostgreSQL·Redis·NATS·OpenSearch) |
 | `schema-gate` | `packages/schemas/` | ① 코드젠 재생성 후 드리프트 검사 (ADR-001 규칙 1) ② 샘플 이벤트 하위 호환 재검증 + permissions.yaml 검증 (ADR-017 §5, `scripts/check_compat.py`) |
 | `docker` | `Dockerfile.python`, Python 소스 | gateway / feed-api 이미지 빌드. main push 시 GHCR 발행 (`sha-<커밋>` + `latest`) |
 | `ci-ok` | 항상 | 집계 job — branch protection의 required check는 이것 하나만 걸면 된다 |

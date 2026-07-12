@@ -1,0 +1,26 @@
+{
+  "event_id": "01JZK7Q3W0000000000000000F",
+  "stream": "feed",
+  "type": "feed.post.published",
+  "schema_version": 1,
+  "world_id": "w_main",
+  "actor_id": "a_aria_kim",
+  "tick": 42,
+  "occurred_at": "2026-07-11T09:00:42Z",
+  "causation_id": "01JZK7Q3W0000000000000000A",
+  "correlation_id": "01JZK7Q3W0000000000000000B",
+  "payload": {
+    "visibility": "world",
+    "title": "김아리, 준호에게 말을 걸다",
+    "body": "카페에서 준호에게 어제의 오해를 풀자고 말을 건다",
+    "narration_kind": "template",
+    "participants": ["a_aria_kim", "a_junho_park"],
+    "community_id": null,
+    "location_id": "loc_cafe_luna",
+    "drama_score": 0.55,
+    "worthiness": 0.47,
+    "source_event_type": "actor.action.performed",
+    "tags": ["speak"],
+    "media": []
+  }
+}

@@ -109,11 +109,26 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 12
+      opensearch:
+        image: opensearchproject/opensearch:2.19.0
+        env:
+          discovery.type: single-node
+          DISABLE_SECURITY_PLUGIN: "true"
+          DISABLE_INSTALL_DEMO_CONFIG: "true"
+          OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+        ports:
+          - 9200:9200
+        options: >-
+          --health-cmd "curl -sf http://localhost:9200/_cluster/health || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 18
     env:
       # 명시 설정이므로 접속 실패는 skip이 아니라 fail로 처리된다 (conftest 참고)
       LF_TEST_DATABASE_URL: postgresql://livingfeed:livingfeed@localhost:5432/livingfeed
       LF_TEST_NATS_URL: nats://localhost:4222
       LF_TEST_REDIS_URL: redis://localhost:6379/15
+      LF_TEST_OPENSEARCH_URL: http://localhost:9200
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

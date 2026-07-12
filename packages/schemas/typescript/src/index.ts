@@ -5,4 +5,5 @@
  */
 export type { EventEnvelope } from "./generated/envelope.schema";
 export type { ActorActionPerformed } from "./generated/actor.action.performed.schema";
+export type { FeedPostPublished } from "./generated/feed.post.published.schema";
 export type { SystemTickCompleted } from "./generated/system.tick.completed.schema";
