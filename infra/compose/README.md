@@ -8,7 +8,7 @@
 cd infra/compose
 
 docker compose --profile core up -d          # 저장소만 — 서비스는 호스트에서 실행 (권장)
-docker compose --profile full up -d --build  # + gateway, feed-api 컨테이너
+docker compose --profile full up -d --build  # + gateway, feed-api, dispatcher 컨테이너
 docker compose ps                            # 상태/헬스 확인
 docker compose down                          # 중지 (데이터 볼륨 유지)
 docker compose down -v                       # 데이터까지 완전 삭제
@@ -28,6 +28,7 @@ docker compose down -v                       # 데이터까지 완전 삭제
 | MinIO | 9000(S3), 9001(콘솔) | Archive 계층 (ADR-008) |
 | gateway | 8000 | `full` 프로파일만 |
 | feed-api | 8001 | `full` 프로파일만 |
+| dispatcher | (포트 없음) | `full` 프로파일만 — outbox relay 워커 (ADR-017). 시작 시 es 마이그레이션 적용 |
 
 ## 구성 메모
 

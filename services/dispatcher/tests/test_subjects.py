@@ -21,4 +21,4 @@ def test_unknown_stream_rejected() -> None:
 
 def test_dlq_subject() -> None:
     original = "lf.dev.w_main.actor.action.performed"
-    assert dlq_subject("dev", original) == "lf.dev.dlq.w_main.actor.action.performed"
+    assert dlq_subject("dev", original) == "lf-dlq.dev.w_main.actor.action.performed"

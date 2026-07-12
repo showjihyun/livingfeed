@@ -399,6 +399,7 @@ name = "lf-dispatcher"
 version = "0.1.0"
 source = { editable = "services/dispatcher" }
 dependencies = [
+    { name = "lf-eventstore" },
     { name = "lf-schemas" },
     { name = "nats-py" },
     { name = "psycopg", extra = ["binary"] },
@@ -408,10 +409,12 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
+    { name = "pytest-asyncio" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "lf-eventstore", editable = "packages/eventstore" },
     { name = "lf-schemas", editable = "packages/schemas/python" },
     { name = "nats-py", specifier = ">=2.9" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
@@ -419,7 +422,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8" }]
+dev = [
+    { name = "pytest", specifier = ">=8" },
+    { name = "pytest-asyncio", specifier = ">=0.25" },
+]
 
 [[package]]
 name = "lf-emotion"

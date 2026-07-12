@@ -161,7 +161,27 @@ services:
       timeout: 3s
       retries: 6
 
-  # dispatcher / projector / ai-runtime / tick 워커는 Core Engine 구현(로드맵 5단계)에서
+  dispatcher:
+    profiles: [full]
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: infra/compose/Dockerfile.python
+      args:
+        PACKAGE: lf-dispatcher
+        APP_MODULE: unused   # uvicorn 대상이 아니다 — command로 대체
+    command: ["python", "-m", "lf_dispatcher.main"]
+    environment:
+      LF_PG_DSN: postgresql://${POSTGRES_USER:-livingfeed}:${POSTGRES_PASSWORD:-livingfeed}@postgres:5432/${POSTGRES_DB:-livingfeed}
+      NATS_URL: nats://nats:4222
+      LF_ENV: dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+
+  # projector / ai-runtime / tick 워커는 Core Engine 구현(로드맵 5단계)에서
   # full 프로파일에 추가된다 — 현재는 스캐폴드(NotImplementedError)라 기동 대상이 아니다.
 
 volumes:

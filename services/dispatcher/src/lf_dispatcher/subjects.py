@@ -24,5 +24,10 @@ def subject(env: str, world_id: str, stream: str, event_type: str) -> str:
 
 
 def dlq_subject(env: str, original_subject: str) -> str:
-    """DLQ 이동 대상 subject (ADR-017 §4)."""
-    return f"lf.{env}.dlq.{original_subject.removeprefix(f'lf.{env}.')}"
+    """DLQ 이동 대상 subject (ADR-017 §4).
+
+    최상위 프리픽스가 lf-dlq 인 이유: JetStream은 스트림 간 subject 패턴
+    중첩을 금지하는데, lf.<env>.dlq.> 는 도메인 스트림 와일드카드
+    (lf.*.*.actor.> 등)와 패턴 공간이 겹친다. 별도 프리픽스만이 안전하다.
+    """
+    return f"lf-dlq.{env}.{original_subject.removeprefix(f'lf.{env}.')}"

@@ -103,12 +103,16 @@ jobs:
     env:
       # 명시 설정이므로 접속 실패는 skip이 아니라 fail로 처리된다 (conftest 참고)
       LF_TEST_DATABASE_URL: postgresql://livingfeed:livingfeed@localhost:5432/livingfeed
+      LF_TEST_NATS_URL: nats://localhost:4222
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           version: "0.11.2"
           enable-cache: true
+      # NATS는 커맨드 인자(-js)가 필요해 service container로 못 띄운다 (커맨드 재정의 불가)
+      - name: NATS JetStream 기동
+        run: docker run -d --name nats -p 4222:4222 nats:2.10-alpine -js
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run pytest
