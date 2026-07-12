@@ -11,12 +11,15 @@ dependencies = [
     "lf-schemas",
     # WS 세션이 player.* 이벤트를 적재한다 (ADR-010/017 — append가 유일한 쓰기 경로)
     "lf-eventstore",
+    # graph query API 클라이언트 (ADR-006) — kuzu 자체는 런타임에 임포트되지 않는다
+    "lf-projector",
 ]
 
 [tool.uv.sources]
 lf-schemas = { workspace = true }
 lf-eventstore = { workspace = true }
 lf-dispatcher = { workspace = true }
+lf-projector = { workspace = true }
 
 [dependency-groups]
 dev = [

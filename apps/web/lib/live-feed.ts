@@ -13,6 +13,8 @@ import { useEffect, useState } from "react";
 import { createTransport } from "@livingfeed/api-client";
 import type { EventEnvelope, FeedPostPublished } from "@livingfeed/schemas";
 
+import { PLAYER_ID } from "./session";
+
 const GATEWAY_URL = process.env.NEXT_PUBLIC_LF_GATEWAY_URL ?? "http://localhost:8000";
 const FEED_API_URL = process.env.NEXT_PUBLIC_LF_FEED_API_URL ?? "http://localhost:8001";
 const MAX_POSTS = 50;
@@ -108,7 +110,10 @@ export function useLiveFeed(enabled: boolean): { posts: LivePost[]; status: Live
 
     void (async () => {
       try {
-        const response = await fetch(`${FEED_API_URL}/feed?types=world&limit=20`);
+        // player_id → 관계 근접도 항이 켜진 개인화 랭킹 (ADR-014 w_proximity)
+        const response = await fetch(
+          `${FEED_API_URL}/feed?types=world&limit=20&player_id=${PLAYER_ID}`,
+        );
         if (!response.ok) throw new Error(`feed-api ${response.status}`);
         const body = (await response.json()) as { items: FeedDoc[] };
         add(body.items.map(fromDoc));

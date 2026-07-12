@@ -11,6 +11,7 @@ import {
   WORLD_MIN_START,
   formatWorldTime,
 } from "@/lib/data";
+import { useRelationshipGraph } from "@/lib/graph";
 import type { LivePost } from "@/lib/live-feed";
 import { useLiveFeed } from "@/lib/live-feed";
 import { naturalDelayMs, useActorSession } from "@/lib/session";
@@ -102,6 +103,9 @@ export function LivingFeedApp() {
 
   // 실 백엔드 라이브 피드 — 세계 입장 후에만 구독 (미가용이면 데모만 동작)
   const { posts: livePosts, status: liveStatus } = useLiveFeed(screen === "app");
+
+  // 관계 그래프 실측 (kuzu-projector, ADR-006) — 미가용이면 데모 배치 유지
+  const relGraph = useRelationshipGraph(screen === "app");
 
   // 상호작용 세션 (WS) — DM/좋아요를 실세계에 꽂는다. 미가용이면 데모 폴백.
   const session = useActorSession({
@@ -358,7 +362,14 @@ export function LivingFeedApp() {
           />
         )}
         {tab === "hidden" && <HiddenTab />}
-        {tab === "graph" && <GraphTab sel={graphSel} onSelect={setGraphSel} />}
+        {tab === "graph" && (
+          <GraphTab
+            sel={graphSel}
+            onSelect={setGraphSel}
+            liveEdges={relGraph.edges}
+            liveAvailable={relGraph.available}
+          />
+        )}
       </div>
 
       <Toasts toasts={toasts} onClose={closeToast} />

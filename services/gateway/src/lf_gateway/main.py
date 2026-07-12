@@ -29,6 +29,7 @@ import nats.errors
 from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from lf_projector.graph_api import GraphQueryClient
 from psycopg import AsyncConnection
 from redis.asyncio import Redis
 
@@ -80,6 +81,7 @@ def create_app(cfg: Config | None = None, nc: nats.NATS | None = None) -> FastAP
     async def lifespan(app: FastAPI):
         connection = nc if nc is not None else await nats.connect(cfg.nats_url)
         app.state.js = connection.jetstream()
+        app.state.graph = GraphQueryClient(connection, cfg.env)
         app.state.redis = Redis.from_url(cfg.redis_url)
         try:
             yield
@@ -98,6 +100,7 @@ def create_app(cfg: Config | None = None, nc: nats.NATS | None = None) -> FastAP
     )
     if not owned_nc:
         app.state.js = nc.jetstream()
+        app.state.graph = GraphQueryClient(nc, cfg.env)
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
@@ -153,6 +156,21 @@ def create_app(cfg: Config | None = None, nc: nats.NATS | None = None) -> FastAP
 
         # items는 봉투 JSON 원문 — 파싱 1회로 반환 구조에 싣는다
         return {"items": [json.loads(i) for i in items], "next_cursor": next_cursor}
+
+    @app.get("/graph/relationships")
+    async def graph_relationships(
+        world_id: str = Query("w_main", pattern=r"^w_[a-z0-9_]+$"),
+        player_id: str = Query(..., pattern=r"^p_[a-z0-9_]+$"),
+    ) -> dict:
+        """플레이어 관계 그래프의 실측값 — kuzu-projector의 graph query API 중재 (ADR-006).
+
+        그래프 미가용은 오류가 아니다(프로젝션은 최적화) — available=False로
+        내려주고 FE는 데모 배치를 유지한다.
+        """
+        output = await app.state.graph.player_graph(world_id, player_id)
+        if output is None:
+            return {"player_id": player_id, "edges": [], "available": False}
+        return {**output, "available": True}
 
     @app.websocket("/session")
     async def session(ws: WebSocket) -> None:

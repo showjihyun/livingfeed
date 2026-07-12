@@ -99,3 +99,49 @@ def test_first_page_is_cached_but_cursor_pages_are_not():
     client.get("/feed", params={"cursor": CURSOR})
     client.get("/feed", params={"cursor": CURSOR})  # 커서 페이지는 캐시하지 않는다
     assert len(search.calls) == 3
+
+
+class FakeGraph:
+    """관계 근접도 스텁 — a_close만 가깝다."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    async def proximity(self, world_id, from_id, to_ids):
+        self.calls.append((world_id, from_id, tuple(to_ids)))
+        return {a: (0.8 if a == "a_close" else 0.0) for a in to_ids}
+
+
+def make_personalized_client() -> tuple[TestClient, FakeSearch, FakeGraph, FakeCache]:
+    search, cache, graph = FakeSearch(), FakeCache(), FakeGraph()
+    # OS 밑점수는 a_far가 근소하게 앞서지만, 근접도(0.25×0.8)가 순서를 뒤집는다
+    search.items = [
+        {"event_id": "01JZK7Q3W0000000000000000B", "actor_id": "a_far", "_score": 0.50},
+        {"event_id": "01JZK7Q3W0000000000000000A", "actor_id": "a_close", "_score": 0.45},
+    ]
+    cfg = Config(opensearch_url="http://unused", redis_url="redis://unused")
+    app = create_app(cfg=cfg, search=search, cache=cache, graph=graph)
+    return TestClient(app), search, graph, cache
+
+
+def test_player_proximity_rescores_ranked_feed():
+    client, search, graph, cache = make_personalized_client()
+    resp = client.get("/feed", params={"player_id": "p_observer_0417", "limit": 2})
+    body = resp.json()
+    assert body["personalized"] is True
+    # 관계 근접도가 순서를 뒤집는다: 0.45+0.25*0.8=0.65 > 0.50 (ADR-014 랭킹 공식)
+    assert [i["actor_id"] for i in body["items"]] == ["a_close", "a_far"]
+    assert graph.calls[0][1] == "p_observer_0417"
+    # 후보 과확보: limit*2 요청
+    assert search.calls[-1]["limit"] == 4
+    # 개인화 응답은 공유 캐시에 남지 않는다
+    assert cache.store == {}
+
+
+def test_without_player_id_ranking_is_shared_and_cached():
+    client, search, graph, cache = make_personalized_client()
+    body = client.get("/feed", params={"limit": 2}).json()
+    assert "personalized" not in body
+    assert [i["actor_id"] for i in body["items"]] == ["a_far", "a_close"]  # OS 순서 유지
+    assert graph.calls == []
+    assert len(cache.store) == 1

@@ -8,7 +8,11 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "httpx>=0.27",
     "redis>=5.0",
+    "nats-py>=2.9",
     "lf-schemas",
+    # graph query API 클라이언트 — 관계 근접도 랭킹 항 (ADR-006/014).
+    # kuzu 자체는 런타임에 임포트되지 않는다 (graph_api는 경량 임포트)
+    "lf-projector",
 ]
 
 [tool.uv.sources]
@@ -20,8 +24,6 @@ dev = [
     "pytest>=8",
     "pytest-asyncio>=0.25",
     "httpx>=0.27",
-    # 통합 테스트에서 OpenSearch 인덱스를 시드하기 위한 dev 전용 의존
-    "lf-projector",
 ]
 
 [build-system]

@@ -13,6 +13,9 @@ from dataclasses import dataclass
 class Config:
     opensearch_url: str
     redis_url: str
+    #: graph query API(관계 근접도) — 미가용이면 근접도 항 없이 동작한다
+    nats_url: str = "nats://localhost:4222"
+    env: str = "dev"
     #: 브라우저 오리진 허용 목록 (fetch CORS) — 쉼표 구분
     cors_origins: tuple[str, ...] = ("http://localhost:3000",)
     index: str = "lf-feed-posts"
@@ -35,5 +38,7 @@ class Config:
         return cls(
             opensearch_url=os.environ.get("OPENSEARCH_URL", "http://localhost:9200"),
             redis_url=os.environ.get("REDIS_URL", "redis://localhost:6379/1"),
+            nats_url=os.environ.get("NATS_URL", "nats://localhost:4222"),
+            env=os.environ.get("LF_ENV", "dev"),
             cors_origins=tuple(o.strip() for o in origins.split(",") if o.strip()),
         )

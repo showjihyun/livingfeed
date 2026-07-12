@@ -90,7 +90,11 @@ class FeedSearch:
         r = await self._client.post(f"/{cfg.index}/_search", json=body)
         r.raise_for_status()
         hits = r.json()["hits"]["hits"]
-        items = [h["_source"] for h in hits]
+        # ranked 모드는 _score를 함께 싣는다 — 관계 근접도 재랭킹의 밑점수 (ADR-014)
+        if sort == "ranked":
+            items = [{**h["_source"], "_score": h.get("_score") or 0.0} for h in hits]
+        else:
+            items = [h["_source"] for h in hits]
         next_cursor = items[-1]["event_id"] if items and sort == "recent" else None
         return {"items": items, "next_cursor": next_cursor, "mode": sort}
 

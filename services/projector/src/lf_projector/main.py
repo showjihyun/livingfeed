@@ -2,10 +2,11 @@
 
 실행:
     uv run --package lf-projector python -m lf_projector.main --kind os
+    uv run --package lf-projector python -m lf_projector.main --kind kuzu
     uv run --package lf-projector python -m lf_projector.main --kind os --rebuild
-설정: NATS_URL, OPENSEARCH_URL, LF_ENV (config.py 참고).
+설정: NATS_URL, OPENSEARCH_URL, LF_KUZU_DIR, LF_ENV (config.py 참고).
 
-pg/kuzu/qdrant/redis 프로젝터는 각자의 로드맵 단계에서 추가된다.
+pg/qdrant/redis 프로젝터는 각자의 로드맵 단계에서 추가된다.
 """
 
 from __future__ import annotations
@@ -18,9 +19,10 @@ import signal
 import sys
 
 from lf_projector.config import Config
+from lf_projector.kuzu_projector import KuzuProjector
 from lf_projector.os_projector import OsProjector
 
-KINDS = ("os",)
+KINDS = ("os", "kuzu")
 
 
 async def run(kind: str, rebuild: bool) -> None:
@@ -29,7 +31,11 @@ async def run(kind: str, rebuild: bool) -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, stop.set)
-    await OsProjector(Config.from_env()).run(stop=stop, rebuild=rebuild)
+    cfg = Config.from_env()
+    if kind == "kuzu":
+        await KuzuProjector(cfg).run(stop=stop, rebuild=rebuild)
+    else:
+        await OsProjector(cfg).run(stop=stop, rebuild=rebuild)
 
 
 def main() -> None:

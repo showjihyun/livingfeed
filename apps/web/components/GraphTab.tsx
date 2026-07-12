@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { REL, REL_TAB_DEFS } from "@/lib/data";
+import type { LiveRelEdge } from "@/lib/graph";
 import type { RelKey } from "@/lib/types";
 
 import styles from "./lf.module.css";
@@ -10,6 +11,9 @@ import styles from "./lf.module.css";
 interface GraphTabProps {
   sel: RelKey;
   onSelect: (key: RelKey) => void;
+  /** kuzu-projector 실측 관계 (ADR-006) — 있으면 strength를 실측값으로 덮는다 */
+  liveEdges?: LiveRelEdge[];
+  liveAvailable?: boolean;
 }
 
 /* ── 그래프 데이터 (viewBox 760×620 좌표계) ──
@@ -49,14 +53,62 @@ const NODES: NodeDef[] = [
   { name: "정도윤", strength: 0.18, color: "#BFE3D0", edge: "#8FCBAA", design: [205, 445] },
 ];
 
+/** 실측 액터 id → 데모 노드/표시 이름 매핑 (미등록 id는 id 그대로 표기) */
+const LIVE_DEMO_NODE: Record<string, string> = { a_minji_kim: "김민지" };
+const LIVE_NAMES: Record<string, string> = {
+  a_minji_kim: "김민지",
+  a_aria_kim: "김아리",
+  a_junho_park: "박준호",
+};
+//: 실측으로 새로 등장하는 인물의 자리·색 (설계 좌표 슬롯 순환)
+const EXTRA_SLOTS: [number, number][] = [[150, 340], [612, 108], [706, 468], [128, 142]];
+const EXTRA_COLORS: [string, string][] = [
+  ["#F5D9B8", "#E5B57F"],
+  ["#B8E0F5", "#7FB4E8"],
+  ["#E3F0B8", "#B9CD7C"],
+  ["#F5C8B8", "#E8977F"],
+];
+
+/** 실측 엣지를 데모 노드에 병합 — 아는 인물은 strength 교체, 새 인물은 슬롯 추가 */
+function mergeLive(base: NodeDef[], live?: LiveRelEdge[]): NodeDef[] {
+  if (!live?.length) return base;
+  const nodes = base.map((n) => ({ ...n }));
+  const merged = new Set<string>();
+  for (const edge of live) {
+    const demoName = LIVE_DEMO_NODE[edge.actorId];
+    const node = demoName ? nodes.find((n) => n.name === demoName) : undefined;
+    if (node) {
+      node.strength = Math.max(0.08, edge.strength);
+      merged.add(edge.actorId);
+    }
+  }
+  let slot = 0;
+  for (const edge of live) {
+    if (merged.has(edge.actorId) || edge.strength < 0.02) continue;
+    const [x, y] = EXTRA_SLOTS[slot % EXTRA_SLOTS.length];
+    const [color, ring] = EXTRA_COLORS[slot % EXTRA_COLORS.length];
+    slot += 1;
+    nodes.push({
+      name: LIVE_NAMES[edge.actorId] ?? edge.actorId,
+      strength: Math.max(0.08, edge.strength),
+      color,
+      edge: ring,
+      design: [x, y],
+    });
+  }
+  return nodes;
+}
+
 /** 설계 좌표 → 궤도 극좌표 (θ=0에서 설계 좌표를 재현하도록 역산) */
-const ORBITS = Object.fromEntries(
-  NODES.map((n) => {
-    const dx = n.design[0] - CX;
-    const dy = (n.design[1] - CY) / TILT;
-    return [n.name, { radius: Math.hypot(dx, dy), angle: Math.atan2(dy, dx) }];
-  }),
-);
+function orbitsFor(nodes: NodeDef[]): Record<string, { radius: number; angle: number }> {
+  return Object.fromEntries(
+    nodes.map((n) => {
+      const dx = n.design[0] - CX;
+      const dy = (n.design[1] - CY) / TILT;
+      return [n.name, { radius: Math.hypot(dx, dy), angle: Math.atan2(dy, dx) }];
+    }),
+  );
+}
 
 interface Placed {
   x: number;
@@ -65,8 +117,10 @@ interface Placed {
   scale: number;
 }
 
-function place(name: string, theta: number, zoom: number): Placed {
-  const orbit = ORBITS[name];
+type Orbits = Record<string, { radius: number; angle: number }>;
+
+function place(orbits: Orbits, name: string, theta: number, zoom: number): Placed {
+  const orbit = orbits[name];
   if (orbit.radius === 0) return { x: CX, y: CY, depth: 0.5, scale: 1 };
   const a = orbit.angle + theta;
   const depth = (Math.sin(a) + 1) / 2; // 화면 아래(y+)가 앞
@@ -317,11 +371,29 @@ const LEGEND: { label: string; kind: EdgeKind }[] = [
 ];
 
 /** 궤도 캔버스 — 드래그 회전(관성) + 휠 줌 + 더블클릭 리셋 */
-function GraphCanvas({ sel, onSelect }: GraphTabProps) {
+function GraphCanvas({ sel, onSelect, liveEdges }: GraphTabProps) {
   const [theta, setTheta] = useState(0);
   const [zoom, setZoom] = useState(1);
   const drag = useRef({ active: false, lastX: 0, moved: 0, velocity: 0, lastAt: 0 });
   const raf = useRef<number | undefined>(undefined);
+
+  // 실측 병합 — 아는 인물은 관계도 교체, 새 인물(김아리 등)은 궤도에 등장한다
+  const nodes = useMemo(() => mergeLive(NODES, liveEdges), [liveEdges]);
+  const orbits = useMemo(() => orbitsFor(nodes), [nodes]);
+  const edges = useMemo(() => {
+    const known = new Set(NODES.map((n) => n.name));
+    const dynamic: EdgeDef[] = nodes
+      .filter((n) => !known.has(n.name))
+      .map((n) => ({
+        id: `live-${n.name}`,
+        from: "당신",
+        to: n.name,
+        kind: (n.strength >= 0.3 ? "close" : "faint") as EdgeKind,
+        width: 2 + 3 * n.strength,
+        bend: 0.12,
+      }));
+    return [...EDGES, ...dynamic];
+  }, [nodes]);
 
   // 관성 루프 — 드래그를 놓으면 서서히 감속
   useEffect(() => {
@@ -379,14 +451,14 @@ function GraphCanvas({ sel, onSelect }: GraphTabProps) {
 
   const placed = useMemo(() => {
     const map: Record<string, Placed> = {};
-    for (const n of NODES) map[n.name] = place(n.name, theta, zoom);
+    for (const n of nodes) map[n.name] = place(orbits, n.name, theta, zoom);
     return map;
-  }, [theta, zoom]);
+  }, [nodes, orbits, theta, zoom]);
 
-  // 깊이 정렬 — 뒤의 노드가 먼저 그려진다 (중심 김민지는 중간층)
+  // 깊이 정렬 — 뒤의 노드가 먼저 그려진다 (중심 플레이어는 중간층)
   const nodesByDepth = useMemo(
-    () => [...NODES].sort((a, b) => placed[a.name].depth - placed[b.name].depth),
-    [placed],
+    () => [...nodes].sort((a, b) => placed[a.name].depth - placed[b.name].depth),
+    [nodes, placed],
   );
 
   return (
@@ -446,7 +518,7 @@ function GraphCanvas({ sel, onSelect }: GraphTabProps) {
         />
       ))}
 
-      {EDGES.map((edge) => (
+      {edges.map((edge) => (
         <EdgeGroup
           key={edge.id}
           edge={edge}
@@ -470,7 +542,7 @@ function GraphCanvas({ sel, onSelect }: GraphTabProps) {
   );
 }
 
-export function GraphTab({ sel, onSelect }: GraphTabProps) {
+export function GraphTab({ sel, onSelect, liveEdges, liveAvailable }: GraphTabProps) {
   const rel = REL[sel];
   return (
     <>
@@ -491,7 +563,7 @@ export function GraphTab({ sel, onSelect }: GraphTabProps) {
 
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
         <div style={{ flex: 1, position: "relative", background: "#F8FBFF" }}>
-          <GraphCanvas sel={sel} onSelect={onSelect} />
+          <GraphCanvas sel={sel} onSelect={onSelect} liveEdges={liveEdges} />
 
           {/* 범례 + 조작 힌트 */}
           <div
@@ -526,6 +598,16 @@ export function GraphTab({ sel, onSelect }: GraphTabProps) {
             <div style={{ width: 1, height: 14, background: "#E2EAF6" }} />
             <div style={{ fontSize: 11.5, fontWeight: 700, color: "#8C97AF" }}>
               드래그 회전 · 휠 확대 · 더블클릭 초기화
+            </div>
+            <div style={{ width: 1, height: 14, background: "#E2EAF6" }} />
+            <div
+              style={{
+                fontSize: 11.5,
+                fontWeight: 800,
+                color: liveAvailable ? "#3E8A66" : "#8C97AF",
+              }}
+            >
+              {liveAvailable ? "관계도 실측 연결됨" : "관계도 데모 값"}
             </div>
           </div>
         </div>
