@@ -5,13 +5,26 @@ description = "Actor Runtime — asyncio 워커 풀 + 해시 샤딩 (ADR-012)"
 requires-python = ">=3.12"
 dependencies = [
     "lf-schemas",
+    "lf-eventstore",
+    "lf-tick",
+    "nats-py>=2.9",
+    "redis>=5.0",
+    "pyyaml>=6.0",
 ]
 
 [tool.uv.sources]
 lf-schemas = { workspace = true }
+lf-eventstore = { workspace = true }
+lf-tick = { workspace = true }
+lf-ai-runtime = { workspace = true }
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.25",
+    # 통합 테스트에서 AI Runtime을 in-process로 띄우기 위한 dev 전용 의존
+    "lf-ai-runtime",
+]
 
 [build-system]
 requires = ["hatchling"]

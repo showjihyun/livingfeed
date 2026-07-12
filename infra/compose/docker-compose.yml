@@ -181,24 +181,53 @@ services:
       nats:
         condition: service_healthy
 
-  tick:
+  ai-runtime:
     profiles: [full]
     restart: unless-stopped
     build:
       context: ../..
       dockerfile: infra/compose/Dockerfile.python
       args:
-        PACKAGE: lf-tick
+        PACKAGE: lf-ai-runtime
         APP_MODULE: unused   # uvicorn 대상이 아니다 — command로 대체
-    command: ["python", "-m", "lf_tick.main"]
+    command: ["python", "-m", "lf_ai_runtime.main"]
+    environment:
+      NATS_URL: nats://nats:4222
+      LF_ENV: dev
+      # 기본은 규칙 프로바이더 — LLM 사용 시: LF_AI_PROVIDER=anthropic + ANTHROPIC_API_KEY
+      LF_AI_PROVIDER: ${LF_AI_PROVIDER:-rule}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    depends_on:
+      nats:
+        condition: service_healthy
+
+  tick:
+    # 액터가 실린 tick 워커 (ADR-011/012) — 로드맵 6단계부터 lf_actor.main이 엔트리다
+    profiles: [full]
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: infra/compose/Dockerfile.python
+      args:
+        PACKAGE: lf-actor
+        APP_MODULE: unused   # uvicorn 대상이 아니다 — command로 대체
+    command: ["python", "-m", "lf_actor.main"]
     environment:
       LF_PG_DSN: postgresql://${POSTGRES_USER:-livingfeed}:${POSTGRES_PASSWORD:-livingfeed}@postgres:5432/${POSTGRES_DB:-livingfeed}
+      NATS_URL: nats://nats:4222
+      LF_REDIS_URL: redis://redis:6379/0
+      LF_ENV: dev
       LF_WORLD_ID: w_main
+      LF_PERSONAS_DIR: /app/agents/personas
     depends_on:
       postgres:
         condition: service_healthy
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
-  # projector / ai-runtime 은 이후 로드맵 단계에서 full 프로파일에 추가된다 —
+  # projector 는 이후 로드맵 단계에서 full 프로파일에 추가된다 —
   # 현재는 스캐폴드(NotImplementedError)라 기동 대상이 아니다.
 
 volumes:

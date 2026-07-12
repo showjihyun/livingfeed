@@ -1,0 +1,72 @@
+"""actor tick 워커 엔트리포인트 — 액터가 실린 tick engine (ADR-011/012).
+
+실행:
+    uv run --package lf-actor python -m lf_actor.main
+설정: lf_tick.config의 것들 + NATS_URL, LF_REDIS_URL, LF_PERSONAS_DIR.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+import os
+import signal
+import sys
+from pathlib import Path
+
+import nats
+from lf_tick.config import TickConfig
+from lf_tick.engine import run_tick_loop
+from redis.asyncio import Redis
+
+from lf_actor.client import AiRuntimeClient
+from lf_actor.memory import WorkingMemory
+from lf_actor.persona import load_personas
+from lf_actor.phases import ActorPhases
+
+logger = logging.getLogger("lf.actor.main")
+
+
+async def run() -> None:
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(sig, stop.set)
+
+    cfg = TickConfig.from_env()
+    env = os.environ.get("LF_ENV", "dev")
+    nats_url = os.environ.get("NATS_URL", "nats://localhost:4222")
+    redis_url = os.environ.get("LF_REDIS_URL", "redis://localhost:6379/0")
+    personas_dir = Path(os.environ.get("LF_PERSONAS_DIR", "agents/personas"))
+
+    personas = load_personas(personas_dir)
+    logger.info("페르소나 %d명 로드: %s", len(personas), ", ".join(p.id for p in personas))
+
+    nc = await nats.connect(nats_url)
+    redis = Redis.from_url(redis_url)
+    try:
+        phases = ActorPhases(
+            personas,
+            ai=AiRuntimeClient(nc, env),
+            memory=WorkingMemory(redis),
+        )
+        await run_tick_loop(cfg, phases, stop=stop)
+    finally:
+        await redis.aclose()
+        await nc.drain()
+
+
+def main() -> None:
+    sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
+    )
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    asyncio.run(run())
+
+
+if __name__ == "__main__":
+    main()

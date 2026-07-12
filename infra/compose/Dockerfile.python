@@ -18,6 +18,7 @@ COPY packages/schemas ./packages/schemas
 COPY packages/eventstore ./packages/eventstore
 COPY services ./services
 COPY engine ./engine
+COPY agents ./agents
 
 RUN uv sync --frozen --no-dev --package "${PACKAGE}"
 

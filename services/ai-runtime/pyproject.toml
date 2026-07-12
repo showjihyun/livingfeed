@@ -5,6 +5,8 @@ description = "AI Runtime — LLM/임베딩 단일 통제 지점 (ADR-018)"
 requires-python = ">=3.12"
 dependencies = [
     "nats-py>=2.9",
+    "jsonschema>=4.23",
+    "anthropic>=0.116",
     "lf-schemas",
 ]
 
@@ -12,7 +14,7 @@ dependencies = [
 lf-schemas = { workspace = true }
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "pytest-asyncio>=0.25"]
 
 [build-system]
 requires = ["hatchling"]

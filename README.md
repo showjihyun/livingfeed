@@ -75,7 +75,7 @@ docker compose --profile full up -d --build  # + gateway, feed-api
 3. ✅ Docker Compose 개발환경
 4. ✅ CI/CD (GitHub Actions — 경로 필터 + 스키마 게이트, [infra/ci](infra/ci/README.md))
 5. ✅ Core Engine (이벤트 스토어 + outbox → dispatcher relay → tick engine)
-6. ⬜ 첫 번째 AI Actor 실행
+6. ✅ 첫 번째 AI Actor 실행 (AI Runtime + Actor Runtime — 김아리가 tick마다 행동한다)
 7. ⬜ Living Feed MVP
 
 Phase 목표: Phase 1 — 100 액터 / Phase 2 — 1,000 / Phase 3 — 10,000+ ([ADR-020](docs/adr/ADR-020-performance-budget.md))
