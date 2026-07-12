@@ -1,0 +1,19 @@
+{
+  "event_id": "01JZK7Q3W0000000000000000V",
+  "stream": "actor",
+  "type": "actor.belief.formed",
+  "schema_version": 1,
+  "world_id": "w_main",
+  "actor_id": "a_aria_kim",
+  "tick": 180,
+  "occurred_at": "2026-07-11T11:00:00Z",
+  "causation_id": null,
+  "correlation_id": "01JZK7Q3W0000000000000000V",
+  "payload": {
+    "statement": "p_observer_0417은 내게 힘이 되는 사람이다 — 어려울 때 먼저 다가와줬다.",
+    "kind": "supporter",
+    "confidence": 0.58,
+    "about_id": "p_observer_0417",
+    "source_event_ids": ["01JZK7Q3W0000000000000000G"]
+  }
+}

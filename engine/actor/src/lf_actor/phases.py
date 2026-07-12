@@ -32,6 +32,7 @@ from lf_actor.emotion import SHIFT_TYPE, EmotionAdapter, PendingShift
 from lf_actor.mailbox import Mailbox
 from lf_actor.memory import WorkingMemory
 from lf_actor.persona import Persona
+from lf_actor.reflection import Belief, BeliefLedger, belief_point_key, derive_beliefs
 from lf_actor.relationship import PRINCIPAL as REL_PRINCIPAL
 from lf_actor.relationship import PendingRelEvent, RelationshipAdapter
 from lf_actor.rules import fallback_action, fallback_reply
@@ -43,6 +44,7 @@ PRINCIPAL = "engine.actor"
 ACTION_TYPE = "actor.action.performed"
 MESSAGE_TYPE = "actor.message.sent"
 MEMORY_TYPE = "actor.memory.consolidated"
+BELIEF_TYPE = "actor.belief.formed"
 
 #: 응답 의무가 있는 상호작용 (반응(like)은 지각·감정 입력일 뿐 응답하지 않는다)
 _REPLYABLE = {"player.dm.sent": "dm", "player.comment.posted": "comment"}
@@ -66,6 +68,8 @@ class ActorPhases:
         relationship: RelationshipAdapter | None = None,
         semantic: SemanticMemory | None = None,
         importance_weights: ImportanceWeights | None = None,
+        belief_ledger: BeliefLedger | None = None,
+        reflection_interval: int = 30,
     ) -> None:
         if not personas:
             raise ValueError("액터가 없다 — 최소 1명의 페르소나가 필요하다")
@@ -77,6 +81,8 @@ class ActorPhases:
         self._relationship = relationship
         self._semantic = semantic
         self._weights = importance_weights or ImportanceWeights()
+        self._ledger = belief_ledger
+        self._reflection_interval = max(1, reflection_interval)
         # 첫 액터들은 세계의 주인공 — Hot으로 시작 (승격/강등은 관심 신호 소스가 생기면)
         self._lods: dict[str, ActorLod] = {
             actor_id: ActorLod(tier=Tier.HOT, last_interest_tick=0) for actor_id in self._personas
@@ -293,6 +299,9 @@ class ActorPhases:
             rel_counts = await self._consolidate_relationships(ctx)
         # 기억 응고 — 이번 tick의 재료가 에피소드로 접힌다 (ADR-008)
         await self._consolidate_memories(ctx, rel_counts)
+        # reflection — 주기적으로 상태의 패턴이 신념이 된다 (ADR-008)
+        if ctx.tick > 0 and ctx.tick % self._reflection_interval == 0:
+            await self._reflect(ctx)
         # 감정 감쇠·baseline 회귀 (ADR-015 §감쇠)
         if self._emotion is not None:
             for persona in self._personas.values():
@@ -300,6 +309,65 @@ class ActorPhases:
         self._resolved_actions = []
         self._resolved_shifts = []
         self._resolved_replies = []
+
+    async def _reflect(self, ctx: TickContext) -> None:
+        """상태 패턴 → 신념 (규칙 기반 MVP — LLM reflection은 후속, ADR-008)."""
+        if self._emotion is None or self._relationship is None or self._ledger is None:
+            return
+        names = {p.id: p.name for p in self._personas.values()}
+        for actor_id in sorted(self._personas):
+            emotion_state = await self._emotion.load(ctx.world_id, actor_id)
+            edges = {}
+            for other_id in await self._relationship.counterparts(ctx.world_id, actor_id):
+                state = await self._relationship.load(ctx.world_id, actor_id, other_id)
+                if state is not None:
+                    edges[other_id] = state
+            for belief in derive_beliefs(emotion_state, edges, name_map=names):
+                if not await self._ledger.changed(ctx.world_id, actor_id, belief):
+                    continue
+                await self._store_belief(ctx, actor_id, belief)
+
+    async def _store_belief(self, ctx: TickContext, actor_id: str, belief: Belief) -> None:
+        head = await current_head(ctx.conn, ctx.world_id, "actor", actor_id)
+        [stored] = await append(
+            ctx.conn, PRINCIPAL,
+            [
+                NewEvent(
+                    world_id=ctx.world_id,
+                    stream="actor",
+                    stream_key=actor_id,
+                    type=BELIEF_TYPE,
+                    tick=ctx.tick,
+                    actor_id=actor_id,
+                    causation_id=belief.source_event_ids[0] if belief.source_event_ids else None,
+                    payload={
+                        "statement": belief.statement,
+                        "kind": belief.kind,
+                        "confidence": belief.confidence,
+                        "about_id": belief.about_id,
+                        "source_event_ids": belief.source_event_ids,
+                    },
+                )
+            ],
+            expected_head=head,
+        )
+        assert self._ledger is not None
+        await self._ledger.record(ctx.world_id, actor_id, belief)
+        if self._semantic is not None:
+            # 같은 (kind, about) 신념은 같은 포인트를 덮어쓴다 — 신념은 갱신되는 자리다
+            await self._semantic.remember(
+                ctx.world_id, actor_id,
+                event_id=stored.envelope["event_id"],
+                text=belief.statement,
+                importance=belief.confidence,
+                source_event_ids=belief.source_event_ids,
+                point_key=belief_point_key(actor_id, belief),
+            )
+        await self._memory.add(ctx.world_id, actor_id, f"곱씹은 생각: {belief.statement}")
+        logger.info(
+            "신념 형성: %s [%s→%s] conf=%.2f tick=%d",
+            actor_id, belief.kind, belief.about_id, belief.confidence, ctx.tick,
+        )
 
     async def _consolidate_memories(self, ctx: TickContext, rel_counts: dict[str, int]) -> None:
         actions_by_actor = {actor_id: env for actor_id, env in self._resolved_actions}

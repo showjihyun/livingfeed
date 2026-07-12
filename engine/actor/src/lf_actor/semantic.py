@@ -90,8 +90,13 @@ class SemanticMemory:
         importance: float,
         source_event_ids: list[str],
         now_s: float | None = None,
+        point_key: str | None = None,
     ) -> bool:
-        """응고 기억을 임베딩 저장한다. 실패는 False — 응고 이벤트(원본)는 이미 안전하다."""
+        """응고 기억을 임베딩 저장한다. 실패는 False — 응고 이벤트(원본)는 이미 안전하다.
+
+        point_key를 주면 그 키로 포인트 id를 파생한다 — 신념처럼 같은 자리의
+        기억이 갱신(덮어쓰기)되는 경우에 쓴다 (reflection, ADR-008).
+        """
         now_s = now_s if now_s is not None else time.time()
         decay_at = now_s + DECAY_MIN_S + (DECAY_MAX_S - DECAY_MIN_S) * importance
         try:
@@ -101,7 +106,7 @@ class SemanticMemory:
                 json={
                     "points": [
                         {
-                            "id": _point_id(event_id),
+                            "id": _point_id(point_key or event_id),
                             "vector": embed(text, self._dim),
                             "payload": {
                                 "actor_id": actor_id,

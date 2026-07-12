@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/actor.belief.formed.schema.json",
+  "title": "ActorBeliefFormed",
+  "description": "reflection이 경험에서 응고한 신념 (ADR-008 §기억 수명주기). 반복된 감정·관계 패턴이 '이 사람은 어떤 사람이다'라는 명제가 된다. Semantic에 임베딩되어 회상 하한(0.3)보다 낮은 응고 게이트(0.4)의 예외 — 신념은 중요도가 아니라 확신으로 산다.",
+  "type": "object",
+  "properties": {
+    "statement": {
+      "type": "string",
+      "description": "신념 명제 — 회상 시 프롬프트에 그대로 실린다",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "kind": {
+      "type": "string",
+      "description": "신념 분류 (supporter, threat, ...) — 같은 (kind, about)은 갱신이다",
+      "pattern": "^[a-z_]+$"
+    },
+    "confidence": {
+      "type": "number",
+      "description": "확신 0..1 — 근거 상태(관계 차원·감정 강도)에서 파생",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "about_id": {
+      "type": ["string", "null"],
+      "description": "신념의 대상 (액터/플레이어, 자기 자신이나 세계면 null)"
+    },
+    "source_event_ids": {
+      "type": "array",
+      "description": "근거 사건들 (최선 노력 감사 추적 — 상태 유래 신념은 비어 있을 수 있다)",
+      "items": { "type": "string", "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$" }
+    }
+  },
+  "required": ["statement", "kind", "confidence", "about_id", "source_event_ids"],
+  "additionalProperties": false
+}

@@ -26,6 +26,7 @@ from lf_actor.mailbox import Mailbox, run_mailbox_router
 from lf_actor.memory import WorkingMemory
 from lf_actor.persona import load_personas
 from lf_actor.phases import ActorPhases
+from lf_actor.reflection import BeliefLedger
 from lf_actor.relationship import RelationshipAdapter
 from lf_actor.semantic import SemanticMemory
 
@@ -65,6 +66,8 @@ async def run() -> None:
             emotion=EmotionAdapter(redis),
             relationship=RelationshipAdapter(redis),
             semantic=semantic,
+            belief_ledger=BeliefLedger(redis),
+            reflection_interval=int(os.environ.get("LF_REFLECT_INTERVAL", "30")),
         )
         # tick 루프와 메일박스 라우터(LF_PLAYER → Redis)가 나란히 돈다 (ADR-012)
         await asyncio.gather(
