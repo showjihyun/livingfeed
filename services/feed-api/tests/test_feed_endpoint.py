@@ -55,8 +55,8 @@ def test_default_is_ranked_world_first_page():
 
 def test_types_csv_is_parsed_and_validated():
     client, search, _ = make_client()
-    assert client.get("/feed", params={"types": "personal, world"}).status_code == 200
-    assert search.calls[-1]["kinds"] == ["personal", "world"]
+    assert client.get("/feed", params={"types": "community, world"}).status_code == 200
+    assert search.calls[-1]["kinds"] == ["community", "world"]
 
     resp = client.get("/feed", params={"types": "world,doom"})
     assert resp.status_code == 400

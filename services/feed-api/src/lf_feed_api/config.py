@@ -13,6 +13,8 @@ from dataclasses import dataclass
 class Config:
     opensearch_url: str
     redis_url: str
+    #: PG read 테이블(프로필/대화, pg-projector 산출물) — 미가용이면 해당 경로만 503
+    database_url: str = "postgresql://livingfeed:livingfeed@localhost:5432/livingfeed"
     #: graph query API(관계 근접도) — 미가용이면 근접도 항 없이 동작한다
     nats_url: str = "nats://localhost:4222"
     env: str = "dev"
@@ -38,6 +40,10 @@ class Config:
         return cls(
             opensearch_url=os.environ.get("OPENSEARCH_URL", "http://localhost:9200"),
             redis_url=os.environ.get("REDIS_URL", "redis://localhost:6379/1"),
+            database_url=os.environ.get(
+                "LF_DATABASE_URL",
+                "postgresql://livingfeed:livingfeed@localhost:5432/livingfeed",
+            ),
             nats_url=os.environ.get("NATS_URL", "nats://localhost:4222"),
             env=os.environ.get("LF_ENV", "dev"),
             cors_origins=tuple(o.strip() for o in origins.split(",") if o.strip()),

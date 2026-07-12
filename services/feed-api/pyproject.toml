@@ -9,6 +9,8 @@ dependencies = [
     "httpx>=0.27",
     "redis>=5.0",
     "nats-py>=2.9",
+    # PG read 테이블 조회 — 프로필/대화 히스토리 (ADR-003 pg-projector의 읽기 짝)
+    "psycopg[binary,pool]>=3.2",
     "lf-schemas",
     # graph query API 클라이언트 — 관계 근접도 랭킹 항 (ADR-006/014).
     # kuzu 자체는 런타임에 임포트되지 않는다 (graph_api는 경량 임포트)

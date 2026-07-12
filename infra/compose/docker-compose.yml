@@ -155,10 +155,16 @@ services:
     environment:
       OPENSEARCH_URL: http://opensearch:9200
       REDIS_URL: redis://redis:6379/1
+      # PG read 테이블(프로필/대화, pg-projector 산출물) — 미가용이면 해당 경로만 503
+      LF_DATABASE_URL: postgresql://${POSTGRES_USER:-livingfeed}:${POSTGRES_PASSWORD:-livingfeed}@postgres:5432/${POSTGRES_DB:-livingfeed}
+      # graph query API(관계 근접도 랭킹 항) — 미가용이면 근접도 항 없이 동작
+      NATS_URL: nats://nats:4222
     depends_on:
       redis:
         condition: service_healthy
       opensearch:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
@@ -335,7 +341,51 @@ services:
       nats:
         condition: service_healthy
 
-  # pg/qdrant/redis 프로젝터는 각자의 로드맵 단계에서 추가된다.
+  pg-projector:
+    # PG read 테이블: 에피소드·신념·대화 (ADR-003, ADR-008 후속)
+    # 재구축: docker compose run --rm pg-projector python -m lf_projector.main --kind pg --rebuild
+    profiles: [full]
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: infra/compose/Dockerfile.python
+      args:
+        PACKAGE: lf-projector
+        APP_MODULE: unused   # uvicorn 대상이 아니다 — command로 대체
+    command: ["python", "-m", "lf_projector.main", "--kind", "pg"]
+    environment:
+      NATS_URL: nats://nats:4222
+      LF_DATABASE_URL: postgresql://${POSTGRES_USER:-livingfeed}:${POSTGRES_PASSWORD:-livingfeed}@postgres:5432/${POSTGRES_DB:-livingfeed}
+      LF_ENV: dev
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  redis-projector:
+    # Redis 타임라인: 관계 기반 fan-out-on-write — Personal/Private 피드 (ADR-014 §2단)
+    # 재구축: docker compose run --rm redis-projector python -m lf_projector.main --kind redis --rebuild
+    profiles: [full]
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: infra/compose/Dockerfile.python
+      args:
+        PACKAGE: lf-projector
+        APP_MODULE: unused   # uvicorn 대상이 아니다 — command로 대체
+    command: ["python", "-m", "lf_projector.main", "--kind", "redis"]
+    environment:
+      NATS_URL: nats://nats:4222
+      REDIS_URL: redis://redis:6379/1
+      LF_ENV: dev
+    depends_on:
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # qdrant 프로젝터는 자신의 로드맵 단계에서 추가된다.
 
 volumes:
   pg_data:

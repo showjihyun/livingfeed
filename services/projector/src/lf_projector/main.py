@@ -3,10 +3,11 @@
 실행:
     uv run --package lf-projector python -m lf_projector.main --kind os
     uv run --package lf-projector python -m lf_projector.main --kind kuzu
+    uv run --package lf-projector python -m lf_projector.main --kind pg
+    uv run --package lf-projector python -m lf_projector.main --kind redis
     uv run --package lf-projector python -m lf_projector.main --kind os --rebuild
-설정: NATS_URL, OPENSEARCH_URL, LF_KUZU_DIR, LF_ENV (config.py 참고).
-
-pg/qdrant/redis 프로젝터는 각자의 로드맵 단계에서 추가된다.
+설정: NATS_URL, OPENSEARCH_URL, LF_KUZU_DIR, LF_DATABASE_URL, REDIS_URL, LF_ENV
+(config.py 참고). qdrant 프로젝터는 자신의 로드맵 단계에서 추가된다.
 """
 
 from __future__ import annotations
@@ -21,8 +22,17 @@ import sys
 from lf_projector.config import Config
 from lf_projector.kuzu_projector import KuzuProjector
 from lf_projector.os_projector import OsProjector
+from lf_projector.pg_projector import PgProjector
+from lf_projector.redis_projector import RedisProjector
 
-KINDS = ("os", "kuzu")
+KINDS = ("os", "kuzu", "pg", "redis")
+
+PROJECTORS = {
+    "os": OsProjector,
+    "kuzu": KuzuProjector,
+    "pg": PgProjector,
+    "redis": RedisProjector,
+}
 
 
 async def run(kind: str, rebuild: bool) -> None:
@@ -32,10 +42,7 @@ async def run(kind: str, rebuild: bool) -> None:
         with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, stop.set)
     cfg = Config.from_env()
-    if kind == "kuzu":
-        await KuzuProjector(cfg).run(stop=stop, rebuild=rebuild)
-    else:
-        await OsProjector(cfg).run(stop=stop, rebuild=rebuild)
+    await PROJECTORS[kind](cfg).run(stop=stop, rebuild=rebuild)
 
 
 def main() -> None:
