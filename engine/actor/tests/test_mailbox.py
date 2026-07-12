@@ -73,8 +73,10 @@ async def test_player_dm_gets_reply_through_tick(conn, redis, nc, ai_service):  
 
     events = [s.envelope for s in await read_stream(conn, WORLD, "actor", "a_aria_kim")]
     types = [e["type"] for e in events]
-    # 응답이 행동보다 앞선다 (상호작용 우선, ADR-012 규칙 2)
-    assert types == ["actor.message.sent", "actor.action.performed"]
+    # 응답이 행동보다 앞선다 (상호작용 우선, ADR-012 규칙 2) — 응고가 tick을 닫는다
+    assert types == [
+        "actor.message.sent", "actor.action.performed", "actor.memory.consolidated",
+    ]
 
     reply = events[0]
     assert reply["causation_id"] == dm["event_id"]
@@ -101,7 +103,10 @@ async def test_reaction_is_perceived_but_not_replied(conn, redis, nc, ai_service
     await run_tick(conn, phases, CLOCK, WORLD, tick=0, head=0)
 
     events = [s.envelope for s in await read_stream(conn, WORLD, "actor", "a_aria_kim")]
-    assert [e["type"] for e in events] == ["actor.action.performed"]  # 응답 의무 없음
+    # 응답 의무는 없지만 지각은 기억으로 응고된다 (ADR-008)
+    assert [e["type"] for e in events] == [
+        "actor.action.performed", "actor.memory.consolidated",
+    ]
 
     recent = await WorkingMemory(redis).recent(WORLD, "a_aria_kim")
     assert any("좋아요" in m for m in recent)  # 그러나 지각은 된다 (감정 입력, ADR-015)

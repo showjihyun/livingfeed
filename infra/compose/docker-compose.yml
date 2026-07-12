@@ -237,6 +237,8 @@ services:
       LF_WORLD_ID: w_main
       LF_PERSONAS_DIR: /app/agents/personas
       LF_AI_TIMEOUT_S: ${LF_AI_TIMEOUT_S:-18}
+      # Semantic 기억 (ADR-008) — 미가용이어도 tick은 흐른다 (회상만 비활성)
+      LF_QDRANT_URL: http://qdrant:6333
     depends_on:
       postgres:
         condition: service_healthy

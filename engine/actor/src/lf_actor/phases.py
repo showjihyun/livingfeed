@@ -19,6 +19,13 @@ from lf_tick.lod import ActorLod, Tier, due_by_tier, scheduled_counts
 from lf_tick.pipeline import TickContext
 
 from lf_actor.client import AiRuntimeClient
+from lf_actor.consolidation import (
+    Episode,
+    ImportanceWeights,
+    TickMaterials,
+    build_episode,
+    describe_interaction,
+)
 from lf_actor.context import WorldContext, build
 from lf_actor.emotion import PRINCIPAL as EMOTION_PRINCIPAL
 from lf_actor.emotion import SHIFT_TYPE, EmotionAdapter, PendingShift
@@ -28,30 +35,17 @@ from lf_actor.persona import Persona
 from lf_actor.relationship import PRINCIPAL as REL_PRINCIPAL
 from lf_actor.relationship import PendingRelEvent, RelationshipAdapter
 from lf_actor.rules import fallback_action, fallback_reply
+from lf_actor.semantic import SemanticMemory
 
 logger = logging.getLogger("lf.actor.phases")
 
 PRINCIPAL = "engine.actor"
 ACTION_TYPE = "actor.action.performed"
 MESSAGE_TYPE = "actor.message.sent"
+MEMORY_TYPE = "actor.memory.consolidated"
 
 #: 응답 의무가 있는 상호작용 (반응(like)은 지각·감정 입력일 뿐 응답하지 않는다)
 _REPLYABLE = {"player.dm.sent": "dm", "player.comment.posted": "comment"}
-
-
-def describe_interaction(envelope: dict[str, Any]) -> str:
-    """상호작용 봉투 → Working Memory 문장 (지각의 최소 형태)."""
-    p = envelope["payload"]
-    kind = envelope["type"]
-    if kind == "player.dm.sent":
-        return f"플레이어 {p['player_id']}의 DM: \"{p['text']}\""
-    if kind == "player.comment.posted":
-        return f"플레이어 {p['player_id']}가 내 글에 댓글을 남겼다: \"{p['text']}\""
-    if kind == "player.reaction.added":
-        return f"플레이어 {p['player_id']}가 내 글에 좋아요를 눌렀다"
-    if kind == "world.incident.occurred":
-        return f"세계 사건: {p['description']}"
-    return f"플레이어 상호작용: {kind}"
 
 
 class ActorPhases:
@@ -70,6 +64,8 @@ class ActorPhases:
         mailbox: Mailbox | None = None,
         emotion: EmotionAdapter | None = None,
         relationship: RelationshipAdapter | None = None,
+        semantic: SemanticMemory | None = None,
+        importance_weights: ImportanceWeights | None = None,
     ) -> None:
         if not personas:
             raise ValueError("액터가 없다 — 최소 1명의 페르소나가 필요하다")
@@ -79,6 +75,8 @@ class ActorPhases:
         self._mailbox = mailbox
         self._emotion = emotion
         self._relationship = relationship
+        self._semantic = semantic
+        self._weights = importance_weights or ImportanceWeights()
         # 첫 액터들은 세계의 주인공 — Hot으로 시작 (승격/강등은 관심 신호 소스가 생기면)
         self._lods: dict[str, ActorLod] = {
             actor_id: ActorLod(tier=Tier.HOT, last_interest_tick=0) for actor_id in self._personas
@@ -90,9 +88,10 @@ class ActorPhases:
         self._inbox: dict[str, list[dict[str, Any]]] = {}
         #: perceive의 감정 평가 결과 — RESOLVE에서 engine.emotion으로 적재 (ADR-015)
         self._shifts: list[PendingShift] = []
-        #: RESOLVE가 남기는 이번 tick의 응고 재료 — CONSOLIDATE의 관계 갱신 입력 (ADR-016)
+        #: RESOLVE가 남기는 이번 tick의 응고 재료 — CONSOLIDATE의 관계·기억 입력 (ADR-008/016)
         self._resolved_actions: list[tuple[str, dict[str, Any]]] = []  # (actor_id, envelope)
         self._resolved_shifts: list[PendingShift] = []
+        self._resolved_replies: list[tuple[str, dict[str, Any], str]] = []
 
     async def schedule(self, ctx: TickContext) -> dict[str, int]:
         return scheduled_counts(self._lods, ctx.tick)
@@ -134,7 +133,8 @@ class ActorPhases:
             for actor_id in due[tier]:
                 persona = self._personas[actor_id]
                 working = await self._memory.recent(ctx.world_id, actor_id)
-                bundle = build(persona, working, world)
+                episodes = await self._recall(ctx.world_id, actor_id, working)
+                bundle = build(persona, working, world, episodes=episodes)
                 payload = await self._ai.decide_action(
                     bundle, schema, tier=tier.value, actor_id=actor_id, tick=ctx.tick
                 )
@@ -150,7 +150,10 @@ class ActorPhases:
                 if envelope["type"] not in _REPLYABLE:
                     continue
                 working = await self._memory.recent(ctx.world_id, actor_id)
-                bundle = build(persona, working, world, purpose="reply_to_player")
+                episodes = await self._recall(ctx.world_id, actor_id, working)
+                bundle = build(
+                    persona, working, world, purpose="reply_to_player", episodes=episodes
+                )
                 text = await self._ai.converse(
                     bundle, tier="hot", actor_id=actor_id, tick=ctx.tick
                 )
@@ -160,6 +163,12 @@ class ActorPhases:
 
         # Cold 티어는 ColdSimulator(통계 일괄 처리)의 몫 — Phase 1은 대상 없음 (ADR-012)
         return decided
+
+    async def _recall(self, world_id: str, actor_id: str, working: list[str]) -> list[str]:
+        """장기 기억 회상 — 최신 지각을 질의로 유사 에피소드 top-k (ADR-008)."""
+        if self._semantic is None or not working:
+            return []
+        return await self._semantic.recall(world_id, actor_id, working[0], k=3)
 
     def _reply_event(
         self, ctx: TickContext, actor_id: str, source: dict[str, Any], text: str
@@ -271,6 +280,7 @@ class ActorPhases:
             )
 
         self._intents = []
+        self._resolved_replies = list(self._replies)  # 기억 응고용 스냅샷 (ADR-008)
         self._replies = []
         self._resolved_shifts = list(self._shifts)  # 관계 응고용 스냅샷 (ADR-016 규칙 2)
         self._shifts = []
@@ -278,14 +288,82 @@ class ActorPhases:
 
     async def consolidate(self, ctx: TickContext) -> None:
         # 관계 응고 (ADR-016 §갱신 규칙 — CONSOLIDATE 단계)
+        rel_counts: dict[str, int] = {}
         if self._relationship is not None:
-            await self._consolidate_relationships(ctx)
-        # 감정 감쇠·baseline 회귀 (ADR-015 §감쇠) — 기억 응고는 ADR-008 단계에서
+            rel_counts = await self._consolidate_relationships(ctx)
+        # 기억 응고 — 이번 tick의 재료가 에피소드로 접힌다 (ADR-008)
+        await self._consolidate_memories(ctx, rel_counts)
+        # 감정 감쇠·baseline 회귀 (ADR-015 §감쇠)
         if self._emotion is not None:
             for persona in self._personas.values():
                 await self._emotion.decay_one_tick(ctx.world_id, persona)
+        self._resolved_actions = []
+        self._resolved_shifts = []
+        self._resolved_replies = []
 
-    async def _consolidate_relationships(self, ctx: TickContext) -> None:
+    async def _consolidate_memories(self, ctx: TickContext, rel_counts: dict[str, int]) -> None:
+        actions_by_actor = {actor_id: env for actor_id, env in self._resolved_actions}
+        peaks: dict[str, float] = {}
+        for shift in self._resolved_shifts:
+            intensity = float(shift.instance.get("intensity", 0.0))
+            peaks[shift.actor_id] = max(peaks.get(shift.actor_id, 0.0), intensity)
+
+        for actor_id in sorted(self._personas):
+            materials = TickMaterials(
+                interactions=self._inbox.get(actor_id, []),
+                replies=[
+                    (env, text) for a, env, text in self._resolved_replies if a == actor_id
+                ],
+                action_envelope=actions_by_actor.get(actor_id),
+                emotion_peak=peaks.get(actor_id, 0.0),
+                relationship_events=rel_counts.get(actor_id, 0),
+            )
+            episode = build_episode(materials, weights=self._weights)
+            if episode is None:
+                continue
+            await self._store_episode(ctx, actor_id, episode)
+
+    async def _store_episode(self, ctx: TickContext, actor_id: str, episode: Episode) -> None:
+        head = await current_head(ctx.conn, ctx.world_id, "actor", actor_id)
+        [stored] = await append(
+            ctx.conn, PRINCIPAL,
+            [
+                NewEvent(
+                    world_id=ctx.world_id,
+                    stream="actor",
+                    stream_key=actor_id,
+                    type=MEMORY_TYPE,
+                    tick=ctx.tick,
+                    actor_id=actor_id,
+                    causation_id=episode.causation_id,
+                    correlation_id=episode.correlation_id,
+                    payload={
+                        "summary": episode.summary,
+                        "importance": episode.importance,
+                        "factors": episode.factors,
+                        "source_event_ids": episode.source_event_ids,
+                        "tags": episode.tags,
+                    },
+                )
+            ],
+            expected_head=head,
+        )
+        # 중요도 게이트 통과분만 Semantic 임베딩 — 망각은 Semantic에서만 (ADR-008)
+        if self._semantic is not None and episode.importance >= self._weights.semantic_gate:
+            await self._semantic.remember(
+                ctx.world_id, actor_id,
+                event_id=stored.envelope["event_id"],
+                text=episode.summary,
+                importance=episode.importance,
+                source_event_ids=episode.source_event_ids,
+            )
+        logger.info(
+            "기억 응고: %s tick=%d importance=%.2f%s",
+            actor_id, ctx.tick, episode.importance,
+            " (semantic)" if episode.importance >= self._weights.semantic_gate else "",
+        )
+
+    async def _consolidate_relationships(self, ctx: TickContext) -> dict[str, int]:
         assert self._relationship is not None
         rel = self._relationship
         pending: list[PendingRelEvent] = []
@@ -353,5 +431,8 @@ class ActorPhases:
             await append(ctx.conn, REL_PRINCIPAL, events, expected_head=head)
             logger.info("관계 기록: %s→%s %d건 tick=%d", from_id, to_id, len(events), ctx.tick)
 
-        self._resolved_actions = []
-        self._resolved_shifts = []
+        # 기억 응고의 관계영향 항 입력 — from(액터)별 관계 이벤트 수
+        counts: dict[str, int] = {}
+        for event in pending:
+            counts[event.from_id] = counts.get(event.from_id, 0) + 1
+        return counts

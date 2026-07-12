@@ -22,6 +22,7 @@ CHARS_PER_TOKEN = 2.5
 
 #: 섹션별 토큰 예산 (ADR-009 §토큰 예산, Phase 1 기본값)
 BUDGET_IDENTITY = 800
+BUDGET_EPISODES = 600
 BUDGET_WORKING = 1_200
 BUDGET_WORLD = 400
 BUDGET_TASK_FRAME = 600
@@ -66,6 +67,22 @@ def _identity_section(persona: Persona) -> str:
         "당신은 살아있는 세계의 주민이다. 항상 이 인물로서 지각하고 결정한다."
     )
     return _clip(text, BUDGET_IDENTITY)
+
+
+def _episodes_section(episodes: list[str]) -> str:
+    """Episodes(4) — 장기 기억 회상 (ADR-008 recall). 비어 있으면 섹션 생략이 아니라
+    고정 문구를 둔다 — 섹션 존재 자체가 프리픽스 안정성에 기여한다 (ADR-009/018)."""
+    if not episodes:
+        return "## 떠오르는 기억\n(지금 상황과 이어지는 오래된 기억은 없다)"
+    limit = int(BUDGET_EPISODES * CHARS_PER_TOKEN)
+    kept: list[str] = []
+    used = 0
+    for episode in episodes:
+        if used + len(episode) > limit:
+            break
+        kept.append(episode)
+        used += len(episode) + 1
+    return "## 떠오르는 기억 (관련 회상)\n" + "\n".join(f"- {e}" for e in kept)
 
 
 def _working_section(entries: list[str]) -> str:
@@ -117,13 +134,15 @@ def build(
     *,
     purpose: str = "decide_action",
     trace_id: str | None = None,
+    episodes: list[str] | None = None,
 ) -> Bundle:
-    """ContextBundle 조립 — 섹션 순서 고정 (ADR-009 규칙 1)."""
+    """ContextBundle 조립 — 섹션 순서 고정 (ADR-009 규칙 1: Episodes(4) < Working(5))."""
     frame = _TASK_FRAMES.get(purpose)
     if frame is None:
         raise ValueError(f"알 수 없는 purpose: {purpose}")
     user = "\n\n".join(
         [
+            _episodes_section(episodes or []),
             _working_section(working),
             _world_section(world),
             _clip(frame, BUDGET_TASK_FRAME),

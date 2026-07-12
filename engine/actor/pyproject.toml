@@ -14,6 +14,8 @@ dependencies = [
     "nats-py>=2.9",
     "redis>=5.0",
     "pyyaml>=6.0",
+    # Semantic 기억(Qdrant REST) — 무거운 SDK 회피 (ADR-007/008)
+    "httpx>=0.27",
 ]
 
 [tool.uv.sources]

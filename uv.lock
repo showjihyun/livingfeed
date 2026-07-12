@@ -467,6 +467,7 @@ name = "lf-actor"
 version = "0.1.0"
 source = { editable = "engine/actor" }
 dependencies = [
+    { name = "httpx" },
     { name = "lf-dispatcher" },
     { name = "lf-emotion" },
     { name = "lf-eventstore" },
@@ -487,6 +488,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
     { name = "lf-dispatcher", editable = "services/dispatcher" },
     { name = "lf-emotion", editable = "engine/emotion" },
     { name = "lf-eventstore", editable = "packages/eventstore" },

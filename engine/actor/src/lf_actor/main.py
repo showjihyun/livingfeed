@@ -27,6 +27,7 @@ from lf_actor.memory import WorkingMemory
 from lf_actor.persona import load_personas
 from lf_actor.phases import ActorPhases
 from lf_actor.relationship import RelationshipAdapter
+from lf_actor.semantic import SemanticMemory
 
 logger = logging.getLogger("lf.actor.main")
 
@@ -49,8 +50,11 @@ async def run() -> None:
     personas = load_personas(personas_dir)
     logger.info("페르소나 %d명 로드: %s", len(personas), ", ".join(p.id for p in personas))
 
+    qdrant_url = os.environ.get("LF_QDRANT_URL", "http://localhost:6333")
+
     nc = await nats.connect(nats_url)
     redis = Redis.from_url(redis_url)
+    semantic = SemanticMemory(qdrant_url)
     try:
         mailbox = Mailbox(redis)
         phases = ActorPhases(
@@ -60,6 +64,7 @@ async def run() -> None:
             mailbox=mailbox,
             emotion=EmotionAdapter(redis),
             relationship=RelationshipAdapter(redis),
+            semantic=semantic,
         )
         # tick 루프와 메일박스 라우터(LF_PLAYER → Redis)가 나란히 돈다 (ADR-012)
         await asyncio.gather(
@@ -67,6 +72,7 @@ async def run() -> None:
             run_mailbox_router(nc, mailbox, env, stop=stop),
         )
     finally:
+        await semantic.close()
         await redis.aclose()
         await nc.drain()
 

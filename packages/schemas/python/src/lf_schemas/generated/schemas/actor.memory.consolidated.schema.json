@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/actor.memory.consolidated.schema.json",
+  "title": "ActorMemoryConsolidated",
+  "description": "tick 종료 시 응고된 에피소드 기억 (ADR-008 §기억 수명주기). 이벤트 스토어가 곧 Episodic 계층의 영구 원본이다. importance ≥ 임계면 Semantic(Qdrant)에도 임베딩된다 — 망각은 Semantic에서만 일어나고 원본은 남는다.",
+  "type": "object",
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "에피소드 요약 — 템플릿 우선, 중요도 상위만 LLM (ADR-008 규칙 2)",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "importance": {
+      "type": "number",
+      "description": "0.35·감정강도 + 0.30·관계영향 + 0.20·목표관련성 + 0.15·희소성 (계수는 설정값)",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "factors": {
+      "type": "object",
+      "description": "중요도 구성요소 — 계수 튜닝(리플레이 오프라인 평가)의 재료",
+      "properties": {
+        "emotion": { "type": "number", "minimum": 0, "maximum": 1 },
+        "relationship": { "type": "number", "minimum": 0, "maximum": 1 },
+        "goal": { "type": "number", "minimum": 0, "maximum": 1 },
+        "rarity": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "required": ["emotion", "relationship", "goal", "rarity"],
+      "additionalProperties": false
+    },
+    "source_event_ids": {
+      "type": "array",
+      "description": "이 기억의 원본 사건들 — 어떤 기억이든 감사 추적 가능 (ADR-008 규칙 4)",
+      "items": { "type": "string", "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$" },
+      "minItems": 1
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z_]+$" }
+    }
+  },
+  "required": ["summary", "importance", "factors", "source_event_ids", "tags"],
+  "additionalProperties": false
+}
