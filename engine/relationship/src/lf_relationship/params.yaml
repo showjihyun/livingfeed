@@ -1,0 +1,46 @@
+# Relationship Engine 파라미터 — 단일 파일 (ADR-016 완화책: 델타 튜닝 중앙화)
+# 리플레이 기반 A/B 튜닝 대상. 코드에 수치 하드코딩 금지.
+
+# 상호작용 효과 (ADR-016 갱신 규칙 1): 사건 → 방향별 차원 델타.
+#   outgoing = 행위자(from)→대상(to) 엣지에 적용 (내가 그에게 한 일이 내 마음을 바꾼다)
+#   incoming = 대상(from)→행위자(to) 엣지에 적용 (그가 내게 한 일)
+interaction_effects:
+  # 플레이어 개입 — 액터→플레이어 엣지(incoming 시점)만 갱신한다
+  player.dm.sent:
+    incoming: { trust: 0.04, intimacy: 0.05, salience: 0.08 }
+  player.comment.posted:
+    incoming: { trust: 0.03, intimacy: 0.03, salience: 0.06 }
+  player.reaction.added:
+    incoming: { intimacy: 0.01, salience: 0.03 }
+  # 액터 행동 (actor.action.performed의 action_kind) — 양방향
+  action.speak:
+    outgoing: { intimacy: 0.03, trust: 0.02, salience: 0.05 }
+    incoming: { intimacy: 0.02, salience: 0.04 }
+  action.help:
+    outgoing: { intimacy: 0.03, respect: 0.02, salience: 0.05 }
+    incoming: { trust: 0.06, respect: 0.03, intimacy: 0.03, salience: 0.07 }
+  action.confront:
+    outgoing: { salience: 0.10, intimacy: -0.01 }
+    incoming: { trust: -0.05, resentment: 0.06, salience: 0.10 }
+
+# 감정 응고 (ADR-016 갱신 규칙 2): 대상 있는 감정 인스턴스 → 차원 반영.
+# 델타 = 계수 × 감정 강도. 반복 anger → resentment 누적이 핵심 서사 장치.
+emotion_consolidation:
+  gratitude: { trust: 0.05, intimacy: 0.03 }
+  joy: { intimacy: 0.02 }
+  anger: { resentment: 0.08, trust: -0.06 }
+  distress: { intimacy: -0.02 }
+
+# 시간 감쇠 (ADR-016 갱신 규칙 4, tick당): 상호작용 없으면 서서히 —
+# resentment는 매우 느리게 (화해 후에도 남는 앙금)
+decay_per_tick:
+  intimacy: 0.0003
+  salience: 0.0006
+  resentment: 0.000002  # 세계 1일(1440 tick)에 0.003 — 잊히지만 사라지지 않는다
+
+# 발행 임계 (ADR-016 갱신 규칙 5): 직전 발행 이후 누적 |델타| L1 합이
+# 이 값을 넘을 때만 relationship.state.changed 발행
+publish_threshold: 0.08
+
+# sparse 상한 (ADR-016 리스크): 액터당 활성 관계 — 초과 시 최저 salience 휴면화
+max_active_edges: 150

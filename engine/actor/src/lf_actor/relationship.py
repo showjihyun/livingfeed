@@ -1,0 +1,211 @@
+"""관계 상태 어댑터 — lf-relationship 순수 로직에 저장(Redis)·적재 준비를 붙인다 (ADR-016).
+
+계산은 전부 lf-relationship(결정적 순수 함수)이고, 여기는 엣지 상태의
+수화/저장, sparse 인덱스(액터당 상한), relationship.* 적재 준비만 담당한다.
+적재는 tick CONSOLIDATE에서 principal 'engine.relationship'으로 일어난다.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass
+from typing import Any
+
+from lf_relationship import (
+    RelationshipState,
+    UpdateResult,
+    apply_interaction,
+    consolidate_emotion,
+    consume_pending,
+    decay,
+    default_params,
+    transition_stage,
+)
+from redis.asyncio import Redis
+
+logger = logging.getLogger("lf.actor.relationship")
+
+PRINCIPAL = "engine.relationship"
+CHANGED_TYPE = "relationship.state.changed"
+MILESTONE_TYPE = "relationship.milestone.reached"
+
+
+@dataclass(frozen=True)
+class PendingRelEvent:
+    """CONSOLIDATE에서 적재될 관계 이벤트 — stream_key는 'from|to' (방향별 스트림)."""
+
+    from_id: str
+    to_id: str
+    type: str
+    payload: dict[str, Any]
+    causation_id: str | None
+    correlation_id: str | None
+
+
+class RelationshipAdapter:
+    def __init__(self, redis: Redis) -> None:
+        self._redis = redis
+        self._params = default_params()
+
+    @staticmethod
+    def _state_key(world_id: str, from_id: str, to_id: str) -> str:
+        return f"lf:rel:{world_id}:{from_id}:{to_id}"
+
+    @staticmethod
+    def _index_key(world_id: str, from_id: str) -> str:
+        return f"lf:relidx:{world_id}:{from_id}"
+
+    async def load(self, world_id: str, from_id: str, to_id: str) -> RelationshipState | None:
+        raw = await self._redis.get(self._state_key(world_id, from_id, to_id))
+        return None if raw is None else RelationshipState.from_json(json.loads(raw))
+
+    async def save(
+        self, world_id: str, from_id: str, to_id: str, state: RelationshipState
+    ) -> None:
+        await self._redis.set(
+            self._state_key(world_id, from_id, to_id),
+            json.dumps(state.to_json(), ensure_ascii=False),
+        )
+
+    async def counterparts(self, world_id: str, from_id: str) -> list[str]:
+        members = await self._redis.smembers(self._index_key(world_id, from_id))
+        return sorted(m.decode() if isinstance(m, bytes) else m for m in members)
+
+    async def _ensure_edge(
+        self, world_id: str, from_id: str, to_id: str, cause: dict[str, Any]
+    ) -> tuple[RelationshipState, list[PendingRelEvent]]:
+        """엣지 수화 — 없으면 생성(sparse)하고 first_met 마일스톤을 만든다 (ADR-016)."""
+        state = await self.load(world_id, from_id, to_id)
+        if state is not None:
+            return state, []
+
+        state = transition_stage(RelationshipState(), "acquaintance")
+        await self._register_edge(world_id, from_id, to_id)
+        milestone = PendingRelEvent(
+            from_id=from_id,
+            to_id=to_id,
+            type=MILESTONE_TYPE,
+            payload={
+                "from_id": from_id,
+                "to_id": to_id,
+                "milestone": "first_met",
+                "stage": state.stage,
+                "note": f"{cause.get('type', '상호작용')}(으)로 처음 연결됐다"[:200],
+            },
+            causation_id=cause.get("event_id"),
+            correlation_id=cause.get("correlation_id"),
+        )
+        return state, [milestone]
+
+    async def _register_edge(self, world_id: str, from_id: str, to_id: str) -> None:
+        index = self._index_key(world_id, from_id)
+        await self._redis.sadd(index, to_id)
+        # 활성 상한(Dunbar) — 초과 시 최저 salience부터 휴면화 (ADR-016 리스크)
+        size = await self._redis.scard(index)
+        if size <= self._params["max_active_edges"]:
+            return
+        weakest_id, weakest_salience = None, float("inf")
+        for candidate in await self.counterparts(world_id, from_id):
+            if candidate == to_id:
+                continue
+            state = await self.load(world_id, from_id, candidate)
+            salience = state.salience if state else 0.0
+            if salience < weakest_salience:
+                weakest_id, weakest_salience = candidate, salience
+        if weakest_id is not None:
+            await self._redis.srem(index, weakest_id)
+            await self._redis.delete(self._state_key(world_id, from_id, weakest_id))
+            logger.info("관계 휴면화: %s→%s (salience=%.3f)", from_id, weakest_id, weakest_salience)
+
+    def _changed_event(
+        self,
+        from_id: str,
+        to_id: str,
+        state: RelationshipState,
+        deltas: dict[str, float],
+        reason: str,
+        cause: dict[str, Any],
+    ) -> PendingRelEvent:
+        return PendingRelEvent(
+            from_id=from_id,
+            to_id=to_id,
+            type=CHANGED_TYPE,
+            payload={
+                "from_id": from_id,
+                "to_id": to_id,
+                "dimensions": {k: round(v, 4) for k, v in state.dimensions.items()},
+                "deltas": deltas,
+                "stage": state.stage,
+                "salience": round(state.salience, 4),
+                "reason": reason[:200],
+            },
+            causation_id=cause.get("event_id"),
+            correlation_id=cause.get("correlation_id"),
+        )
+
+    async def _apply(
+        self,
+        world_id: str,
+        from_id: str,
+        to_id: str,
+        result: UpdateResult,
+        cause: dict[str, Any],
+        created: list[PendingRelEvent],
+    ) -> list[PendingRelEvent]:
+        events = list(created)
+        state = result.state
+        if result.publish:
+            state, deltas = consume_pending(state)
+            events.append(
+                self._changed_event(from_id, to_id, state, deltas, result.reason, cause)
+            )
+        await self.save(world_id, from_id, to_id, state)
+        return events
+
+    async def record_interaction(
+        self,
+        world_id: str,
+        from_id: str,
+        to_id: str,
+        source_kind: str,
+        direction: str,
+        cause: dict[str, Any],
+    ) -> list[PendingRelEvent]:
+        """상호작용 효과 (갱신 규칙 1) — from→to 엣지에 방향별 델타."""
+        state, created = await self._ensure_edge(world_id, from_id, to_id, cause)
+        result = apply_interaction(state, source_kind, direction, params=self._params)
+        return await self._apply(world_id, from_id, to_id, result, cause, created)
+
+    async def record_emotion(
+        self,
+        world_id: str,
+        from_id: str,
+        to_id: str,
+        emotion_type: str,
+        intensity: float,
+        cause: dict[str, Any],
+    ) -> list[PendingRelEvent]:
+        """감정 응고 (갱신 규칙 2) — 대상 있는 감정이 관계로 스며든다."""
+        state, created = await self._ensure_edge(world_id, from_id, to_id, cause)
+        result = consolidate_emotion(state, emotion_type, intensity, params=self._params)
+        return await self._apply(world_id, from_id, to_id, result, cause, created)
+
+    async def decay_all(self, world_id: str, from_id: str) -> list[PendingRelEvent]:
+        """시간 감쇠 (갱신 규칙 4) — 식은 관계도 임계를 넘으면 세계에 기록된다."""
+        events: list[PendingRelEvent] = []
+        for to_id in await self.counterparts(world_id, from_id):
+            state = await self.load(world_id, from_id, to_id)
+            if state is None:
+                continue
+            decayed = decay(state, 1, params=self._params)
+            if decayed.pending_l1() >= self._params["publish_threshold"]:
+                cleared, deltas = consume_pending(decayed)
+                events.append(
+                    self._changed_event(
+                        from_id, to_id, cleared, deltas, "시간 감쇠 — 관계가 식었다", {}
+                    )
+                )
+                decayed = cleared
+            await self.save(world_id, from_id, to_id, decayed)
+        return events

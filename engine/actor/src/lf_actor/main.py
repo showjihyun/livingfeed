@@ -26,6 +26,7 @@ from lf_actor.mailbox import Mailbox, run_mailbox_router
 from lf_actor.memory import WorkingMemory
 from lf_actor.persona import load_personas
 from lf_actor.phases import ActorPhases
+from lf_actor.relationship import RelationshipAdapter
 
 logger = logging.getLogger("lf.actor.main")
 
@@ -58,6 +59,7 @@ async def run() -> None:
             memory=WorkingMemory(redis),
             mailbox=mailbox,
             emotion=EmotionAdapter(redis),
+            relationship=RelationshipAdapter(redis),
         )
         # tick 루프와 메일박스 라우터(LF_PLAYER → Redis)가 나란히 돈다 (ADR-012)
         await asyncio.gather(

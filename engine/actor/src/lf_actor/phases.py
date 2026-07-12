@@ -25,6 +25,8 @@ from lf_actor.emotion import SHIFT_TYPE, EmotionAdapter, PendingShift
 from lf_actor.mailbox import Mailbox
 from lf_actor.memory import WorkingMemory
 from lf_actor.persona import Persona
+from lf_actor.relationship import PRINCIPAL as REL_PRINCIPAL
+from lf_actor.relationship import PendingRelEvent, RelationshipAdapter
 from lf_actor.rules import fallback_action, fallback_reply
 
 logger = logging.getLogger("lf.actor.phases")
@@ -65,6 +67,7 @@ class ActorPhases:
         memory: WorkingMemory,
         mailbox: Mailbox | None = None,
         emotion: EmotionAdapter | None = None,
+        relationship: RelationshipAdapter | None = None,
     ) -> None:
         if not personas:
             raise ValueError("액터가 없다 — 최소 1명의 페르소나가 필요하다")
@@ -73,6 +76,7 @@ class ActorPhases:
         self._memory = memory
         self._mailbox = mailbox
         self._emotion = emotion
+        self._relationship = relationship
         # 첫 액터들은 세계의 주인공 — Hot으로 시작 (승격/강등은 관심 신호 소스가 생기면)
         self._lods: dict[str, ActorLod] = {
             actor_id: ActorLod(tier=Tier.HOT, last_interest_tick=0) for actor_id in self._personas
@@ -84,6 +88,9 @@ class ActorPhases:
         self._inbox: dict[str, list[dict[str, Any]]] = {}
         #: perceive의 감정 평가 결과 — RESOLVE에서 engine.emotion으로 적재 (ADR-015)
         self._shifts: list[PendingShift] = []
+        #: RESOLVE가 남기는 이번 tick의 응고 재료 — CONSOLIDATE의 관계 갱신 입력 (ADR-016)
+        self._resolved_actions: list[tuple[str, dict[str, Any]]] = []  # (actor_id, envelope)
+        self._resolved_shifts: list[PendingShift] = []
 
     async def schedule(self, ctx: TickContext) -> dict[str, int]:
         return scheduled_counts(self._lods, ctx.tick)
@@ -181,6 +188,7 @@ class ActorPhases:
         같은 액터의 응답과 행동은 한 번의 append(단일 스트림 CAS)로 묶인다 —
         응답이 행동보다 앞선다 (상호작용 우선, ADR-012 규칙 2).
         """
+        self._resolved_actions = []
         events_by_actor: dict[str, list[NewEvent]] = {}
         memos: dict[str, list[str]] = {}
 
@@ -245,6 +253,11 @@ class ActorPhases:
                 continue
             stored = await append(ctx.conn, PRINCIPAL, events, expected_head=head)
             emitted += len(stored)
+            for record in stored:
+                env = record.envelope
+                # 대상 있는 행동은 관계 응고의 재료다 (CONSOLIDATE, ADR-016 규칙 1)
+                if env["type"] == ACTION_TYPE and env["payload"].get("target_actor_id"):
+                    self._resolved_actions.append((actor_id, env))
             for memo in memos[actor_id]:
                 # 자기 행동/응답 → Working Memory 유입 (지각의 최소 형태, ADR-008)
                 await self._memory.add(ctx.world_id, actor_id, memo)
@@ -257,11 +270,83 @@ class ActorPhases:
 
         self._intents = []
         self._replies = []
+        self._resolved_shifts = list(self._shifts)  # 관계 응고용 스냅샷 (ADR-016 규칙 2)
         self._shifts = []
         return emitted
 
     async def consolidate(self, ctx: TickContext) -> None:
+        # 관계 응고 (ADR-016 §갱신 규칙 — CONSOLIDATE 단계)
+        if self._relationship is not None:
+            await self._consolidate_relationships(ctx)
         # 감정 감쇠·baseline 회귀 (ADR-015 §감쇠) — 기억 응고는 ADR-008 단계에서
         if self._emotion is not None:
             for persona in self._personas.values():
                 await self._emotion.decay_one_tick(ctx.world_id, persona)
+
+    async def _consolidate_relationships(self, ctx: TickContext) -> None:
+        assert self._relationship is not None
+        rel = self._relationship
+        pending: list[PendingRelEvent] = []
+
+        # 규칙 1a: 플레이어 개입 → 액터→플레이어 엣지 (그가 내게 한 일)
+        for actor_id in sorted(self._inbox):
+            for envelope in self._inbox[actor_id]:
+                pending += await rel.record_interaction(
+                    ctx.world_id, actor_id, envelope["payload"]["player_id"],
+                    envelope["type"], "incoming", cause=envelope,
+                )
+
+        # 규칙 1b: 대상 있는 액터 행동 → 양방향 엣지 (비대칭 델타)
+        for actor_id, envelope in self._resolved_actions:
+            target = envelope["payload"]["target_actor_id"]
+            kind = f"action.{envelope['payload']['action_kind']}"
+            pending += await rel.record_interaction(
+                ctx.world_id, actor_id, target, kind, "outgoing", cause=envelope
+            )
+            pending += await rel.record_interaction(
+                ctx.world_id, target, actor_id, kind, "incoming", cause=envelope
+            )
+
+        # 규칙 2: 감정 응고 — 대상 있는 감정이 관계로 스며든다
+        for shift in self._resolved_shifts:
+            instance = shift.instance
+            if instance.get("target_id"):
+                pending += await rel.record_emotion(
+                    ctx.world_id, shift.actor_id, instance["target_id"],
+                    instance["type"], float(instance["intensity"]),
+                    cause={
+                        "event_id": shift.causation_id,
+                        "correlation_id": shift.correlation_id,
+                    },
+                )
+
+        # 규칙 4: 시간 감쇠 — 전 활성 엣지
+        for actor_id in sorted(self._personas):
+            pending += await rel.decay_all(ctx.world_id, actor_id)
+
+        # 규칙 5: 임계 초과 변화만 적재 (pending은 이미 임계 통과분만 담고 있다)
+        by_edge: dict[tuple[str, str], list[PendingRelEvent]] = {}
+        for event in pending:
+            by_edge.setdefault((event.from_id, event.to_id), []).append(event)
+        for from_id, to_id in sorted(by_edge):
+            stream_key = f"{from_id}|{to_id}"
+            events = [
+                NewEvent(
+                    world_id=ctx.world_id,
+                    stream="relationship",
+                    stream_key=stream_key,
+                    type=event.type,
+                    tick=ctx.tick,
+                    actor_id=event.from_id,
+                    causation_id=event.causation_id,
+                    correlation_id=event.correlation_id,
+                    payload=event.payload,
+                )
+                for event in by_edge[(from_id, to_id)]
+            ]
+            head = await current_head(ctx.conn, ctx.world_id, "relationship", stream_key)
+            await append(ctx.conn, REL_PRINCIPAL, events, expected_head=head)
+            logger.info("관계 기록: %s→%s %d건 tick=%d", from_id, to_id, len(events), ctx.tick)
+
+        self._resolved_actions = []
+        self._resolved_shifts = []

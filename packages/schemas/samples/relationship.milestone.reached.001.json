@@ -1,0 +1,19 @@
+{
+  "event_id": "01JZK7Q3W0000000000000000P",
+  "stream": "relationship",
+  "type": "relationship.milestone.reached",
+  "schema_version": 1,
+  "world_id": "w_main",
+  "actor_id": "a_aria_kim",
+  "tick": 44,
+  "occurred_at": "2026-07-11T09:02:08Z",
+  "causation_id": "01JZK7Q3W0000000000000000G",
+  "correlation_id": "01JZK7Q3W0000000000000000G",
+  "payload": {
+    "from_id": "a_aria_kim",
+    "to_id": "p_observer_0417",
+    "milestone": "first_met",
+    "stage": "acquaintance",
+    "note": "플레이어 p_observer_0417의 DM으로 처음 연결됐다"
+  }
+}

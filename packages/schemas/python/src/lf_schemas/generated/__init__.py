@@ -7,5 +7,7 @@ from lf_schemas.generated import feed_post_published as feed_post_published
 from lf_schemas.generated import player_comment_posted as player_comment_posted
 from lf_schemas.generated import player_dm_sent as player_dm_sent
 from lf_schemas.generated import player_reaction_added as player_reaction_added
+from lf_schemas.generated import relationship_milestone_reached as relationship_milestone_reached
+from lf_schemas.generated import relationship_state_changed as relationship_state_changed
 from lf_schemas.generated import system_tick_completed as system_tick_completed
 from lf_schemas.generated import system_tick_started as system_tick_started

@@ -1,0 +1,33 @@
+{
+  "event_id": "01JZK7Q3W0000000000000000N",
+  "stream": "relationship",
+  "type": "relationship.state.changed",
+  "schema_version": 1,
+  "world_id": "w_main",
+  "actor_id": "a_aria_kim",
+  "tick": 44,
+  "occurred_at": "2026-07-11T09:02:10Z",
+  "causation_id": "01JZK7Q3W0000000000000000G",
+  "correlation_id": "01JZK7Q3W0000000000000000G",
+  "payload": {
+    "from_id": "a_aria_kim",
+    "to_id": "p_observer_0417",
+    "dimensions": {
+      "trust": 0.12,
+      "intimacy": 0.09,
+      "respect": 0.02,
+      "attraction": 0.0,
+      "resentment": 0.0
+    },
+    "deltas": {
+      "trust": 0.07,
+      "intimacy": 0.06,
+      "respect": 0.02,
+      "attraction": 0.0,
+      "resentment": 0.0
+    },
+    "stage": "acquaintance",
+    "salience": 0.14,
+    "reason": "지지 DM과 반복된 감사 — 신뢰가 자라기 시작한다"
+  }
+}

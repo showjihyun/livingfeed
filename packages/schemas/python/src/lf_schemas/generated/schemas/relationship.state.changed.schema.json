@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/relationship.state.changed.schema.json",
+  "title": "RelationshipStateChanged",
+  "description": "방향성 관계(from→to)의 유의미한 상태 변화 (ADR-016). 임계 초과 누적 변화만 발행된다 — kuzu-projector가 그래프에 반영하고, Relationship Feed의 재료가 된다. 원인은 봉투 causation_id.",
+  "type": "object",
+  "properties": {
+    "from_id": {
+      "type": "string",
+      "description": "관계의 주체 (액터)"
+    },
+    "to_id": {
+      "type": "string",
+      "description": "관계의 대상 (액터 또는 플레이어) — 비대칭: to→from은 별개 엣지다"
+    },
+    "dimensions": {
+      "type": "object",
+      "description": "현재 5차원 상태 (ADR-016 §관계 상태)",
+      "properties": {
+        "trust": { "type": "number", "minimum": -1, "maximum": 1 },
+        "intimacy": { "type": "number", "minimum": 0, "maximum": 1 },
+        "respect": { "type": "number", "minimum": -1, "maximum": 1 },
+        "attraction": { "type": "number", "minimum": 0, "maximum": 1 },
+        "resentment": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "required": ["trust", "intimacy", "respect", "attraction", "resentment"],
+      "additionalProperties": false
+    },
+    "deltas": {
+      "type": "object",
+      "description": "직전 발행 이후 누적된 변화량 (임계 판정 대상)",
+      "properties": {
+        "trust": { "type": "number" },
+        "intimacy": { "type": "number" },
+        "respect": { "type": "number" },
+        "attraction": { "type": "number" },
+        "resentment": { "type": "number" }
+      },
+      "required": ["trust", "intimacy", "respect", "attraction", "resentment"],
+      "additionalProperties": false
+    },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "stranger", "acquaintance", "friend", "close_friend",
+        "romantic", "family", "mentor", "rival", "enemy"
+      ]
+    },
+    "salience": {
+      "type": "number",
+      "description": "이 관계가 from의 삶에서 차지하는 비중 — 회상·컨텍스트 우선순위",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "reason": {
+      "type": "string",
+      "description": "사람이 읽는 변화 원인 한 줄",
+      "maxLength": 200
+    }
+  },
+  "required": ["from_id", "to_id", "dimensions", "deltas", "stage", "salience", "reason"],
+  "additionalProperties": false
+}

@@ -8,6 +8,7 @@ dependencies = [
     "lf-eventstore",
     "lf-tick",
     "lf-emotion",
+    "lf-relationship",
     # 메시징 토폴로지(DLQ subject 규칙)의 유일 구현을 재사용한다 (ADR-017 §3)
     "lf-dispatcher",
     "nats-py>=2.9",
@@ -20,6 +21,7 @@ lf-schemas = { workspace = true }
 lf-eventstore = { workspace = true }
 lf-tick = { workspace = true }
 lf-emotion = { workspace = true }
+lf-relationship = { workspace = true }
 lf-dispatcher = { workspace = true }
 lf-ai-runtime = { workspace = true }
 

@@ -446,6 +446,7 @@ dependencies = [
     { name = "lf-dispatcher" },
     { name = "lf-emotion" },
     { name = "lf-eventstore" },
+    { name = "lf-relationship" },
     { name = "lf-schemas" },
     { name = "lf-tick" },
     { name = "nats-py" },
@@ -465,6 +466,7 @@ requires-dist = [
     { name = "lf-dispatcher", editable = "services/dispatcher" },
     { name = "lf-emotion", editable = "engine/emotion" },
     { name = "lf-eventstore", editable = "packages/eventstore" },
+    { name = "lf-relationship", editable = "engine/relationship" },
     { name = "lf-schemas", editable = "packages/schemas/python" },
     { name = "lf-tick", editable = "engine/tick" },
     { name = "nats-py", specifier = ">=2.9" },
@@ -762,16 +764,24 @@ dev = [
 name = "lf-relationship"
 version = "0.1.0"
 source = { editable = "engine/relationship" }
+dependencies = [
+    { name = "pyyaml" },
+]
 
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
+    { name = "pytest-asyncio" },
 ]
 
 [package.metadata]
+requires-dist = [{ name = "pyyaml", specifier = ">=6.0" }]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8" }]
+dev = [
+    { name = "pytest", specifier = ">=8" },
+    { name = "pytest-asyncio", specifier = ">=0.25" },
+]
 
 [[package]]
 name = "lf-schemas"

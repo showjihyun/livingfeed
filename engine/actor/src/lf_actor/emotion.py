@@ -31,6 +31,9 @@ class PendingShift:
     payload: dict[str, Any]
     causation_id: str
     correlation_id: str
+    #: 이 변화를 유발한 감정 인스턴스 {type, intensity, target_id} —
+    #: 관계 응고(ADR-016 갱신 규칙 2)의 입력이 된다
+    instance: dict[str, Any]
 
 
 class EmotionAdapter:
@@ -71,6 +74,16 @@ class EmotionAdapter:
             result = appraise_interaction(state, interaction, persona.big_five)
             state = result.state
             if result.significant:
+                # 이 상호작용이 만든/강화한 인스턴스 — 대상 기준 최신 상태에서 찾는다
+                triggered = next(
+                    (
+                        e.to_json()
+                        for e in state.emotions
+                        if e.source_event == interaction["event_id"]
+                        or e.target_id == interaction["payload"].get("player_id")
+                    ),
+                    {"type": "unknown", "intensity": 0.0, "target_id": None},
+                )
                 shifts.append(
                     PendingShift(
                         actor_id=persona.id,
@@ -81,6 +94,7 @@ class EmotionAdapter:
                         },
                         causation_id=interaction["event_id"],
                         correlation_id=interaction["correlation_id"],
+                        instance=triggered,
                     )
                 )
         await self.save(world_id, persona.id, state)
