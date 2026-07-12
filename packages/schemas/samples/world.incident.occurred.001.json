@@ -1,0 +1,19 @@
+{
+  "event_id": "01JZK7Q3W0000000000000000R",
+  "stream": "world",
+  "type": "world.incident.occurred",
+  "schema_version": 1,
+  "world_id": "w_main",
+  "actor_id": null,
+  "tick": 120,
+  "occurred_at": "2026-07-11T10:00:00Z",
+  "causation_id": "01JZK7Q3W0000000000000000Q",
+  "correlation_id": "01JZK7Q3W0000000000000000R",
+  "payload": {
+    "incident_kind": "chance_encounter",
+    "description": "카페 루나의 정전 — 촛불 아래, 피하고 싶던 사람들이 같은 테이블에 앉게 됐다",
+    "location_id": "loc_cafe_luna",
+    "affected_actor_ids": ["a_aria_kim", "a_junho_park"],
+    "intensity": 0.65
+  }
+}

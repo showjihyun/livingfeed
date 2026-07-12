@@ -19,13 +19,21 @@ from lf_dispatcher.subjects import dlq_subject
 from lf_eventstore import ConcurrencyConflict, ValidationFailed, append
 from psycopg import AsyncConnection
 
-from lf_feed.compose import PRINCIPAL, build_post_event, evaluate, load_actor_names
+from lf_feed.compose import (
+    PRINCIPAL,
+    build_incident_post_event,
+    build_post_event,
+    evaluate,
+    evaluate_incident,
+    load_actor_names,
+)
 from lf_feed.config import Config
 from lf_feed.scoring import RarityTracker
 
 logger = logging.getLogger("lf.feed.composer")
 
 SOURCE_EVENT_TYPE = "actor.action.performed"
+INCIDENT_EVENT_TYPE = "world.incident.occurred"
 
 
 class FeedComposer:
@@ -40,14 +48,21 @@ class FeedComposer:
 
     async def compose_once(self, conn: AsyncConnection, envelope: dict[str, Any]) -> str | None:
         """봉투 하나를 편집한다. 반환: 승격된 post_id, 임계 미달이면 None."""
-        drama, score = evaluate(envelope, self._rarity, self._cfg.scoring)
+        if envelope["type"] == INCIDENT_EVENT_TYPE:
+            # Director boost 항이 실값(1.0)인 유일한 소스 (ADR-013/014)
+            drama, score = evaluate_incident(envelope, self._rarity, self._cfg.scoring)
+            event = build_incident_post_event(envelope, drama=drama, score=score)
+        else:
+            drama, score = evaluate(envelope, self._rarity, self._cfg.scoring)
+            event = build_post_event(
+                envelope, drama=drama, score=score, actor_names=self._names
+            )
         if score < self._cfg.scoring.threshold:
             logger.debug(
                 "임계 미달 — event_id=%s score=%.3f < %.3f",
                 envelope["event_id"], score, self._cfg.scoring.threshold,
             )
             return None
-        event = build_post_event(envelope, drama=drama, score=score, actor_names=self._names)
         await append(conn, PRINCIPAL, [event], expected_head=0)
         logger.info(
             "FeedItem 승격 — post_id=%s source=%s score=%.3f",
@@ -91,27 +106,37 @@ class FeedComposer:
     async def run(self, *, stop: asyncio.Event | None = None) -> None:
         stop = stop or asyncio.Event()
         cfg = self._cfg
-        filter_subject = f"lf.{cfg.env}.*.{SOURCE_EVENT_TYPE}"
 
         async with await AsyncConnection.connect(cfg.pg_dsn, autocommit=True) as conn:
             nc = await nats.connect(cfg.nats_url)
             try:
                 js = nc.jetstream()
-                psub = await js.pull_subscribe(
-                    filter_subject, durable=cfg.durable, stream=cfg.source_stream
-                )
+                # 편집 소스 2종: 액터 행동(LF_ACTOR) + 세계 사건(LF_WORLD, Director)
+                subs = [
+                    await js.pull_subscribe(
+                        f"lf.{cfg.env}.*.{SOURCE_EVENT_TYPE}",
+                        durable=cfg.durable, stream=cfg.source_stream,
+                    ),
+                    await js.pull_subscribe(
+                        f"lf.{cfg.env}.*.{INCIDENT_EVENT_TYPE}",
+                        durable=f"{cfg.durable}-world", stream="LF_WORLD",
+                    ),
+                ]
                 logger.info(
-                    "feed composer 대기 — filter=%s durable=%s threshold=%.2f",
-                    filter_subject, cfg.durable, cfg.scoring.threshold,
+                    "feed composer 대기 — durable=%s threshold=%.2f (소스: 행동+세계사건)",
+                    cfg.durable, cfg.scoring.threshold,
                 )
                 while not stop.is_set():
-                    try:
-                        msgs = await psub.fetch(cfg.batch_size, timeout=cfg.fetch_timeout_s)
-                    except (TimeoutError, nats.errors.TimeoutError):
-                        # nats-py fetch는 경로에 따라 asyncio.TimeoutError(=내장
-                        # TimeoutError)도 던진다 — 유휴 타임아웃은 정상 흐름이다
-                        continue
-                    for msg in msgs:
-                        await self._handle(msg, conn, js)
+                    for psub in subs:
+                        try:
+                            msgs = await psub.fetch(
+                                cfg.batch_size, timeout=cfg.fetch_timeout_s
+                            )
+                        except (TimeoutError, nats.errors.TimeoutError):
+                            # nats-py fetch는 경로에 따라 asyncio.TimeoutError(=내장
+                            # TimeoutError)도 던진다 — 유휴 타임아웃은 정상 흐름이다
+                            continue
+                        for msg in msgs:
+                            await self._handle(msg, conn, js)
             finally:
                 await nc.drain()

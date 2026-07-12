@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/world.incident.occurred.schema.json",
+  "title": "WorldIncidentOccurred",
+  "description": "환경 사건 — Director의 간접 개입 도구 inject_incident의 출력 (ADR-013). 액터를 조종하지 않는다: 사건은 환경에 놓이고, 반응은 액터의 몫이다. FeedComposer의 승격 대상 (ADR-014 '세계 뉴스').",
+  "type": "object",
+  "properties": {
+    "incident_kind": {
+      "type": "string",
+      "description": "사건 분류 (blackout, rumor_spread, chance_encounter, ...)",
+      "pattern": "^[a-z_]+$"
+    },
+    "description": {
+      "type": "string",
+      "description": "사건 서술 한 줄 — 피드 내레이션과 액터 지각의 입력",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "location_id": {
+      "type": ["string", "null"]
+    },
+    "affected_actor_ids": {
+      "type": "array",
+      "description": "사건의 영향권 액터 (지각 대상 — 강제 반응 아님)",
+      "items": { "type": "string" }
+    },
+    "intensity": {
+      "type": "number",
+      "description": "사건 강도 0..1 — 피드 drama 점수와 지각 우선순위의 입력",
+      "minimum": 0,
+      "maximum": 1
+    }
+  },
+  "required": ["incident_kind", "description", "location_id", "affected_actor_ids", "intensity"],
+  "additionalProperties": false
+}

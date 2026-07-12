@@ -77,40 +77,57 @@ async def run_mailbox_router(
     """
     stop = stop or asyncio.Event()
     js = nc.jetstream()
-    filter_subject = f"lf.{env}.*.player.>"
-    psub = await js.pull_subscribe(filter_subject, durable=DURABLE, stream=SOURCE_STREAM)
-    logger.info("메일박스 라우터 대기 — filter=%s durable=%s", filter_subject, DURABLE)
+    # 지각 소스 2종: 플레이어 개입(대상 1명) + 세계 사건(영향권 전원, ADR-013)
+    subs = [
+        await js.pull_subscribe(
+            f"lf.{env}.*.player.>", durable=DURABLE, stream=SOURCE_STREAM
+        ),
+        await js.pull_subscribe(
+            f"lf.{env}.*.world.incident.occurred",
+            durable=f"{DURABLE}-incident", stream="LF_WORLD",
+        ),
+    ]
+    logger.info("메일박스 라우터 대기 — durable=%s (플레이어+세계사건)", DURABLE)
 
-    while not stop.is_set():
+    def targets_of(envelope: dict[str, Any]) -> list[str]:
+        if envelope["type"] == "world.incident.occurred":
+            return list(envelope["payload"]["affected_actor_ids"])
+        return [envelope["payload"]["target_actor_id"]]
+
+    async def route(msg: Any) -> None:
         try:
-            msgs = await psub.fetch(batch_size, timeout=fetch_timeout_s)
-        except (TimeoutError, nats.errors.TimeoutError):
-            continue
-        for msg in msgs:
-            try:
-                envelope = json.loads(msg.data)
-                target = envelope["payload"]["target_actor_id"]
+            envelope = json.loads(msg.data)
+            for target in targets_of(envelope):
                 await mailbox.push(envelope["world_id"], target, envelope)
-            except (json.JSONDecodeError, KeyError, TypeError) as e:
-                # 라우팅 불가 독약 — DLQ로 (조용한 유실 금지, ADR-017 §4)
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            # 라우팅 불가 독약 — DLQ로 (조용한 유실 금지, ADR-017 §4)
+            subj = dlq_subject(env, msg.subject)
+            await js.publish(
+                subj, msg.data,
+                headers={"Nats-Msg-Id": f"dlq-mailbox-{msg.metadata.sequence.stream}"},
+            )
+            logger.warning("메일박스 라우팅 실패 → DLQ %s: %s", subj, e)
+            await msg.ack()
+        except Exception:
+            if msg.metadata.num_delivered >= MAX_DELIVER:
                 subj = dlq_subject(env, msg.subject)
                 await js.publish(
                     subj, msg.data,
                     headers={"Nats-Msg-Id": f"dlq-mailbox-{msg.metadata.sequence.stream}"},
                 )
-                logger.warning("메일박스 라우팅 실패 → DLQ %s: %s", subj, e)
+                logger.exception("라우팅 반복 실패 → DLQ %s", subj)
                 await msg.ack()
-            except Exception:
-                if msg.metadata.num_delivered >= MAX_DELIVER:
-                    subj = dlq_subject(env, msg.subject)
-                    await js.publish(
-                        subj, msg.data,
-                        headers={"Nats-Msg-Id": f"dlq-mailbox-{msg.metadata.sequence.stream}"},
-                    )
-                    logger.exception("라우팅 반복 실패 → DLQ %s", subj)
-                    await msg.ack()
-                else:
-                    logger.exception("라우팅 일시 오류 — 재전달 예약")
-                    await msg.nak(delay=NAK_DELAY_S)
             else:
-                await msg.ack()
+                logger.exception("라우팅 일시 오류 — 재전달 예약")
+                await msg.nak(delay=NAK_DELAY_S)
+        else:
+            await msg.ack()
+
+    while not stop.is_set():
+        for psub in subs:
+            try:
+                msgs = await psub.fetch(batch_size, timeout=fetch_timeout_s)
+            except (TimeoutError, nats.errors.TimeoutError):
+                continue
+            for msg in msgs:
+                await route(msg)

@@ -289,6 +289,28 @@ services:
       opensearch:
         condition: service_healthy
 
+  director:
+    # Director AI — 서사 관찰 + 제한된 간접 개입 (ADR-013). 세계당 1 인스턴스.
+    profiles: [full]
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: infra/compose/Dockerfile.python
+      args:
+        PACKAGE: lf-director
+        APP_MODULE: unused   # uvicorn 대상이 아니다 — command로 대체
+    command: ["python", "-m", "lf_director.main"]
+    environment:
+      LF_PG_DSN: postgresql://${POSTGRES_USER:-livingfeed}:${POSTGRES_PASSWORD:-livingfeed}@postgres:5432/${POSTGRES_DB:-livingfeed}
+      NATS_URL: nats://nats:4222
+      LF_ENV: dev
+      LF_WORLD_ID: w_main
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+
   kuzu-projector:
     # 관계 그래프 프로젝션 + graph query API (ADR-006) — Kuzu는 임베디드(볼륨에 DB 파일)
     # 재구축: docker compose run --rm kuzu-projector python -m lf_projector.main --kind kuzu --rebuild

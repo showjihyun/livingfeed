@@ -1,0 +1,48 @@
+# Director AI 파라미터 — 단일 파일 (ADR-013: Drama Score 구성요소는 설정화)
+# 리플레이 기반 오프라인 튜닝 대상. 코드에 수치 하드코딩 금지.
+
+# 관찰: 이벤트 → drama 기여도 (침체 감지의 재료)
+drama_contribution:
+  actor.action.performed:
+    base_by_kind:
+      confront: 0.8
+      help: 0.3
+      speak: 0.2
+    default: 0.05
+    target_multiplier: 1.3   # 대인 사건이 더 극적이다
+  actor.emotion.shifted:
+    intensity_weight: 0.5    # 최고 감정 강도 × 계수
+  feed.post.published:
+    drama_weight: 0.3        # 편집 통과 자체가 서사 신호다
+
+# 침체 감지: 최근 창의 tick당 drama 이동평균이 임계 미만으로 N tick 지속
+observation:
+  window_ticks: 30
+  quiet_threshold: 0.2
+  quiet_ticks_to_fire: 30
+
+# 개입 예산 (hard rule, ADR-013): 창(세계 1시간 = 60 tick)당 상한 +
+# 같은 correlation 사슬 연속 개입 금지
+budget:
+  window_ticks: 60
+  max_interventions: 2
+
+# inject_incident 라이브러리 — 같은 도구 반복의 기계감 방지를 위해 순환한다.
+# description의 {a}/{b}는 갈등 후보 쌍(그래프 tension 질의)으로 채워진다.
+incidents:
+  - kind: chance_encounter
+    description: "동네 카페의 정전 — 촛불 아래, 피하고 싶던 사람들이 같은 테이블에 앉게 됐다"
+    location_id: loc_cafe_luna
+    intensity: 0.65
+  - kind: rumor_spread
+    description: "누군가의 대화가 잘못 전해졌다 — 사무실에 출처 불명의 소문이 돌기 시작한다"
+    location_id: loc_newsroom
+    intensity: 0.55
+  - kind: deadline_crunch
+    description: "예고 없던 마감 단축 — 모두의 계획이 하루 앞으로 당겨졌다"
+    location_id: loc_newsroom
+    intensity: 0.5
+  - kind: sudden_rain
+    description: "갑작스런 폭우 — 우산 없는 사람들이 같은 처마 밑으로 모여들었다"
+    location_id: null
+    intensity: 0.4

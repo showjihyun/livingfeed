@@ -543,19 +543,37 @@ name = "lf-director"
 version = "0.1.0"
 source = { editable = "engine/director" }
 dependencies = [
+    { name = "lf-dispatcher" },
+    { name = "lf-eventstore" },
+    { name = "lf-projector" },
     { name = "lf-schemas" },
+    { name = "nats-py" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "pyyaml" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
+    { name = "pytest-asyncio" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "lf-schemas", editable = "packages/schemas/python" }]
+requires-dist = [
+    { name = "lf-dispatcher", editable = "services/dispatcher" },
+    { name = "lf-eventstore", editable = "packages/eventstore" },
+    { name = "lf-projector", editable = "services/projector" },
+    { name = "lf-schemas", editable = "packages/schemas/python" },
+    { name = "nats-py", specifier = ">=2.9" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
+    { name = "pyyaml", specifier = ">=6.0" },
+]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8" }]
+dev = [
+    { name = "pytest", specifier = ">=8" },
+    { name = "pytest-asyncio", specifier = ">=0.25" },
+]
 
 [[package]]
 name = "lf-dispatcher"

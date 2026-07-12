@@ -5,13 +5,24 @@ description = "Director AI — 서사 관찰 + 제한된 간접 개입 (ADR-013)
 requires-python = ">=3.12"
 dependencies = [
     "lf-schemas",
+    "lf-eventstore",
+    # 메시징 토폴로지(subject/DLQ 규칙)의 유일 구현을 재사용한다 (ADR-017 §3)
+    "lf-dispatcher",
+    # graph query API 클라이언트 — 갈등 후보(tension) 질의 (ADR-006)
+    "lf-projector",
+    "nats-py>=2.9",
+    "psycopg[binary]>=3.2",
+    "pyyaml>=6.0",
 ]
 
 [tool.uv.sources]
 lf-schemas = { workspace = true }
+lf-eventstore = { workspace = true }
+lf-dispatcher = { workspace = true }
+lf-projector = { workspace = true }
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "pytest-asyncio>=0.25"]
 
 [build-system]
 requires = ["hatchling"]

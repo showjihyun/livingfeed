@@ -54,7 +54,8 @@ class FeedPostPublished(BaseModel):
         ..., description="본문 생성 방식 — 비용 게이트 감사용"
     )
     participants: list[str] = Field(
-        ..., description="참여 액터 전원 (작성 주체는 봉투 actor_id)", min_length=1
+        ...,
+        description="참여 액터 전원 (작성 주체는 봉투 actor_id) — 세계 사건은 비어 있을 수 있다",
     )
     community_id: str | None = Field(
         ..., description="Community 가시성일 때의 대상 커뮤니티"

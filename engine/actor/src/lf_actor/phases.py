@@ -49,6 +49,8 @@ def describe_interaction(envelope: dict[str, Any]) -> str:
         return f"플레이어 {p['player_id']}가 내 글에 댓글을 남겼다: \"{p['text']}\""
     if kind == "player.reaction.added":
         return f"플레이어 {p['player_id']}가 내 글에 좋아요를 눌렀다"
+    if kind == "world.incident.occurred":
+        return f"세계 사건: {p['description']}"
     return f"플레이어 상호작용: {kind}"
 
 
@@ -288,9 +290,12 @@ class ActorPhases:
         rel = self._relationship
         pending: list[PendingRelEvent] = []
 
-        # 규칙 1a: 플레이어 개입 → 액터→플레이어 엣지 (그가 내게 한 일)
+        # 규칙 1a: 플레이어 개입 → 액터→플레이어 엣지 (그가 내게 한 일).
+        # 세계 사건 지각은 관계 갱신이 아니다 — 간접 효과(소문)는 후속 (ADR-016 규칙 3)
         for actor_id in sorted(self._inbox):
             for envelope in self._inbox[actor_id]:
+                if not envelope["type"].startswith("player."):
+                    continue
                 pending += await rel.record_interaction(
                     ctx.world_id, actor_id, envelope["payload"]["player_id"],
                     envelope["type"], "incoming", cause=envelope,

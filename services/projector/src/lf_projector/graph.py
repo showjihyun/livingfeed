@@ -69,6 +69,13 @@ _PAIR = (
     "RETURN r.trust, r.intimacy, r.salience"
 )
 
+_TENSION = (
+    "MATCH (a:Actor)-[r:RELATES]->(b:Actor) "
+    "WHERE r.resentment >= $min_resentment "
+    "RETURN a.id, b.id, r.resentment, r.trust "
+    "ORDER BY r.resentment DESC LIMIT $limit"
+)
+
 
 class RelGraph:
     """세계별 Kuzu DB 핸들 캐시 + 정형 연산."""
@@ -184,6 +191,22 @@ class RelGraph:
                 best = max(best, strength(trust, intimacy, salience))
             scores[to_id] = best
         return scores
+
+    def tension_pairs(
+        self, world_id: str, *, min_resentment: float = 0.1, limit: int = 5
+    ) -> list[list[Any]]:
+        """갈등 후보 — resentment 상위 방향 엣지 (Director의 개입 대상 질의, ADR-013).
+
+        반환: [[from_id, to_id, resentment, trust], ...] resentment 내림차순.
+        """
+        result = self._conn(world_id).execute(
+            _TENSION, {"min_resentment": min_resentment, "limit": limit}
+        )
+        pairs: list[list[Any]] = []
+        while result.has_next():
+            from_id, to_id, resentment, trust = result.get_next()
+            pairs.append([from_id, to_id, round(resentment, 4), round(trust, 4)])
+        return pairs
 
     def drop_world(self, world_id: str) -> None:
         """재구축용 파괴 (ADR-003 계약 3). Windows 파일 락 대비 짧은 재시도."""

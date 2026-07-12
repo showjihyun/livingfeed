@@ -37,6 +37,16 @@ _TITLES: dict[str, tuple[str, str]] = {
 }
 _TITLE_DEFAULT = ("{author}의 새로운 움직임", "{author}의 새로운 움직임")
 
+#: 세계 사건(incident_kind)별 피드 제목 — Director 개입의 얼굴 (ADR-013/014)
+_INCIDENT_TITLES: dict[str, str] = {
+    "chance_encounter": "세계 뉴스 — 우연이 겹친 밤",
+    "rumor_spread": "세계 뉴스 — 소문이 돌기 시작했다",
+    "deadline_crunch": "세계 뉴스 — 모두의 마감이 당겨졌다",
+    "sudden_rain": "세계 뉴스 — 갑작스런 폭우",
+    "blackout": "세계 뉴스 — 도시가 어두워졌다",
+}
+_INCIDENT_TITLE_DEFAULT = "세계 뉴스 — 무슨 일이 일어났다"
+
 
 def derive_post_id(source_event_id: str) -> str:
     """원본 event_id → 결정적 post ULID (타임스탬프 승계 + 해시 난수부)."""
@@ -128,3 +138,51 @@ def evaluate(
     score = worthiness(drama, 0.0, rarity.rarity(kind), 0.0, cfg)
     rarity.observe(kind)
     return drama, score
+
+
+def evaluate_incident(
+    envelope: dict[str, Any], rarity: RarityTracker, cfg: ScoringConfig
+) -> tuple[float, float]:
+    """세계 사건의 (drama, worthiness) — Director boost 항이 처음으로 실값이 된다.
+
+    drama = 사건 강도, boost = 1.0 (Director가 놓은 사건이 곧 부스트 신호, ADR-014).
+    """
+    payload = envelope["payload"]
+    kind = payload["incident_kind"]
+    drama = min(1.0, max(0.0, float(payload["intensity"])))
+    score = worthiness(drama, 0.0, rarity.rarity(kind), 1.0, cfg)
+    rarity.observe(kind)
+    return drama, score
+
+
+def build_incident_post_event(
+    envelope: dict[str, Any], *, drama: float, score: float
+) -> NewEvent:
+    """world.incident.occurred → feed.post.published (세계 뉴스 카드, ADR-014)."""
+    payload = envelope["payload"]
+    post_id = derive_post_id(envelope["event_id"])
+    return NewEvent(
+        world_id=envelope["world_id"],
+        stream="feed",
+        stream_key=post_id,
+        type=FEED_POST_TYPE,
+        tick=envelope["tick"],
+        actor_id=None,  # 세계 사건 — 주체 액터가 없다
+        causation_id=envelope["event_id"],
+        correlation_id=envelope["correlation_id"],  # Director가 시작한 사슬을 잇는다
+        event_id=post_id,
+        payload={
+            "visibility": "world",
+            "title": _INCIDENT_TITLES.get(payload["incident_kind"], _INCIDENT_TITLE_DEFAULT),
+            "body": payload["description"][:2000],
+            "narration_kind": "template",
+            "participants": payload["affected_actor_ids"],
+            "community_id": None,
+            "location_id": payload.get("location_id"),
+            "drama_score": round(drama, 4),
+            "worthiness": round(score, 4),
+            "source_event_type": envelope["type"],
+            "tags": [payload["incident_kind"]],
+            "media": [],
+        },
+    )

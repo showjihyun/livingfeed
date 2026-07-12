@@ -47,8 +47,18 @@ async def serve_graph_api(
                         world_id, request["from_id"], list(request["to_ids"])
                     )
                 }
+            elif op == "tension_pairs":
+                output = {
+                    "pairs": graph.tension_pairs(
+                        world_id,
+                        min_resentment=float(request.get("min_resentment", 0.1)),
+                        limit=int(request.get("limit", 5)),
+                    )
+                }
             else:
-                raise ValueError(f"알 수 없는 op: {op!r} (지원: player_graph, proximity)")
+                raise ValueError(
+                    f"알 수 없는 op: {op!r} (지원: player_graph, proximity, tension_pairs)"
+                )
             response = {"ok": True, "output": output}
         except Exception as e:  # 명시적 오류 응답 — 조용한 유실 금지
             logger.exception("graph query 실패")
@@ -102,3 +112,14 @@ class GraphQueryClient:
         if output is None:
             return {}
         return {k: float(v) for k, v in output.get("scores", {}).items()}
+
+    async def tension_pairs(
+        self, world_id: str, *, min_resentment: float = 0.1, limit: int = 5
+    ) -> list[list[Any]]:
+        output = await self._request(
+            {
+                "op": "tension_pairs", "world_id": world_id,
+                "min_resentment": min_resentment, "limit": limit,
+            }
+        )
+        return list(output.get("pairs", [])) if output else []

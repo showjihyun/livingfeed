@@ -26,11 +26,9 @@ export interface FeedPostPublished {
    */
   narration_kind: "template" | "llm";
   /**
-   * 참여 액터 전원 (작성 주체는 봉투 actor_id)
-   *
-   * @minItems 1
+   * 참여 액터 전원 (작성 주체는 봉투 actor_id) — 세계 사건은 비어 있을 수 있다
    */
-  participants: [string, ...string[]];
+  participants: string[];
   /**
    * Community 가시성일 때의 대상 커뮤니티
    */
