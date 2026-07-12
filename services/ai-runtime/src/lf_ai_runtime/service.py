@@ -44,9 +44,21 @@ _COMPAT_SPECS: dict[str, tuple[tuple[str, ...], str | None, str, int]] = {
 }
 
 
+#: 로컬 서버(Ollama 기본 포트) — LM Studio는 LF_LOCAL_BASE_URL=http://localhost:1234/v1
+LOCAL_BASE_URL_DEFAULT = "http://localhost:11434/v1"
+
+
 def make_providers(cfg: Config) -> dict[str, Provider]:
-    """키가 존재하는 프로바이더를 전부 등록한다. rule은 항상 사용 가능."""
+    """키가 존재하는 프로바이더를 전부 등록한다. rule/local은 항상 사용 가능."""
     providers: dict[str, Provider] = {"rule": RuleBasedProvider()}
+    # local: 키가 필요 없다 (OpenAI SDK가 빈 키를 거부해 자리표시자 사용).
+    # 서버 미기동이면 호출 시점에 명시적 연결 오류 → 액터는 규칙 폴백 (ADR-012)
+    providers["local"] = OpenAICompatProvider(
+        "local",
+        api_key=os.environ.get("LF_LOCAL_API_KEY", "local"),
+        base_url=os.environ.get("LF_LOCAL_BASE_URL", LOCAL_BASE_URL_DEFAULT),
+        max_tokens=1024,
+    )
     if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
         providers["anthropic"] = AnthropicProvider()
     for name, (key_envs, base_url, token_param, max_tokens) in _COMPAT_SPECS.items():

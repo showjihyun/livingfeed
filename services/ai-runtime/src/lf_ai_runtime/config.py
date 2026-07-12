@@ -26,6 +26,10 @@ class Config:
     def from_env(cls) -> Config:
         provider = os.environ.get("LF_AI_PROVIDER", "rule")
         routes = build_default_routes(provider)
+        # 로컬 모델 일괄 교체 (전 티어 단일 모델) — 예: LF_LOCAL_MODEL=exaone3.5:7.8b
+        local_model = os.environ.get("LF_LOCAL_MODEL")
+        if local_model and provider == "local":
+            routes = {key: local_model for key in routes}
         # 재정의 형식: {"decide_action/hot": "gemini:gemini-2.5-pro", ...}
         raw = os.environ.get("LF_MODEL_ROUTES")
         if raw:

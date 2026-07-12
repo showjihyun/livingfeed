@@ -43,7 +43,15 @@ DEFAULT_TIER_MODELS: dict[str, dict[str, str]] = {
     "gemini": {"hot": "gemini-2.5-pro", "warm": "gemini-2.5-flash", "system": "gemini-2.5-flash"},
     "deepseek": {"hot": "deepseek-chat", "warm": "deepseek-chat", "system": "deepseek-chat"},
     "glm": {"hot": "glm-4.6", "warm": "glm-4-flash", "system": "glm-4-flash"},
+    # 로컬(Ollama/LM Studio): 12GB VRAM은 상주 모델 1개가 현실적 —
+    # 티어를 나누면 모델 스왑(언로드/로드)이 tick 예산을 잡아먹는다. 전 티어 단일 모델.
+    "local": {"hot": "qwen2.5:14b", "warm": "qwen2.5:14b", "system": "qwen2.5:14b"},
 }
+
+
+#: 라우트 프리픽스로 인정되는 프로바이더 이름 — 모델명 자체의 콜론(예: Ollama의
+#: "qwen2.5:14b")과 구분하기 위해, 알려진 이름일 때만 프리픽스로 해석한다.
+KNOWN_PROVIDERS = frozenset({"rule", "local", "anthropic", "openai", "gemini", "deepseek", "glm"})
 
 
 def build_default_routes(provider: str) -> dict[tuple[str, str], str]:
@@ -94,7 +102,9 @@ class AiRuntime:
             return None
         if ":" in route:
             provider_name, _, model = route.partition(":")
-            return provider_name, model
+            # 모델명 자체의 콜론(qwen2.5:14b 등)과 구분 — 알려진 프로바이더만 프리픽스
+            if provider_name in KNOWN_PROVIDERS:
+                return provider_name, model
         return self._default, route
 
     async def infer(self, request: InferenceRequest) -> InferenceResponse:

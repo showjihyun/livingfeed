@@ -195,15 +195,20 @@ services:
       NATS_URL: nats://nats:4222
       LF_ENV: dev
       # 기본은 규칙 프로바이더 — LLM 사용 시 LF_AI_PROVIDER + 해당 API 키 (.env)
-      # 지원: rule | anthropic | openai | gemini | deepseek | glm (services/ai-runtime/README.md)
+      # 지원: rule | local | anthropic | openai | gemini | deepseek | glm (services/ai-runtime/README.md)
       LF_AI_PROVIDER: ${LF_AI_PROVIDER:-rule}
       LF_MODEL_ROUTES: ${LF_MODEL_ROUTES:-}
+      # local: 호스트에서 도는 Ollama/LM Studio — 컨테이너에서는 host.docker.internal 경유
+      LF_LOCAL_BASE_URL: ${LF_LOCAL_BASE_URL:-http://host.docker.internal:11434/v1}
+      LF_LOCAL_MODEL: ${LF_LOCAL_MODEL:-}
       LF_OPENAI_REASONING_EFFORT: ${LF_OPENAI_REASONING_EFFORT:-low}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       GLM_API_KEY: ${GLM_API_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # Linux에서도 호스트 Ollama 접근 가능하게
     depends_on:
       nats:
         condition: service_healthy

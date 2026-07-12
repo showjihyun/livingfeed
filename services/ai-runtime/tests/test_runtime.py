@@ -68,6 +68,30 @@ async def test_provider_prefixed_route_dispatches_to_named_provider():
     assert response.model == "whatever-model"
 
 
+async def test_colon_in_model_name_is_not_a_provider_prefix():
+    """Ollama식 모델명(qwen2.5:14b)의 콜론은 프리픽스가 아니다."""
+    runtime = AiRuntime(
+        providers={"rule": RuleBasedProvider()},
+        default_provider="rule",
+        routes={("decide_action", "hot"): "qwen2.5:14b"},
+    )
+    response = await runtime.infer(request())
+    assert response.ok
+    assert response.model == "qwen2.5:14b"  # 통째로 모델명, 기본 프로바이더 소속
+
+
+async def test_prefixed_local_model_with_tag():
+    """"local:qwen2.5:14b" — 첫 콜론만 구분자, 나머지는 모델명."""
+    runtime = AiRuntime(
+        providers={"rule": RuleBasedProvider(), "local": RuleBasedProvider()},
+        default_provider="rule",
+        routes={("decide_action", "hot"): "local:qwen2.5:14b"},
+    )
+    response = await runtime.infer(request())
+    assert response.ok
+    assert response.model == "qwen2.5:14b"
+
+
 def test_default_routes_per_provider():
     assert build_default_routes("openai")[("decide_action", "hot")] == "gpt-5"
     assert build_default_routes("deepseek")[("decide_action", "warm")] == "deepseek-chat"
@@ -75,8 +99,31 @@ def test_default_routes_per_provider():
     assert build_default_routes("gemini")[("summarize", "system")] == "gemini-2.5-flash"
     # anthropic의 reflect 특례는 유지 (ADR-018 표)
     assert build_default_routes("anthropic")[("reflect", "warm")] == "claude-sonnet-5"
+    # local은 전 티어 단일 모델 (12GB VRAM = 상주 1개, 스왑 방지)
+    local = build_default_routes("local")
+    assert len({model for model in local.values()}) == 1
     with pytest.raises(ValueError):
         build_default_routes("unknown")
+
+
+def test_local_provider_registered_without_key(monkeypatch):
+    from lf_ai_runtime.config import Config
+    from lf_ai_runtime.service import make_providers
+
+    for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    providers = make_providers(Config(nats_url="", env="t", provider="local"))
+    assert "local" in providers and "rule" in providers  # 키 없이도 항상 등록
+    assert "openai" not in providers
+
+
+def test_local_model_env_replaces_all_tiers(monkeypatch):
+    from lf_ai_runtime.config import Config
+
+    monkeypatch.setenv("LF_AI_PROVIDER", "local")
+    monkeypatch.setenv("LF_LOCAL_MODEL", "exaone3.5:7.8b")
+    cfg = Config.from_env()
+    assert set(cfg.routes.values()) == {"exaone3.5:7.8b"}
 
 
 def test_extract_json_object_tolerates_fences_and_prose():
