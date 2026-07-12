@@ -84,7 +84,7 @@ async def test_persistent_violation_returns_explicit_error():
     assert "스키마 위반" in response.error  # 조용한 성공 위장 금지 (ADR-018 §4)
 
 
-def test_sanitize_schema_strips_unsupported_constraints():
+def test_sanitize_schema_meets_structured_output_requirements():
     sanitized = _sanitize_schema(ACTION_SCHEMA)
 
     def has_key(node, key) -> bool:
@@ -97,3 +97,23 @@ def test_sanitize_schema_strips_unsupported_constraints():
     assert has_key(ACTION_SCHEMA, "maxLength")  # 원본엔 있고
     assert not has_key(sanitized, "maxLength")  # 전송본엔 없다
     assert has_key(sanitized, "required")  # 구조 제약은 유지
+
+    def check_objects(node) -> None:
+        """구조화 출력 필수 조건: 모든 object에 additionalProperties=false, type 유니언 금지."""
+        if isinstance(node, dict):
+            assert not isinstance(node.get("type"), list), "type 유니언은 anyOf로 변환돼야 한다"
+            if node.get("type") == "object" or "properties" in node:
+                assert node.get("additionalProperties") is False
+            for value in node.values():
+                check_objects(value)
+        elif isinstance(node, list):
+            for value in node:
+                check_objects(value)
+
+    check_objects(sanitized)
+    # 원본의 자유형 params({"type": "object"})와 nullable 유니언이 실제로 변환됐다
+    assert sanitized["properties"]["params"]["additionalProperties"] is False
+    assert sanitized["properties"]["decision_trace"]["additionalProperties"] is False
+    assert {"type": "null"} in sanitized["properties"]["target_actor_id"]["anyOf"]
+    # 원본은 변형되지 않았다 (순수 함수)
+    assert ACTION_SCHEMA["properties"]["params"].get("additionalProperties") is None

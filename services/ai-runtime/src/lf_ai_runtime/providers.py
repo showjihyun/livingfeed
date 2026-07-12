@@ -70,18 +70,34 @@ class RuleBasedProvider:
         }
 
 
-def _sanitize_schema(schema: Any) -> Any:
-    """구조화 출력이 지원하지 않는 제약을 제거한다 (응답 검증은 원본 스키마로 별도 수행).
-
-    미지원: minLength/maxLength/pattern/format, minimum/maximum 등 수치 제약.
-    """
-    unsupported = {
+#: 구조화 출력이 지원하지 않는 키워드 — 전송본에서 제거 (응답 검증은 원본 스키마로 별도 수행)
+_UNSUPPORTED_KEYWORDS = frozenset(
+    {
         "minLength", "maxLength", "pattern", "format",
         "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
         "$schema", "$id",
     }
+)
+
+
+def _sanitize_schema(schema: Any) -> Any:
+    """이벤트 payload 스키마를 구조화 출력 요구사항에 맞게 변환한다.
+
+    - 미지원 제약 키워드 제거 (수치·문자열 제약 등)
+    - 모든 object에 additionalProperties: false 강제 (구조화 출력 필수 조건 —
+      자유형 object(예: params)는 빈 객체로 좁혀진다; 원본 스키마 검증은 통과)
+    - "type": [A, B] 유니언을 anyOf로 변환 (예: ["string", "null"])
+    """
     if isinstance(schema, dict):
-        return {k: _sanitize_schema(v) for k, v in schema.items() if k not in unsupported}
+        out = {k: _sanitize_schema(v) for k, v in schema.items() if k not in _UNSUPPORTED_KEYWORDS}
+        type_value = out.get("type")
+        if isinstance(type_value, list):
+            rest = {k: v for k, v in out.items() if k != "type"}
+            return {**rest, "anyOf": [{"type": t} for t in type_value]}
+        if type_value == "object" or "properties" in out:
+            out.setdefault("properties", {})
+            out["additionalProperties"] = False
+        return out
     if isinstance(schema, list):
         return [_sanitize_schema(v) for v in schema]
     return schema
