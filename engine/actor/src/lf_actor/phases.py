@@ -30,6 +30,9 @@ from lf_actor.context import WorldContext, build
 from lf_actor.conversation import conversation_turns
 from lf_actor.emotion import PRINCIPAL as EMOTION_PRINCIPAL
 from lf_actor.emotion import SHIFT_TYPE, EmotionAdapter, PendingShift
+from lf_actor.goal import ADVANCED_TYPE as GOAL_TYPE
+from lf_actor.goal import PRINCIPAL as GOAL_PRINCIPAL
+from lf_actor.goal import GoalAdapter, PendingGoalEvent
 from lf_actor.mailbox import Mailbox
 from lf_actor.memory import WorkingMemory
 from lf_actor.persona import Persona
@@ -73,6 +76,7 @@ class ActorPhases:
         emotion: EmotionAdapter | None = None,
         relationship: RelationshipAdapter | None = None,
         semantic: SemanticMemory | None = None,
+        goal: GoalAdapter | None = None,
         importance_weights: ImportanceWeights | None = None,
         belief_ledger: BeliefLedger | None = None,
         reflection_interval: int = 30,
@@ -87,6 +91,7 @@ class ActorPhases:
         self._emotion = emotion
         self._relationship = relationship
         self._semantic = semantic
+        self._goal = goal
         self._weights = importance_weights or ImportanceWeights()
         self._ledger = belief_ledger
         self._reflection_interval = max(1, reflection_interval)
@@ -105,7 +110,8 @@ class ActorPhases:
         #: perceive의 감정 평가 결과 — RESOLVE에서 engine.emotion으로 적재 (ADR-015)
         self._shifts: list[PendingShift] = []
         #: RESOLVE가 남기는 이번 tick의 응고 재료 — CONSOLIDATE의 관계·기억 입력 (ADR-008/016)
-        self._resolved_actions: list[tuple[str, dict[str, Any]]] = []  # (actor_id, envelope)
+        self._resolved_actions: list[tuple[str, dict[str, Any]]] = []  # 대상 있는 행동 (관계용)
+        self._resolved_action_all: list[tuple[str, dict[str, Any]]] = []  # 전 행동 (목표용)
         self._resolved_shifts: list[PendingShift] = []
         self._resolved_replies: list[tuple[str, dict[str, Any], str]] = []
 
@@ -177,6 +183,12 @@ class ActorPhases:
                 self._shifts.extend(shifts)
                 # 현재 감정이 다음 결정의 컨텍스트가 된다 (ADR-015 §행동 연결)
                 await self._memory.add(ctx.world_id, actor_id, mood_line)
+            # 지지·관심은 소속 욕구를 채운다 (ADR-012 need 갱신)
+            if self._goal is not None:
+                for envelope in items:
+                    await self._goal.record_interaction(
+                        ctx.world_id, self._personas[actor_id], envelope["type"]
+                    )
             logger.info("지각: %s 에게 플레이어 개입 %d건", actor_id, len(items))
 
     async def decide(self, ctx: TickContext) -> dict[str, int]:
@@ -191,6 +203,9 @@ class ActorPhases:
             for actor_id in due[tier]:
                 persona = self._personas[actor_id]
                 working = await self._memory.recent(ctx.world_id, actor_id)
+                # 현재 욕구·목표를 결정 앞에 세운다 — 액터가 자기 목표를 좇게 (ADR-012)
+                if self._goal is not None:
+                    working = [await self._goal.summary(ctx.world_id, persona), *working]
                 episodes = await self._recall(ctx.world_id, actor_id, working)
                 bundle = build(persona, working, world, episodes=episodes)
                 payload = await self._ai.decide_action(
@@ -261,6 +276,7 @@ class ActorPhases:
         응답이 행동보다 앞선다 (상호작용 우선, ADR-012 규칙 2).
         """
         self._resolved_actions = []
+        self._resolved_action_all = []
         events_by_actor: dict[str, list[NewEvent]] = {}
         memos: dict[str, list[str]] = {}
 
@@ -327,9 +343,11 @@ class ActorPhases:
             emitted += len(stored)
             for record in stored:
                 env = record.envelope
-                # 대상 있는 행동은 관계 응고의 재료다 (CONSOLIDATE, ADR-016 규칙 1)
-                if env["type"] == ACTION_TYPE and env["payload"].get("target_actor_id"):
-                    self._resolved_actions.append((actor_id, env))
+                if env["type"] == ACTION_TYPE:
+                    self._resolved_action_all.append((actor_id, env))  # 목표 응고용 (전 행동)
+                    # 대상 있는 행동은 관계 응고의 재료다 (CONSOLIDATE, ADR-016 규칙 1)
+                    if env["payload"].get("target_actor_id"):
+                        self._resolved_actions.append((actor_id, env))
             for memo in memos[actor_id]:
                 # 자기 행동/응답 → Working Memory 유입 (지각의 최소 형태, ADR-008)
                 await self._memory.add(ctx.world_id, actor_id, memo)
@@ -352,8 +370,10 @@ class ActorPhases:
         rel_counts: dict[str, int] = {}
         if self._relationship is not None:
             rel_counts = await self._consolidate_relationships(ctx)
+        # 목표 응고 — 행동이 욕구를 채우고 목표를 진행시킨다 (ADR-012 need/goal)
+        goal_relevance, goal_actions = await self._consolidate_goals(ctx)
         # 기억 응고 — 이번 tick의 재료가 에피소드로 접힌다 (ADR-008)
-        await self._consolidate_memories(ctx, rel_counts)
+        await self._consolidate_memories(ctx, rel_counts, goal_relevance, goal_actions)
         # reflection — 주기적으로 상태의 패턴이 신념이 된다 (ADR-008)
         if ctx.tick > 0 and ctx.tick % self._reflection_interval == 0:
             await self._reflect(ctx)
@@ -361,9 +381,56 @@ class ActorPhases:
         if self._emotion is not None:
             for persona in self._personas.values():
                 await self._emotion.decay_one_tick(ctx.world_id, persona)
+        # 욕구 감쇠 — 만족은 되돌아온다 (ADR-012)
+        if self._goal is not None:
+            for persona in self._personas.values():
+                await self._goal.decay_one_tick(ctx.world_id, persona)
         self._resolved_actions = []
+        self._resolved_action_all = []
         self._resolved_shifts = []
         self._resolved_replies = []
+
+    async def _consolidate_goals(
+        self, ctx: TickContext
+    ) -> tuple[dict[str, float], dict[str, dict[str, Any]]]:
+        """행동 → 욕구·목표 갱신. 반환: (액터별 congruence, 목표 진행시킨 행동 봉투).
+
+        congruence는 기억 중요도의 goal 항이 되고, 진행이 임계를 넘긴 목표는
+        actor.goal.advanced로 적재되며 그 행동은 에피소드 재료가 된다 (대상 없어도).
+        """
+        if self._goal is None:
+            return {}, {}
+        relevance: dict[str, float] = {}
+        advanced_actions: dict[str, dict[str, Any]] = {}
+        by_actor: dict[str, list[PendingGoalEvent]] = {}
+        for actor_id, envelope in self._resolved_action_all:
+            congruence, events = await self._goal.record_action(
+                ctx.world_id, self._personas[actor_id], envelope
+            )
+            relevance[actor_id] = max(relevance.get(actor_id, 0.0), congruence)
+            if events:
+                advanced_actions[actor_id] = envelope
+                by_actor.setdefault(actor_id, []).extend(events)
+
+        for actor_id in sorted(by_actor):
+            head = await current_head(ctx.conn, ctx.world_id, "actor", actor_id)
+            events = [
+                NewEvent(
+                    world_id=ctx.world_id,
+                    stream="actor",
+                    stream_key=actor_id,
+                    type=GOAL_TYPE,
+                    tick=ctx.tick,
+                    actor_id=actor_id,
+                    causation_id=e.causation_id,
+                    correlation_id=e.correlation_id,
+                    payload=e.payload,
+                )
+                for e in by_actor[actor_id]
+            ]
+            await append(ctx.conn, GOAL_PRINCIPAL, events, expected_head=head)
+            logger.info("목표 진행 적재: %s %d건 tick=%d", actor_id, len(events), ctx.tick)
+        return relevance, advanced_actions
 
     async def _reflect(self, ctx: TickContext) -> None:
         """상태 패턴 → 신념 (규칙 기반 MVP — LLM reflection은 후속, ADR-008)."""
@@ -424,8 +491,16 @@ class ActorPhases:
             actor_id, belief.kind, belief.about_id, belief.confidence, ctx.tick,
         )
 
-    async def _consolidate_memories(self, ctx: TickContext, rel_counts: dict[str, int]) -> None:
+    async def _consolidate_memories(
+        self,
+        ctx: TickContext,
+        rel_counts: dict[str, int],
+        goal_relevance: dict[str, float],
+        goal_actions: dict[str, dict[str, Any]],
+    ) -> None:
         actions_by_actor = {actor_id: env for actor_id, env in self._resolved_actions}
+        # 목표를 진행시킨 행동은 대상이 없어도 기억할 일이다 ("사이드 프로젝트를 진행했다")
+        actions_by_actor.update(goal_actions)
         peaks: dict[str, float] = {}
         for shift in self._resolved_shifts:
             intensity = float(shift.instance.get("intensity", 0.0))
@@ -440,6 +515,7 @@ class ActorPhases:
                 action_envelope=actions_by_actor.get(actor_id),
                 emotion_peak=peaks.get(actor_id, 0.0),
                 relationship_events=rel_counts.get(actor_id, 0),
+                goal_relevance=goal_relevance.get(actor_id, 0.0),
             )
             episode = build_episode(materials, weights=self._weights)
             if episode is None:

@@ -1,0 +1,21 @@
+# Goal Engine 파라미터 (ADR-012) — 리플레이 재현 A/B 튜닝의 단일 원천.
+
+# needs_bias·need가 없을 때의 기본 관심도
+default_bias: 0.5
+
+needs:
+  # 초기 만족도 = needs_bias · initial_fill (반쯤 채워진 채 시작 — 여지가 있다)
+  initial_fill: 0.6
+  # 정렬된 행동 1회가 그 욕구를 채우는 양
+  satisfy_per_action: 0.18
+  # 플레이어 상호작용(지지·관심)이 채우는 양
+  satisfy_per_interaction: 0.12
+  # tick당 만족도 감쇠 (욕구가 되돌아온다) — 성실성 높으면 덜 흔들린다는 후속
+  deplete_per_tick: 0.03
+
+goals:
+  # 정렬된 행동 1회의 기본 진행량 (목표 우선순위로 스케일)
+  progress_step: 0.12
+  # 누적 진행 델타가 이만큼 쌓여야 actor.goal.advanced를 발행한다
+  # (사람은 한 걸음마다 "해냈다"고 선언하지 않는다 — 관계 발행 규칙과 동형)
+  publish_threshold: 0.2

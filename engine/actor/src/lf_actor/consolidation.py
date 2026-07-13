@@ -47,6 +47,8 @@ class TickMaterials:
     action_envelope: dict[str, Any] | None = None
     emotion_peak: float = 0.0
     relationship_events: int = 0
+    #: 이 tick 행동이 액터의 드라이브에 얼마나 맞았나 0..1 (Goal Engine congruence, ADR-012)
+    goal_relevance: float = 0.0
 
     def is_empty(self) -> bool:
         return not (self.interactions or self.replies or self.action_envelope)
@@ -87,11 +89,12 @@ def build_episode(
         source_ids.append(materials.action_envelope["event_id"])
         tags.add(payload["action_kind"])
 
-    # 목표 관련성은 Goal 상태가 이벤트화되는 단계의 후속이다 — 0으로 정직하게
+    # 목표 관련성 = 이 tick 행동의 congruence (Goal Engine, ADR-012) — 자기 드라이브에
+    # 맞는 행동이 기억에 남는다. 목표 상태 없으면 0으로 흐른다 (어댑터 미주입 시)
     factors = {
         "emotion": round(min(1.0, materials.emotion_peak), 4),
         "relationship": round(min(1.0, materials.relationship_events / 2), 4),
-        "goal": 0.0,
+        "goal": round(min(1.0, materials.goal_relevance), 4),
         "rarity": round(
             1.0
             if any(e["type"] == "world.incident.occurred" for e in materials.interactions)

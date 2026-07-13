@@ -21,10 +21,11 @@ needs_bias:            # Human Behavior Engine 욕구 가중 (docs/plan/06)
   belonging: 0.40
   security: 0.30
 
-goals:
+goals:                 # need = 이 목표가 걸린 욕구 축 (Goal Engine, ADR-012)
   - id: g_expose_corruption
     description: 시 정부 재개발 비리 특종 보도
     priority: 0.9
+    need: achievement
 
 secrets:
   - id: s_source_betrayal

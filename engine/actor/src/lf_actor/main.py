@@ -22,6 +22,7 @@ from redis.asyncio import Redis
 
 from lf_actor.client import AiRuntimeClient
 from lf_actor.emotion import EmotionAdapter
+from lf_actor.goal import GoalAdapter
 from lf_actor.mailbox import Mailbox, run_mailbox_router
 from lf_actor.memory import WorkingMemory
 from lf_actor.persona import load_personas
@@ -66,6 +67,7 @@ async def run() -> None:
             emotion=EmotionAdapter(redis),
             relationship=RelationshipAdapter(redis),
             semantic=semantic,
+            goal=GoalAdapter(redis),
             belief_ledger=BeliefLedger(redis),
             reflection_interval=int(os.environ.get("LF_REFLECT_INTERVAL", "30")),
             identity_redis=redis,

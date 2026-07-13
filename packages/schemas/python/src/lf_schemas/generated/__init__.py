@@ -2,6 +2,7 @@
 from lf_schemas.generated import actor_action_performed as actor_action_performed
 from lf_schemas.generated import actor_belief_formed as actor_belief_formed
 from lf_schemas.generated import actor_emotion_shifted as actor_emotion_shifted
+from lf_schemas.generated import actor_goal_advanced as actor_goal_advanced
 from lf_schemas.generated import actor_identity_declared as actor_identity_declared
 from lf_schemas.generated import actor_memory_consolidated as actor_memory_consolidated
 from lf_schemas.generated import actor_message_sent as actor_message_sent

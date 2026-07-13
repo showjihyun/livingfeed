@@ -22,13 +22,15 @@ needs_bias:            # Human Behavior Engine 욕구 가중 (docs/plan/06)
   belonging: 0.85
   security: 0.60
 
-goals:
+goals:                 # need = 이 목표가 걸린 욕구 축 (Goal Engine, ADR-012)
   - id: g_decide_resignation
     description: 퇴사할지, 팀장과 면담할지 결정한다
     priority: 0.9
+    need: security
   - id: g_side_project
     description: 몰래 진행 중인 사이드 프로젝트를 완성한다
     priority: 0.6
+    need: achievement
 
 secrets:
   - id: s_resignation_letter

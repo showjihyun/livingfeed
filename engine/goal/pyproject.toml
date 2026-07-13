@@ -1,0 +1,19 @@
+[project]
+name = "lf-goal"
+version = "0.1.0"
+description = "Goal Engine — 욕구 게이지 + 목표 진행 + congruence, 규칙 기반 (ADR-012/008)"
+requires-python = ">=3.12"
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.25"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# params.yaml은 패키지 데이터로 포함된다 (hatchling 기본 — 패키지 디렉터리 전체)
+[tool.hatch.build.targets.wheel]
+packages = ["src/lf_goal"]
