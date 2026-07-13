@@ -8,7 +8,7 @@
  * 백엔드 미가용이거나 기록이 없으면 null — 호출측은 데모 인트로를 유지한다.
  */
 
-import { PLAYER_ID } from "./session";
+import { PLAYER_ID } from "./config";
 import type { DmMessage } from "./types";
 
 const FEED_API_URL = process.env.NEXT_PUBLIC_LF_FEED_API_URL ?? "http://localhost:8001";

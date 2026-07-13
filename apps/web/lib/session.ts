@@ -14,10 +14,9 @@ import { createTransport } from "@livingfeed/api-client";
 import type { SessionHandle } from "@livingfeed/api-client";
 import type { ActorMessageSent } from "@livingfeed/schemas";
 
-const GATEWAY_URL = process.env.NEXT_PUBLIC_LF_GATEWAY_URL ?? "http://localhost:8000";
+import { PLAYER_ID } from "./config";
 
-/** 데모 관찰자 계정 — 사이드바의 '관찰자_0417'과 같은 인물 */
-export const PLAYER_ID = "p_observer_0417";
+const GATEWAY_URL = process.env.NEXT_PUBLIC_LF_GATEWAY_URL ?? "http://localhost:8000";
 
 /** 응답·댓글 표시 전의 '생각하고 타이핑하는' 시간 — 즉답은 기계 티가 난다 */
 export function naturalDelayMs(): number {

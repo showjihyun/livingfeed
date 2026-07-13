@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from "react";
 
-import { PLAYER_ID } from "./session";
+import { PLAYER_ID } from "./config";
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_LF_GATEWAY_URL ?? "http://localhost:8000";
 const REFRESH_MS = 20_000;

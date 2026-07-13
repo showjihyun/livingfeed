@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from "react";
 
-import { PLAYER_ID } from "./session";
+import { PLAYER_ID } from "./config";
 
 const FEED_API_URL = process.env.NEXT_PUBLIC_LF_FEED_API_URL ?? "http://localhost:8001";
 

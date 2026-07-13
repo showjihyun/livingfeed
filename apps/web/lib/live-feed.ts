@@ -13,7 +13,7 @@ import { useEffect, useState } from "react";
 import { createTransport } from "@livingfeed/api-client";
 import type { EventEnvelope, FeedPostPublished } from "@livingfeed/schemas";
 
-import { PLAYER_ID } from "./session";
+import { PLAYER_ID } from "./config";
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_LF_GATEWAY_URL ?? "http://localhost:8000";
 const FEED_API_URL = process.env.NEXT_PUBLIC_LF_FEED_API_URL ?? "http://localhost:8001";

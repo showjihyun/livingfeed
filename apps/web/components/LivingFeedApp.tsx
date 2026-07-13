@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   COMMENT_REPLIES,
@@ -11,6 +11,7 @@ import {
   WORLD_MIN_START,
   formatWorldTime,
 } from "@/lib/data";
+import { FOCUS_ACTOR_ID } from "@/lib/config";
 import { useRelationshipGraph } from "@/lib/graph";
 import type { LivePost } from "@/lib/live-feed";
 import { useLiveFeed } from "@/lib/live-feed";
@@ -18,9 +19,6 @@ import { fetchDmHistory } from "@/lib/messages";
 import { useActorProfile } from "@/lib/profile";
 import { naturalDelayMs, useActorSession } from "@/lib/session";
 import type { DmMessage, FeedComment, RelKey, Screen, Tab, Toast } from "@/lib/types";
-
-/** 데모 DM 상대 — 실제 액터로 존재한다 (agents/personas/minji-kim.yaml) */
-const MINJI_ACTOR_ID = "a_minji_kim";
 
 import { Curating } from "./Curating";
 import { DmTab } from "./DmTab";
@@ -110,14 +108,14 @@ export function LivingFeedApp() {
   const relGraph = useRelationshipGraph(screen === "app");
 
   // 민지의 내면 실측 (pg-projector 신념·에피소드, ADR-003/008) — 미가용이면 데모 서사
-  const minjiProfile = useActorProfile(MINJI_ACTOR_ID, screen === "app");
+  const minjiProfile = useActorProfile(FOCUS_ACTOR_ID, screen === "app");
 
   // 지난 대화 이어받기 (read.messages) — 아직 데모 인트로 그대로일 때만 교체한다:
   // 사용자가 이미 대화를 시작했다면 히스토리가 그 위를 덮어쓰면 안 된다
   useEffect(() => {
     if (screen !== "app") return;
     let cancelled = false;
-    void fetchDmHistory(MINJI_ACTOR_ID).then((history) => {
+    void fetchDmHistory(FOCUS_ACTOR_ID).then((history) => {
       if (cancelled || !history) return;
       setDmMsgs((current) => (current === INITIAL_DM ? history : current));
     });
@@ -126,16 +124,32 @@ export function LivingFeedApp() {
     };
   }, [screen]);
 
-  // 상호작용 세션 (WS) — DM/좋아요를 실세계에 꽂는다. 미가용이면 데모 폴백.
+  // 라이브 피드에서 민지가 실제로 올린 최신 포스트 — 댓글의 실 대상(post_id)이 된다.
+  // 없으면 댓글은 데모 시나리오로 폴백한다 (실 post_id가 있어야 실댓글이 성립).
+  const minjiLivePostId = useMemo(
+    () => livePosts.find((p) => p.authorId === FOCUS_ACTOR_ID)?.id,
+    [livePosts],
+  );
+
+  // 상호작용 세션 (WS) — DM/댓글/좋아요를 실세계에 꽂는다. 미가용이면 데모 폴백.
   const session = useActorSession({
     enabled: screen === "app",
     onReply: (reply) => {
+      // 도착 즉시 렌더하지 않는다 — 1~3초 '타이핑'을 거쳐야 사람 같다
       if (reply.channel === "dm") {
-        // 도착 즉시 렌더하지 않는다 — 1~3초 '타이핑'을 거쳐야 사람 같다
         setDmTyping(true);
         after(naturalDelayMs(), () => {
           setDmTyping(false);
           setDmMsgs((list) => [...list, { from: "minji", text: reply.text }]);
+        });
+      } else if (reply.channel === "comment") {
+        setMinjiTyping(true);
+        after(naturalDelayMs(), () => {
+          setMinjiTyping(false);
+          setMinjiComments((list) => [
+            ...list,
+            { author: "김민지", text: reply.text, bg: "#F8FAFD", avatarBg: "#AFC8F5" },
+          ]);
         });
       }
     },
@@ -235,6 +249,10 @@ export function LivingFeedApp() {
       title: "댓글이 전달되었어요",
       body: "민지가 곧 확인해요 — 지금 깨어 있어요",
     });
+    // 실세계 경로 — 실제 민지 포스트가 있으면 player.comment.posted 적재.
+    // 민지의 응답은 다음 tick에 onReply(channel=comment)로 와서 렌더된다.
+    if (minjiLivePostId && session.sendComment(FOCUS_ACTOR_ID, minjiLivePostId, text)) return;
+    // 오프라인/실 포스트 없음 — 데모 시나리오 폴백 (스크립트 답장 + 서사 연출)
     const step = Math.min(commentStep.current, COMMENT_REPLIES.length - 1);
     const replyDelay = naturalDelayMs(); // 즉답 금지 — 1~3초 생각하고 답한다
     after(replyDelay, () => {
@@ -275,7 +293,7 @@ export function LivingFeedApp() {
         });
       });
     }
-  }, [after, commentDraft, minjiTyping, toast]);
+  }, [after, commentDraft, minjiTyping, toast, minjiLivePostId, session]);
 
   const sendDm = useCallback(() => {
     const text = dmDraft.trim();
@@ -285,7 +303,7 @@ export function LivingFeedApp() {
     setDmTyping(true);
     setInterventions((n) => n + 1);
     // 실세계 경로 — player.dm.sent 적재, 민지의 응답은 다음 tick에 push로 온다
-    if (session.sendDm(MINJI_ACTOR_ID, text)) return;
+    if (session.sendDm(FOCUS_ACTOR_ID, text)) return;
     // 오프라인 데모 폴백 (프로토타입 시나리오) — 즉답 금지, 1~3초 타이핑
     const idx = Math.min(dmIdx.current, DM_REPLIES.length - 1);
     after(naturalDelayMs(), () => {

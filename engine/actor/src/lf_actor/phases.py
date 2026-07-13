@@ -27,6 +27,7 @@ from lf_actor.consolidation import (
     describe_interaction,
 )
 from lf_actor.context import WorldContext, build
+from lf_actor.conversation import conversation_turns
 from lf_actor.emotion import PRINCIPAL as EMOTION_PRINCIPAL
 from lf_actor.emotion import SHIFT_TYPE, EmotionAdapter, PendingShift
 from lf_actor.mailbox import Mailbox
@@ -157,8 +158,11 @@ class ActorPhases:
                     continue
                 working = await self._memory.recent(ctx.world_id, actor_id)
                 episodes = await self._recall(ctx.world_id, actor_id, working)
+                # 이 플레이어와의 대화를 시간순으로 — 답장이 흐름을 잇게 한다 (ADR-009)
+                conversation = conversation_turns(working, envelope["payload"]["player_id"])
                 bundle = build(
-                    persona, working, world, purpose="reply_to_player", episodes=episodes
+                    persona, working, world, purpose="reply_to_player",
+                    episodes=episodes, conversation=conversation,
                 )
                 text = await self._ai.converse(
                     bundle, tier="hot", actor_id=actor_id, tick=ctx.tick

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 import nats.errors
@@ -19,6 +20,23 @@ logger = logging.getLogger("lf.actor.ai_client")
 
 #: DECIDE 응답 예산 — 상호작용 p95 4s(ADR-020)보다 여유 있게, tick 예산(60s) 안에서
 DEFAULT_TIMEOUT_S = 10.0
+
+_HANGUL = re.compile(r"[가-힣]")
+_HAN = re.compile(r"[一-鿿]")
+
+
+def sanitize_reply(text: str) -> str:
+    """소형 로컬 모델이 답변 뒤에 흘리는 사고흐름(주로 한자/중국어)을 자른다.
+
+    한국어 캐주얼 DM은 한자 표의문자를 쓰지 않으므로, 한글과 한자가 섞이면
+    첫 한자에서 자른다 — 정상 한국어 답변엔 무해하고, 온전한 비한국어 답변
+    (한글이 없는 경우)은 건드리지 않는다.
+    """
+    if _HANGUL.search(text) and (leak := _HAN.search(text)):
+        trimmed = text[: leak.start()].rstrip(" \t\n,·…—-\"'")
+        if trimmed:
+            return trimmed
+    return text
 
 #: 플레이어 응답(converse)의 구조화 출력 — text 한 필드 (표현은 LLM, 형식은 스키마)
 REPLY_SCHEMA: dict[str, Any] = {
@@ -108,4 +126,6 @@ class AiRuntimeClient:
             return None
         output = response.get("output")
         text = output.get("text") if isinstance(output, dict) else None
-        return text if isinstance(text, str) and text.strip() else None
+        if not isinstance(text, str) or not text.strip():
+            return None
+        return sanitize_reply(text)
