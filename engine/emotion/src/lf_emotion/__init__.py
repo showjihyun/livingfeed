@@ -12,6 +12,9 @@ from lf_emotion.engine import (
     AppraisalResult as AppraisalResult,
 )
 from lf_emotion.engine import (
+    appraise_goal as appraise_goal,
+)
+from lf_emotion.engine import (
     appraise_interaction as appraise_interaction,
 )
 from lf_emotion.engine import (

@@ -7,6 +7,7 @@
 from datetime import UTC, datetime
 
 from lf_actor.client import AiRuntimeClient
+from lf_actor.emotion import EmotionAdapter
 from lf_actor.goal import GoalAdapter
 from lf_actor.memory import WorkingMemory
 from lf_actor.persona import load_persona
@@ -30,6 +31,7 @@ async def test_action_advances_goal_and_scores_memory(conn, redis, nc, ai_servic
         [load_persona(PERSONAS_DIR / "minji-kim.yaml")],
         ai=AiRuntimeClient(nc, ai_service, timeout_s=5),
         memory=WorkingMemory(redis),
+        emotion=EmotionAdapter(redis),  # 목표 진전 → 감정 (ADR-015)
         goal=goal,
     )
     head = 0
@@ -40,6 +42,14 @@ async def test_action_advances_goal_and_scores_memory(conn, redis, nc, ai_servic
 
     advanced = [e for e in events if e["type"] == "actor.goal.advanced"]
     assert advanced, "행동이 누적돼 목표 진행 이벤트가 섰어야 한다"
+
+    # 목표 진전이 기쁨 감정을 낳는다 (ADR-015 goal_congruence)
+    shifts = [e for e in events if e["type"] == "actor.emotion.shifted"]
+    joy = [
+        e for e in shifts
+        if any(inst["type"] == "joy" for inst in e["payload"]["emotions"])
+    ]
+    assert joy, "목표 진전 tick에 기쁨(joy)이 섰어야 한다"
     payload = advanced[0]["payload"]
     assert payload["goal_id"] in {"g_decide_resignation", "g_side_project"}
     assert payload["need"] in {"security", "achievement"}

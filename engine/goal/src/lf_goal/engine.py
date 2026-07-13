@@ -175,6 +175,27 @@ def pressing_need(state: GoalState, needs_bias: dict[str, float]) -> str:
     )
 
 
+def starvation(
+    state: GoalState,
+    needs_bias: dict[str, float],
+    *,
+    params: dict[str, Any] | None = None,
+) -> tuple[str, float] | None:
+    """가장 목마른 욕구가 결핍(만족<임계)이고 관심 있으면 (need, 결핍도) — 없으면 None.
+
+    결핍도 = 1 - 만족도. 좌절 감정(ADR-015)의 magnitude가 된다. 관심(care) 낮은
+    욕구의 결핍은 좌절이 아니다 — 원래 안 챙기던 것이다.
+    """
+    params = params or default_params()
+    need = pressing_need(state, needs_bias)
+    satisfaction = state.needs.get(need, 0.0)
+    care = _care(needs_bias, need, params)
+    starve = params["starvation"]
+    if satisfaction < starve["threshold"] and care >= starve["min_care"]:
+        return need, round(1.0 - satisfaction, 4)
+    return None
+
+
 _NEED_KO = {"achievement": "인정·성취", "belonging": "소속·연결", "security": "안정"}
 
 

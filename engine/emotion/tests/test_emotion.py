@@ -2,6 +2,7 @@
 
 from lf_emotion import (
     EmotionState,
+    appraise_goal,
     appraise_interaction,
     baseline_from_ocean,
     decay,
@@ -101,3 +102,34 @@ def test_state_roundtrips_json():
     state = appraise_interaction(EmotionState(), dm(), OPTIMIST).state
     canonical = state.to_json()
     assert EmotionState.from_json(canonical).to_json() == canonical
+
+
+def test_goal_advance_produces_joy_and_lifts_mood():
+    result = appraise_goal(
+        EmotionState(), OPTIMIST, kind="goal.advanced", magnitude=0.9, source_event="01J"
+    )
+    assert result.significant
+    assert result.state.emotions[0].type == "joy"
+    assert result.state.emotions[0].target_id is None  # 대상 없는 감정 (자기 드라이브)
+    assert result.state.mood.pleasure > 0  # 기분이 밝아진다
+
+
+def test_goal_frustration_produces_distress_and_drops_mood():
+    result = appraise_goal(
+        EmotionState(), NEUROTIC, kind="goal.frustrated", magnitude=0.8, source_event=None
+    )
+    assert result.significant
+    assert result.state.emotions[0].type == "distress"
+    assert result.state.mood.pleasure < 0  # 기분이 가라앉는다
+
+
+def test_tiny_goal_magnitude_is_insignificant():
+    # 미약한 정렬도는 감정을 흔들지 않는다 (mood-delta 유의성)
+    result = appraise_goal(EmotionState(), OPTIMIST, kind="goal.advanced", magnitude=0.02)
+    assert not result.significant
+
+
+def test_unknown_goal_kind_is_noop():
+    result = appraise_goal(EmotionState(), OPTIMIST, kind="goal.exploded", magnitude=1.0)
+    assert not result.significant
+    assert result.state == EmotionState()

@@ -12,7 +12,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from lf_emotion import EmotionState, appraise_interaction, decay, describe
+from lf_emotion import EmotionState, appraise_goal, appraise_interaction, decay, describe
 from redis.asyncio import Redis
 
 from lf_actor.persona import Persona
@@ -29,8 +29,9 @@ class PendingShift:
 
     actor_id: str
     payload: dict[str, Any]
-    causation_id: str
-    correlation_id: str
+    #: 원인 사건 (상호작용·행동). 목표 좌절처럼 상태 유래 감정은 원인이 없다 (None)
+    causation_id: str | None
+    correlation_id: str | None
     #: 이 변화를 유발한 감정 인스턴스 {type, intensity, target_id} —
     #: 관계 응고(ADR-016 갱신 규칙 2)의 입력이 된다
     instance: dict[str, Any]
@@ -104,6 +105,48 @@ class EmotionAdapter:
                 persona.id, tick, len(shifts), describe(state),
             )
         return shifts, describe(state)
+
+    async def appraise_goal_signals(
+        self,
+        world_id: str,
+        persona: Persona,
+        signals: list[tuple[str, float, str | None, str | None, str | None]],
+    ) -> list[PendingShift]:
+        """목표 결과 신호들을 감정으로 (ADR-015 goal_congruence) — 진전은 기쁨, 결핍은 괴로움.
+
+        signals: (kind, magnitude, source_event, causation_id, correlation_id) 목록.
+        대상 없는 감정이라 instance.target_id는 None — 관계 응고에 스며들지 않는다.
+        """
+        state = await self.load(world_id, persona.id)
+        shifts: list[PendingShift] = []
+        for kind, magnitude, source_event, causation, correlation in signals:
+            result = appraise_goal(
+                state, persona.big_five, kind=kind, magnitude=magnitude, source_event=source_event
+            )
+            state = result.state
+            if not result.significant:
+                continue
+            triggered = next(
+                (e.to_json() for e in state.emotions if e.source_event == source_event),
+                {"type": "goal", "intensity": 0.0, "target_id": None},
+            )
+            shifts.append(
+                PendingShift(
+                    actor_id=persona.id,
+                    payload={
+                        "mood": state.mood.to_json(),
+                        "emotions": [e.to_json() for e in state.top_emotions()],
+                        "reason": result.reason[:200],
+                    },
+                    causation_id=causation,
+                    correlation_id=correlation,
+                    instance={"type": "goal", "intensity": 0.0, "target_id": None},
+                )
+            )
+        await self.save(world_id, persona.id, state)
+        if shifts:
+            logger.info("목표 감정: %s %d건 — %s", persona.id, len(shifts), describe(state))
+        return shifts
 
     async def decay_one_tick(self, world_id: str, persona: Persona) -> None:
         """tick CONSOLIDATE의 감쇠 — 인스턴스 지수 감쇠 + mood baseline 회귀 (ADR-015)."""

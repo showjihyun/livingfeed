@@ -37,6 +37,16 @@ appraisal:
     type: gratitude
     base_intensity: 0.55
     pad: { pleasure: 0.7, arousal: 0.35, dominance: 0.15 }
+  # 목표 결과 → 감정 (ADR-015 goal_congruence — Goal Engine congruence가 입력).
+  # magnitude(정렬도/결핍)로 base_intensity가 스케일된다.
+  goal.advanced:
+    type: joy
+    base_intensity: 0.5
+    pad: { pleasure: 0.6, arousal: 0.15, dominance: 0.35 }
+  goal.frustrated:
+    type: distress
+    base_intensity: 0.45
+    pad: { pleasure: -0.55, arousal: 0.25, dominance: -0.35 }
 
 # 성격 변조 (ADR-015 personality_filter)
 personality:

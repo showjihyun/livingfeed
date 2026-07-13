@@ -37,6 +37,9 @@ from lf_goal.engine import (
 from lf_goal.engine import (
     satisfy_from_interaction as satisfy_from_interaction,
 )
+from lf_goal.engine import (
+    starvation as starvation,
+)
 from lf_goal.model import (
     NEEDS as NEEDS,
 )

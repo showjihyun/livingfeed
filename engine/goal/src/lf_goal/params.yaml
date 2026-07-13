@@ -19,3 +19,10 @@ goals:
   # 누적 진행 델타가 이만큼 쌓여야 actor.goal.advanced를 발행한다
   # (사람은 한 걸음마다 "해냈다"고 선언하지 않는다 — 관계 발행 규칙과 동형)
   publish_threshold: 0.2
+
+# 욕구 결핍(starvation) → 좌절 감정 (ADR-015 goal_congruence 음의 축)
+starvation:
+  # 만족도가 이 아래면 결핍 상태
+  threshold: 0.25
+  # 이만큼은 관심 있는 욕구여야 좌절이 유의미하다 (관심 없는 욕구 결핍은 태연)
+  min_care: 0.5

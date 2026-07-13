@@ -11,6 +11,7 @@ from lf_goal import (
     initial_state,
     pressing_need,
     satisfy_from_interaction,
+    starvation,
 )
 
 MINJI_GOALS = [
@@ -93,3 +94,23 @@ def test_describe_names_pressing_need_and_top_goal():
     text = describe(state, MINJI_GOALS, MINJI_BIAS)
     assert "목마른" in text
     assert "사이드 프로젝트" in text
+
+
+def test_starvation_fires_for_deprived_cared_need():
+    # 소속(관심 0.85)이 바닥 → 좌절 신호
+    state = GoalState(needs={"achievement": 0.5, "belonging": 0.05, "security": 0.5}, goals={})
+    signal = starvation(state, MINJI_BIAS)
+    assert signal is not None
+    need, deficit = signal
+    assert need == "belonging"
+    assert deficit > 0.9
+
+
+def test_starvation_silent_when_satisfied_or_uncared():
+    # 채워져 있으면 좌절 없음
+    full = GoalState(needs={"achievement": 0.6, "belonging": 0.6, "security": 0.6}, goals={})
+    assert starvation(full, MINJI_BIAS) is None
+    # 관심 없는 욕구(achievement 0.1)만 바닥이면 태연하다
+    low_care_bias = {"achievement": 0.1, "belonging": 0.2, "security": 0.2}
+    deprived = GoalState(needs={"achievement": 0.0, "belonging": 0.9, "security": 0.9}, goals={})
+    assert starvation(deprived, low_care_bias) is None

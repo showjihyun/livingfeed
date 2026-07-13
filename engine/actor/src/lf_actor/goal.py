@@ -22,6 +22,7 @@ from lf_goal import (
     describe,
     initial_state,
     satisfy_from_interaction,
+    starvation,
 )
 from redis.asyncio import Redis
 
@@ -112,6 +113,13 @@ class GoalAdapter:
             causation_id=cause["event_id"],
             correlation_id=cause.get("correlation_id"),
         )
+
+    async def starvation_signal(
+        self, world_id: str, persona: Persona
+    ) -> tuple[str, float] | None:
+        """가장 목마른 욕구가 결핍이면 (need, 결핍도) — 좌절 감정의 입력 (ADR-015)."""
+        state = await self.load(world_id, persona)
+        return starvation(state, persona.needs_bias)
 
     async def decay_one_tick(self, world_id: str, persona: Persona) -> None:
         """tick 감쇠 — 욕구 만족도가 되돌아온다 (ADR-012). 목표 진행은 남는다."""

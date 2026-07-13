@@ -403,6 +403,8 @@ class ActorPhases:
         relevance: dict[str, float] = {}
         advanced_actions: dict[str, dict[str, Any]] = {}
         by_actor: dict[str, list[PendingGoalEvent]] = {}
+        #: 목표 진전 → 기쁨의 근거: actor → (최대 congruence, 원인 행동)
+        joy_cause: dict[str, tuple[float, dict[str, Any]]] = {}
         for actor_id, envelope in self._resolved_action_all:
             congruence, events = await self._goal.record_action(
                 ctx.world_id, self._personas[actor_id], envelope
@@ -411,6 +413,9 @@ class ActorPhases:
             if events:
                 advanced_actions[actor_id] = envelope
                 by_actor.setdefault(actor_id, []).extend(events)
+                prior = joy_cause.get(actor_id)
+                if prior is None or congruence > prior[0]:
+                    joy_cause[actor_id] = (congruence, envelope)
 
         for actor_id in sorted(by_actor):
             head = await current_head(ctx.conn, ctx.world_id, "actor", actor_id)
@@ -430,7 +435,57 @@ class ActorPhases:
             ]
             await append(ctx.conn, GOAL_PRINCIPAL, events, expected_head=head)
             logger.info("목표 진행 적재: %s %d건 tick=%d", actor_id, len(events), ctx.tick)
+
+        # 목표 결과 → 감정 (ADR-015 goal_congruence): 진전은 기쁨, 결핍은 괴로움
+        if self._emotion is not None:
+            acted = sorted({actor_id for actor_id, _ in self._resolved_action_all})
+            await self._emit_goal_emotions(ctx, joy_cause, acted)
         return relevance, advanced_actions
+
+    async def _emit_goal_emotions(
+        self,
+        ctx: TickContext,
+        joy_cause: dict[str, tuple[float, dict[str, Any]]],
+        acted: list[str],
+    ) -> None:
+        """행동한 액터별로 목표-감정 신호를 모아 actor.emotion.shifted로 적재한다."""
+        assert self._emotion is not None and self._goal is not None
+        for actor_id in acted:
+            persona = self._personas[actor_id]
+            signals: list[tuple[str, float, str | None, str | None, str | None]] = []
+            if actor_id in joy_cause:
+                congruence, env = joy_cause[actor_id]
+                signals.append(
+                    ("goal.advanced", congruence, env["event_id"],
+                     env["event_id"], env.get("correlation_id"))
+                )
+            starve = await self._goal.starvation_signal(ctx.world_id, persona)
+            if starve is not None:
+                signals.append(("goal.frustrated", starve[1], None, None, None))
+            if not signals:
+                continue
+            shifts = await self._emotion.appraise_goal_signals(ctx.world_id, persona, signals)
+            if not shifts:
+                continue
+            head = await current_head(ctx.conn, ctx.world_id, "actor", actor_id)
+            await append(
+                ctx.conn, EMOTION_PRINCIPAL,
+                [
+                    NewEvent(
+                        world_id=ctx.world_id,
+                        stream="actor",
+                        stream_key=actor_id,
+                        type=SHIFT_TYPE,
+                        tick=ctx.tick,
+                        actor_id=actor_id,
+                        causation_id=s.causation_id,
+                        correlation_id=s.correlation_id,
+                        payload=s.payload,
+                    )
+                    for s in shifts
+                ],
+                expected_head=head,
+            )
 
     async def _reflect(self, ctx: TickContext) -> None:
         """상태 패턴 → 신념 (규칙 기반 MVP — LLM reflection은 후속, ADR-008)."""

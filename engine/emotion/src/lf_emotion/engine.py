@@ -107,6 +107,57 @@ def appraise_interaction(
     )
 
 
+def appraise_goal(
+    state: EmotionState,
+    big_five: dict[str, float],
+    *,
+    kind: str,
+    magnitude: float,
+    source_event: str | None = None,
+    params: dict[str, Any] | None = None,
+) -> AppraisalResult:
+    """목표 결과를 평가한다 (ADR-015 goal_congruence) — 진전은 기쁨, 좌절은 괴로움.
+
+    kind는 params.appraisal의 규칙 키 (goal.advanced / goal.frustrated).
+    magnitude(정렬도 또는 결핍, 0..1)가 base_intensity를 스케일한다. 대상 없는
+    감정이다 (사람이 아니라 자기 드라이브에 대한 것) — 관계로 스며들지 않는다.
+
+    유의성은 mood 변화만으로 본다: 지속 조건(결핍)이 매 tick 재평가돼도 mood가
+    이미 그쪽으로 기울면 더는 발행하지 않는다 (상호작용처럼 강도로 트리거하면 스팸).
+    """
+    params = params or default_params()
+    rule = params["appraisal"].get(kind)
+    if rule is None:
+        return AppraisalResult(state=state, significant=False, reason="")
+
+    intensity = min(1.0, rule["base_intensity"] * magnitude * _sensitivity(big_five, params))
+    if intensity < params["instances"]["cull_threshold"]:
+        return AppraisalResult(state=state, significant=False, reason="")
+
+    instance = EmotionInstance(
+        type=rule["type"], intensity=round(intensity, 4), target_id=None, source_event=source_event
+    )
+    inst_params = params["instances"]
+    emotions = merge_instance(
+        state.emotions, instance,
+        reinforcement=inst_params["reinforcement"], max_active=inst_params["max_active"],
+    )
+    weight = params["mood"]["instance_weight"] * intensity
+    pad = rule["pad"]
+    mood = Pad(
+        pleasure=state.mood.pleasure + weight * pad["pleasure"],
+        arousal=state.mood.arousal + weight * pad["arousal"],
+        dominance=state.mood.dominance + weight * pad["dominance"],
+    ).clamped()
+
+    significant = mood.l1_distance(state.mood) >= params["shift_thresholds"]["mood_delta"]
+    return AppraisalResult(
+        state=EmotionState(mood=mood, emotions=emotions),
+        significant=significant,
+        reason=f"{kind} — {rule['type']} {intensity:.2f}",
+    )
+
+
 def decay(
     state: EmotionState,
     big_five: dict[str, float],
