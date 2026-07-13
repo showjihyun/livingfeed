@@ -68,41 +68,7 @@ export const FACE = {
     eye: { size: 3.5, x: 8, top: 12 },
     mouth: { kind: "neutral", w: 6, h: 2, r: 2, top: 19 },
   },
-  /** 민지 44px — 찡그린 표정 + 성난 눈썹 */
-  minji44: {
-    size: 44,
-    radius: "50%",
-    bg: "#AFC8F5",
-    eye: { size: 5, x: 12, top: 17 },
-    mouth: { kind: "frown", w: 9, h: 4, stroke: 2, r: 8, top: 27 },
-    brows: { w: 6, h: 2, x: 10, top: 11, deg: 12 },
-  },
-  /** 철수 44px — 웃는 입 + 볼터치 */
-  chulsu44: {
-    size: 44,
-    radius: "50%",
-    bg: "#FFE9A8",
-    eye: { size: 5, x: 12, top: 17 },
-    mouth: { kind: "open", w: 10, h: 5, r: 9, top: 26 },
-    blush: { w: 7, h: 4, x: 7, top: 25 },
-  },
-  /** 댓글 아바타 28px (bg는 상황별 오버라이드) */
-  comment28: {
-    size: 28,
-    radius: "50%",
-    bg: "#D9E2F2",
-    eye: { size: 3, x: 8, top: 11 },
-    mouth: { kind: "smile", w: 6, h: 3, stroke: 1.5, r: 6, top: 17 },
-  },
-  /** 철수 글의 민지 댓글 아바타 — 찡그림 */
-  comment28Frown: {
-    size: 28,
-    radius: "50%",
-    bg: "#AFC8F5",
-    eye: { size: 3, x: 8, top: 11 },
-    mouth: { kind: "frown", w: 6, h: 3, stroke: 1.5, r: 6, top: 17 },
-  },
-  /** DM 헤더의 민지 38px */
+  /** DM 헤더 아바타 38px */
   dmHeader38: {
     size: 38,
     radius: "50%",

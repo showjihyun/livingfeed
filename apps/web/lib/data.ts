@@ -1,4 +1,4 @@
-import type { RelKey, Tab, ToastIcon } from "./types";
+import type { Tab, ToastIcon } from "./types";
 
 /** UI 파라미터 (특정 인물·서사 데이터 아님) */
 export const TOAST_DURATION_MS = 8000;
@@ -59,89 +59,9 @@ export interface NavDef {
 
 export const NAV_DEFS: NavDef[] = [
   { key: "feed", label: "World Feed", iconD: ICON.globe },
-  { key: "profile", label: "민지 프로필", iconD: ICON.user },
+  { key: "profile", label: "프로필", iconD: ICON.user },
   { key: "dm", label: "받은 것", iconD: ICON.inbox },
   { key: "graph", label: "관계 그래프", iconD: ICON.graph },
-];
-
-export interface RelHistoryItem {
-  title: string;
-  meta: string;
-  dot: string;
-}
-
-export interface RelInfo {
-  title: string;
-  status: string;
-  statusColor: string;
-  desc: string;
-  hint: string;
-  history: RelHistoryItem[];
-}
-
-export const REL: Record<RelKey, RelInfo> = {
-  mc: {
-    title: "민지 ↔ 철수",
-    status: "갈등 중 · 3주째",
-    statusColor: "#C76F93",
-    desc: "입사 동기로 시작해 가장 가까운 사이였지만, 승진 발표 이후 서먹해졌어요. 최근 철수의 소개팅 글에 민지가 날 선 댓글을 남겼습니다.",
-    hint: "두 사람 모두와 아는 사이라면, 화해의 자리를 소개할 수 있어요. (참견러 레벨 3 필요)",
-    history: [
-      { title: "입사 동기로 만남", meta: "세계력 1월 · 신뢰 형성", dot: "#BFE3D0" },
-      { title: "철수만 승진", meta: "세계력 2월 말 · 갈등의 씨앗", dot: "#F5B8CB" },
-      { title: "소개팅 글에 날 선 댓글", meta: "18분 전", dot: "#F5B8CB" },
-    ],
-  },
-  me: {
-    title: "민지 ↔ 당신",
-    status: "친한 사이 · 3월 8일부터",
-    statusColor: "#5F7EC9",
-    desc: "야근 글에 남긴 첫 댓글에서 시작된 관계. 민지는 당신의 조언을 기억하고 있고, 먼저 DM을 보낸 적도 있어요.",
-    hint: "지금 DM을 보내면 민지가 바로 확인해요 — 개입은 흔적을 남깁니다.",
-    history: [
-      { title: "야근 글에 첫 댓글", meta: "3월 2일 · 아는 사이", dot: "#BFE3D0" },
-      { title: "DM으로 조언", meta: "3월 8일 · 친한 사이로", dot: "#AFC8F5" },
-      { title: "기획안 댓글", meta: "오늘 · 민지가 면담을 결심", dot: "#AFC8F5" },
-    ],
-  },
-  ms: {
-    title: "민지 ↔ 수진",
-    status: "신뢰 · 커뮤니티 동료",
-    statusColor: "#3E8A66",
-    desc: "개발자 커뮤니티에서 만난 사이. 수진은 민지의 글을 항상 먼저 읽어주는 사람이에요. 운영권 투표에서 민지의 지지를 기대하고 있어요.",
-    hint: "민지에게 투표 이야기를 꺼내면 이 관계가 움직일 수 있어요.",
-    history: [
-      { title: "커뮤니티에서 만남", meta: "세계력 1월 중순", dot: "#BFE3D0" },
-      { title: "밤샘 프로젝트 협업", meta: "세계력 2월 · 신뢰 형성", dot: "#BFE3D0" },
-      { title: "운영권 투표 지지 요청", meta: "오늘 아침", dot: "#C9B8F0" },
-    ],
-  },
-};
-
-export const REL_TAB_DEFS: { key: RelKey; label: string }[] = [
-  { key: "mc", label: "민지↔철수" },
-  { key: "me", label: "민지↔당신" },
-  { key: "ms", label: "민지↔수진" },
-];
-
-export interface GraphNodeDef {
-  name: string;
-  x: string;
-  y: string;
-  size: number;
-  color: string;
-  /** 이 관계가 선택되면 링 강조 (undefined면 항상/절대 아님을 selAlways로) */
-  selKey?: RelKey;
-  selAlways?: boolean;
-}
-
-export const GRAPH_NODES: GraphNodeDef[] = [
-  { name: "김민지", x: "46%", y: "42%", size: 58, color: "#AFC8F5", selAlways: true },
-  { name: "이철수", x: "23%", y: "20%", size: 46, color: "#FFE9A8", selKey: "mc" },
-  { name: "박수진", x: "70%", y: "23%", size: 46, color: "#C9B8F0", selKey: "ms" },
-  { name: "당신", x: "68%", y: "66%", size: 46, color: "#D9E2F2", selKey: "me" },
-  { name: "한하린", x: "81%", y: "52%", size: 42, color: "#F5B8CB" },
-  { name: "정도윤", x: "22%", y: "64%", size: 42, color: "#BFE3D0" },
 ];
 
 /** 세계 시간: 시작 1361분(3월 14일 22:41), 3초마다 +4분 (현실 4배속) */

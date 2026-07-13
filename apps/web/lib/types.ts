@@ -2,8 +2,6 @@ export type Screen = "onboarding" | "curating" | "app";
 
 export type Tab = "feed" | "profile" | "dm" | "graph" | "hidden";
 
-export type RelKey = "mc" | "me" | "ms";
-
 export type ToastIcon = "check" | "git-branch" | "feather" | "lock-open" | "user-round";
 
 export interface Toast {

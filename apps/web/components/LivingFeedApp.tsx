@@ -6,12 +6,13 @@ import { TOAST_DURATION_MS, WORLD_MIN_START, formatWorldTime } from "@/lib/data"
 import { useActorDirectory } from "@/lib/actors";
 import { FOCUS_ACTOR_ID } from "@/lib/config";
 import { useRelationshipGraph } from "@/lib/graph";
+import { useHiddenFeed } from "@/lib/hidden";
 import type { LivePost } from "@/lib/live-feed";
 import { useLiveFeed } from "@/lib/live-feed";
 import { fetchDmHistory } from "@/lib/messages";
 import { useActorProfile } from "@/lib/profile";
 import { naturalDelayMs, useActorSession } from "@/lib/session";
-import type { DmMessage, FeedComment, RelKey, Screen, Tab, Toast } from "@/lib/types";
+import type { DmMessage, FeedComment, Screen, Tab, Toast } from "@/lib/types";
 
 import { Curating } from "./Curating";
 import { DmTab } from "./DmTab";
@@ -42,11 +43,10 @@ export function LivingFeedApp() {
   const [typingPosts, setTypingPosts] = useState<ReadonlySet<string>>(new Set());
 
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [graphSel, setGraphSel] = useState<RelKey>("mc");
+  const [selectedActor, setSelectedActor] = useState<string | null>(null);
   const [following, setFollowing] = useState(true);
   const [interventions, setInterventions] = useState(0);
   const [coachDismissed, setCoachDismissed] = useState(false);
-  const [hiddenUnlocked] = useState(false);
 
   const toastSeq = useRef(0);
   const timers = useRef<number[]>([]);
@@ -77,8 +77,13 @@ export function LivingFeedApp() {
   // 실 백엔드 라이브 피드 — 세계 입장 후에만 구독 (미가용이면 오프라인 상태만)
   const { posts: livePosts, status: liveStatus } = useLiveFeed(screen === "app");
 
-  // 관계 그래프 실측 (kuzu-projector, ADR-006) — 미가용이면 데모 배치 유지
+  // 관계 그래프 실측 (kuzu-projector, ADR-006) — 미가용이면 빈 상태
   const relGraph = useRelationshipGraph(screen === "app");
+
+  // Hidden Feed — 당신에게만 닿은 비공개 이야기 (private 타임라인, ADR-014).
+  // 신뢰가 열어준다: 액터가 당신에게만 건넨 것이 하나라도 있으면 언락된다.
+  const hidden = useHiddenFeed(screen === "app");
+  const hiddenUnlocked = hidden.items.length > 0;
 
   // 액터 명단(read.actors) — 표시 이름을 여기서 읽는다 (하드코딩 금지, ADR-012)
   const { byId } = useActorDirectory(screen === "app");
@@ -87,6 +92,7 @@ export function LivingFeedApp() {
     (actorId: string) => byId.get(actorId)?.name ?? actorId,
     [byId],
   );
+  const identityOf = useCallback((actorId: string) => byId.get(actorId), [byId]);
 
   // 액터의 내면 실측 (pg-projector 신념·에피소드, ADR-003/008) — 미가용이면 데모 서사
   const focusProfile = useActorProfile(FOCUS_ACTOR_ID, screen === "app");
@@ -277,13 +283,15 @@ export function LivingFeedApp() {
             onSend={sendDm}
           />
         )}
-        {tab === "hidden" && <HiddenTab />}
+        {tab === "hidden" && <HiddenTab items={hidden.items} nameOf={authorName} />}
         {tab === "graph" && (
           <GraphTab
-            sel={graphSel}
-            onSelect={setGraphSel}
-            liveEdges={relGraph.edges}
-            liveAvailable={relGraph.available}
+            edges={relGraph.edges}
+            available={relGraph.available}
+            nameOf={authorName}
+            identityOf={identityOf}
+            selected={selectedActor}
+            onSelect={setSelectedActor}
           />
         )}
       </div>

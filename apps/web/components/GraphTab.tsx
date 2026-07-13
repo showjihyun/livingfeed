@@ -2,104 +2,137 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { REL, REL_TAB_DEFS } from "@/lib/data";
-import type { LiveRelEdge } from "@/lib/graph";
-import type { RelKey } from "@/lib/types";
+import type { ActorIdentity } from "@/lib/actors";
+import type { LiveRelEdge, RelDimensions } from "@/lib/graph";
 
 import styles from "./lf.module.css";
 
 interface GraphTabProps {
-  sel: RelKey;
-  onSelect: (key: RelKey) => void;
-  /** kuzu-projector 실측 관계 (ADR-006) — 있으면 strength를 실측값으로 덮는다 */
-  liveEdges?: LiveRelEdge[];
-  liveAvailable?: boolean;
+  /** kuzu-projector 실측 관계 (ADR-006) — player와 닿은 엣지 전부 */
+  edges: LiveRelEdge[];
+  available: boolean;
+  /** actor_id → 표시 이름 (라이브 identity, 하드코딩 금지) */
+  nameOf: (actorId: string) => string;
+  identityOf: (actorId: string) => ActorIdentity | undefined;
+  /** 선택된 관계 상대 (없으면 null) */
+  selected: string | null;
+  onSelect: (actorId: string | null) => void;
 }
 
-/* ── 그래프 데이터 (viewBox 760×620 좌표계) ──
-   위상: 김민지가 중심(회전축), 나머지는 궤도 위성이다.
-   드래그 회전은 위성의 극좌표 각도에 공통 θ를 더하는 유사 3D 궤도 —
-   화면 y는 tilt로 눌러 타원 궤도, 깊이(z)는 크기·투명도로 표현한다. */
-
+/* ── 궤도 캔버스 좌표계 (viewBox 760×620) ──
+   플레이어(당신)가 중심(회전축), 실측 관계 액터들이 궤도 위성이다.
+   위성의 궤도 반경은 관계도(strength)에서, 각도는 목록 순서에서 파생된다. */
 const CX = 380;
 const CY = 300;
 const TILT = 0.62;
 
+const STAGE_KO: Record<string, string> = {
+  stranger: "낯선 사이",
+  acquaintance: "아는 사이",
+  friend: "친구",
+  close_friend: "가까운 사이",
+  romantic: "연인",
+  family: "가족 같은",
+  mentor: "멘토",
+  rival: "라이벌",
+  enemy: "적대",
+};
+
+const NODE_PALETTE: [string, string][] = [
+  ["#AFC8F5", "#7FA3E8"],
+  ["#F5B8CB", "#E391AF"],
+  ["#BFE3D0", "#8FCBAA"],
+  ["#E8D5A8", "#D6B86A"],
+  ["#C9B8F0", "#A98FE0"],
+  ["#F5C8B8", "#E8977F"],
+  ["#B8E0F5", "#7FB4E8"],
+];
+
+type EdgeKind = "conflict" | "trust" | "close" | "faint";
+
+const KIND_STYLE: Record<EdgeKind, { from: string; to: string; dash?: string }> = {
+  conflict: { from: "#F7A8C4", to: "#E36F9A", dash: "11 8" },
+  trust: { from: "#9FDBBB", to: "#5FBF95" },
+  close: { from: "#9FBCF2", to: "#6D8DD6" },
+  faint: { from: "#E2EAF6", to: "#D4DFF0" },
+};
+
+function edgeKind(d: RelDimensions): EdgeKind {
+  if (d.resentment >= 0.3) return "conflict";
+  if (d.trust >= 0.2) return "trust";
+  if (d.intimacy >= 0.15) return "close";
+  return "faint";
+}
+
 interface NodeDef {
+  actorId: string | null; // null = 플레이어(당신)
   name: string;
-  /** 관계도(플레이어와의 관계 강도) 0..1 — 노드 크기가 여기서 파생된다 */
   strength: number;
   color: string;
-  edge: string; // 그라디언트 테두리 톤
-  design: [number, number]; // θ=0에서의 설계 좌표
-  /** 이 노드가 참여하는 관계들 — 클릭은 첫 항목을 선택, 포함된 관계 선택 시 하이라이트 */
-  selKeys?: RelKey[];
+  edge: string;
+  design: [number, number];
   isPlayer?: boolean;
 }
 
-// 관계도 → 반지름: 강한 관계일수록 크게 보인다 (Kuzu 관계 그래프가 붙으면 실측값)
-const NODE_R_MIN = 15;
-const NODE_R_MAX = 28;
-const nodeRadius = (n: NodeDef) => (n.isPlayer ? 29 : NODE_R_MIN + (NODE_R_MAX - NODE_R_MIN) * n.strength);
-
-// 중심은 플레이어다 — 관계 그래프는 '내 사람들'을 보는 화면 (ADR-014 Relationship).
-// 김민지는 가장 가까운 위성, 철수·수진은 민지를 통해 이어진 2-hop 인물.
-const NODES: NodeDef[] = [
-  { name: "당신", strength: 1, color: "#D9E2F2", edge: "#6D8DD6", design: [CX, CY], selKeys: ["me"], isPlayer: true },
-  { name: "김민지", strength: 0.92, color: "#AFC8F5", edge: "#7FA3E8", design: [295, 205], selKeys: ["me", "mc", "ms"] },
-  { name: "이철수", strength: 0.48, color: "#FFE9A8", edge: "#EBCB6E", design: [165, 150], selKeys: ["mc"] },
-  { name: "박수진", strength: 0.55, color: "#C9B8F0", edge: "#A98FE0", design: [565, 165], selKeys: ["ms"] },
-  { name: "한하린", strength: 0.24, color: "#F5B8CB", edge: "#E391AF", design: [645, 355] },
-  { name: "정도윤", strength: 0.18, color: "#BFE3D0", edge: "#8FCBAA", design: [205, 445] },
-];
-
-/** 실측 액터 id → 데모 노드/표시 이름 매핑 (미등록 id는 id 그대로 표기) */
-const LIVE_DEMO_NODE: Record<string, string> = { a_minji_kim: "김민지" };
-const LIVE_NAMES: Record<string, string> = {
-  a_minji_kim: "김민지",
-  a_aria_kim: "김아리",
-  a_junho_park: "박준호",
-};
-//: 실측으로 새로 등장하는 인물의 자리·색 (설계 좌표 슬롯 순환)
-const EXTRA_SLOTS: [number, number][] = [[150, 340], [612, 108], [706, 468], [128, 142]];
-const EXTRA_COLORS: [string, string][] = [
-  ["#F5D9B8", "#E5B57F"],
-  ["#B8E0F5", "#7FB4E8"],
-  ["#E3F0B8", "#B9CD7C"],
-  ["#F5C8B8", "#E8977F"],
-];
-
-/** 실측 엣지를 데모 노드에 병합 — 아는 인물은 strength 교체, 새 인물은 슬롯 추가 */
-function mergeLive(base: NodeDef[], live?: LiveRelEdge[]): NodeDef[] {
-  if (!live?.length) return base;
-  const nodes = base.map((n) => ({ ...n }));
-  const merged = new Set<string>();
-  for (const edge of live) {
-    const demoName = LIVE_DEMO_NODE[edge.actorId];
-    const node = demoName ? nodes.find((n) => n.name === demoName) : undefined;
-    if (node) {
-      node.strength = Math.max(0.08, edge.strength);
-      merged.add(edge.actorId);
-    }
-  }
-  let slot = 0;
-  for (const edge of live) {
-    if (merged.has(edge.actorId) || edge.strength < 0.02) continue;
-    const [x, y] = EXTRA_SLOTS[slot % EXTRA_SLOTS.length];
-    const [color, ring] = EXTRA_COLORS[slot % EXTRA_COLORS.length];
-    slot += 1;
-    nodes.push({
-      name: LIVE_NAMES[edge.actorId] ?? edge.actorId,
-      strength: Math.max(0.08, edge.strength),
-      color,
-      edge: ring,
-      design: [x, y],
-    });
-  }
-  return nodes;
+interface EdgeDef {
+  actorId: string;
+  from: string;
+  to: string;
+  kind: EdgeKind;
+  width: number;
+  label: string;
 }
 
-/** 설계 좌표 → 궤도 극좌표 (θ=0에서 설계 좌표를 재현하도록 역산) */
+const NODE_R_MIN = 15;
+const NODE_R_MAX = 28;
+const nodeRadius = (n: NodeDef) =>
+  n.isPlayer ? 29 : NODE_R_MIN + (NODE_R_MAX - NODE_R_MIN) * n.strength;
+
+/** 실측 엣지 → 궤도 노드. 강한 관계는 안쪽 궤도, 목록 순서로 각을 나눈다. */
+function buildNodes(edges: LiveRelEdge[], nameOf: (id: string) => string): NodeDef[] {
+  const player: NodeDef = {
+    actorId: null,
+    name: "당신",
+    strength: 1,
+    color: "#D9E2F2",
+    edge: "#6D8DD6",
+    design: [CX, CY],
+    isPlayer: true,
+  };
+  const n = edges.length;
+  const actors = edges.map((e, i) => {
+    const angle = -Math.PI / 2 + (i / Math.max(1, n)) * Math.PI * 2;
+    const radius = 165 + (1 - Math.min(1, e.strength)) * 125; // 강할수록 가깝게
+    const [color, ring] = NODE_PALETTE[i % NODE_PALETTE.length];
+    return {
+      actorId: e.actorId,
+      name: nameOf(e.actorId),
+      strength: Math.max(0.08, e.strength),
+      color,
+      edge: ring,
+      design: [CX + radius * Math.cos(angle), CY + radius * Math.sin(angle) * TILT] as [
+        number,
+        number,
+      ],
+    };
+  });
+  return [player, ...actors];
+}
+
+function buildEdges(edges: LiveRelEdge[], nameOf: (id: string) => string): EdgeDef[] {
+  return edges.map((e) => {
+    const kind = edgeKind(e.dimensions);
+    return {
+      actorId: e.actorId,
+      from: "당신",
+      to: nameOf(e.actorId),
+      kind,
+      width: 2.5 + 3.5 * Math.min(1, e.strength),
+      label: STAGE_KO[e.stage] ?? e.stage,
+    };
+  });
+}
+
 function orbitsFor(nodes: NodeDef[]): Record<string, { radius: number; angle: number }> {
   return Object.fromEntries(
     nodes.map((n) => {
@@ -113,17 +146,16 @@ function orbitsFor(nodes: NodeDef[]): Record<string, { radius: number; angle: nu
 interface Placed {
   x: number;
   y: number;
-  depth: number; // 0(맨 뒤)..1(맨 앞)
+  depth: number;
   scale: number;
 }
-
 type Orbits = Record<string, { radius: number; angle: number }>;
 
 function place(orbits: Orbits, name: string, theta: number, zoom: number): Placed {
   const orbit = orbits[name];
-  if (orbit.radius === 0) return { x: CX, y: CY, depth: 0.5, scale: 1 };
+  if (!orbit || orbit.radius === 0) return { x: CX, y: CY, depth: 0.5, scale: 1 };
   const a = orbit.angle + theta;
-  const depth = (Math.sin(a) + 1) / 2; // 화면 아래(y+)가 앞
+  const depth = (Math.sin(a) + 1) / 2;
   return {
     x: CX + orbit.radius * zoom * Math.cos(a),
     y: CY + orbit.radius * zoom * Math.sin(a) * TILT,
@@ -131,35 +163,6 @@ function place(orbits: Orbits, name: string, theta: number, zoom: number): Place
     scale: (0.82 + 0.3 * depth) * (0.85 + 0.15 * zoom),
   };
 }
-
-type EdgeKind = "conflict" | "trust" | "close" | "faint";
-
-interface EdgeDef {
-  id: string;
-  selKey?: RelKey;
-  from: string;
-  to: string;
-  kind: EdgeKind;
-  width: number;
-  bend: number;
-  label?: string;
-}
-
-const EDGES: EdgeDef[] = [
-  { id: "bg1", from: "박수진", to: "한하린", kind: "faint", width: 2.5, bend: 0.18 },
-  { id: "bg2", from: "이철수", to: "박수진", kind: "faint", width: 2, bend: -0.1 },
-  { id: "bg3", from: "김민지", to: "정도윤", kind: "faint", width: 2, bend: 0.15 },
-  { id: "mc", selKey: "mc", from: "김민지", to: "이철수", kind: "conflict", width: 4.5, bend: -0.2, label: "갈등 중" },
-  { id: "ms", selKey: "ms", from: "김민지", to: "박수진", kind: "trust", width: 4, bend: 0.18, label: "신뢰 회복 중" },
-  { id: "me", selKey: "me", from: "당신", to: "김민지", kind: "close", width: 5.5, bend: 0.2, label: "가까운 사이" },
-];
-
-const KIND_STYLE: Record<EdgeKind, { from: string; to: string; dash?: string }> = {
-  conflict: { from: "#F7A8C4", to: "#E36F9A", dash: "11 8" },
-  trust: { from: "#9FDBBB", to: "#5FBF95" },
-  close: { from: "#9FBCF2", to: "#6D8DD6" },
-  faint: { from: "#E2EAF6", to: "#D4DFF0" },
-};
 
 function quadPath(a: Placed, b: Placed, bend: number): { d: string; mid: [number, number] } {
   const dx = b.x - a.x;
@@ -184,27 +187,14 @@ function EdgeGroup({
   a: Placed;
   b: Placed;
   selected: boolean;
-  onSelect?: () => void;
+  onSelect: () => void;
 }) {
-  const { d, mid } = quadPath(a, b, edge.bend);
+  const { d, mid } = quadPath(a, b, 0.16);
   const style = KIND_STYLE[edge.kind];
-  const gradId = `lf-eg-${edge.id}`;
-  const pathId = `lf-ep-${edge.id}`;
+  const gradId = `lf-eg-${edge.actorId}`;
+  const pathId = `lf-ep-${edge.actorId}`;
   const flowing = edge.kind === "conflict" || selected;
   const depthOpacity = 0.55 + 0.45 * ((a.depth + b.depth) / 2);
-
-  if (edge.kind === "faint") {
-    return (
-      <path
-        d={d}
-        stroke={style.from}
-        strokeWidth={edge.width}
-        fill="none"
-        strokeLinecap="round"
-        opacity={depthOpacity * 0.9}
-      />
-    );
-  }
 
   return (
     <g className={styles.edgeGroup} onClick={onSelect} opacity={depthOpacity}>
@@ -214,8 +204,6 @@ function EdgeGroup({
           <stop offset="100%" stopColor={style.to} />
         </linearGradient>
       </defs>
-
-      {/* 헤일로 — 블러 글로우. 선택되면 숨쉰다 */}
       <path
         className={styles.edgeHalo}
         d={d}
@@ -226,8 +214,6 @@ function EdgeGroup({
         filter="url(#lf-glow)"
         style={selected ? { opacity: 0.7, animation: "lf-breathe 2.6s ease-in-out infinite" } : undefined}
       />
-
-      {/* 본선 */}
       <path
         id={pathId}
         d={d}
@@ -238,8 +224,6 @@ function EdgeGroup({
         strokeDasharray={style.dash}
         style={flowing && style.dash ? { animation: "lf-dash 1.6s linear infinite" } : undefined}
       />
-
-      {/* 선택 에지 위를 흐르는 입자 — 관계가 살아있다 */}
       {selected &&
         [0, 1.1].map((delay) => (
           <circle key={delay} r={3.2} fill="#ffffff" stroke={style.to} strokeWidth={1.2} opacity={0.95}>
@@ -248,12 +232,8 @@ function EdgeGroup({
             </animateMotion>
           </circle>
         ))}
-
-      {/* 넉넉한 히트 영역 */}
       <path d={d} stroke="transparent" strokeWidth={26} fill="none" />
-
-      {/* 관계 라벨 필 */}
-      {edge.label && (
+      {selected && (
         <g className={styles.edgeLabel}>
           <rect
             x={mid[0] - edge.label.length * 6.4 - 10}
@@ -262,18 +242,11 @@ function EdgeGroup({
             height={26}
             rx={13}
             fill="#ffffff"
-            stroke={selected ? style.to : "#E2EAF6"}
+            stroke={style.to}
             strokeWidth={1.5}
             filter="url(#lf-soft)"
           />
-          <text
-            x={mid[0]}
-            y={mid[1] + 4.5}
-            textAnchor="middle"
-            fontSize={12.5}
-            fontWeight={800}
-            fill={selected ? style.to : "#6B7691"}
-          >
+          <text x={mid[0]} y={mid[1] + 4.5} textAnchor="middle" fontSize={12.5} fontWeight={800} fill={style.to}>
             {edge.label}
           </text>
         </g>
@@ -306,8 +279,6 @@ function NodeGroup({
           <stop offset="100%" stopColor={node.edge} />
         </radialGradient>
       </defs>
-
-      {/* 선택 소나 펄스 */}
       {selected &&
         [0, 0.9].map((delay) => (
           <circle
@@ -325,17 +296,12 @@ function NodeGroup({
             }}
           />
         ))}
-
-      {/* 화이트 링 + 본체 */}
       <circle cx={cx} cy={cy} r={r + 4} fill="#ffffff" filter="url(#lf-soft)" />
       {selected && <circle cx={cx} cy={cy} r={r + 5.5} fill="none" stroke="#6D8DD6" strokeWidth={2.5} />}
-      {/* 플레이어(당신) 노드는 점선 오라 — 세계 밖에서 온 존재 */}
       {node.isPlayer && (
         <circle cx={cx} cy={cy} r={r + 10} fill="none" stroke="#6D8DD6" strokeWidth={1.5} strokeDasharray="3 5" opacity={0.6} />
       )}
       <circle cx={cx} cy={cy} r={r} fill={`url(#${gradId})`} />
-
-      {/* 얼굴 — 프로토타입 블롭 비율 그대로 (눈 11%, 입 18%) */}
       <circle cx={cx - r * 0.42} cy={cy - r * 0.18} r={r * 0.11} fill="#3A4256" />
       <circle cx={cx + r * 0.42} cy={cy - r * 0.18} r={r * 0.11} fill="#3A4256" />
       <path
@@ -345,8 +311,6 @@ function NodeGroup({
         fill="none"
         strokeLinecap="round"
       />
-
-      {/* 이름 라벨 — 흰 스트로크 헤일로로 배경 위에서도 또렷하게 */}
       <text
         x={cx}
         y={cy + r + 21}
@@ -370,32 +334,24 @@ const LEGEND: { label: string; kind: EdgeKind }[] = [
   { label: "친밀", kind: "close" },
 ];
 
-/** 궤도 캔버스 — 드래그 회전(관성) + 휠 줌 + 더블클릭 리셋 */
-function GraphCanvas({ sel, onSelect, liveEdges }: GraphTabProps) {
+function GraphCanvas({
+  nodes,
+  edges,
+  selected,
+  onSelect,
+}: {
+  nodes: NodeDef[];
+  edges: EdgeDef[];
+  selected: string | null;
+  onSelect: (actorId: string | null) => void;
+}) {
   const [theta, setTheta] = useState(0);
   const [zoom, setZoom] = useState(1);
   const drag = useRef({ active: false, lastX: 0, moved: 0, velocity: 0, lastAt: 0 });
   const raf = useRef<number | undefined>(undefined);
 
-  // 실측 병합 — 아는 인물은 관계도 교체, 새 인물(김아리 등)은 궤도에 등장한다
-  const nodes = useMemo(() => mergeLive(NODES, liveEdges), [liveEdges]);
   const orbits = useMemo(() => orbitsFor(nodes), [nodes]);
-  const edges = useMemo(() => {
-    const known = new Set(NODES.map((n) => n.name));
-    const dynamic: EdgeDef[] = nodes
-      .filter((n) => !known.has(n.name))
-      .map((n) => ({
-        id: `live-${n.name}`,
-        from: "당신",
-        to: n.name,
-        kind: (n.strength >= 0.3 ? "close" : "faint") as EdgeKind,
-        width: 2 + 3 * n.strength,
-        bend: 0.12,
-      }));
-    return [...EDGES, ...dynamic];
-  }, [nodes]);
 
-  // 관성 루프 — 드래그를 놓으면 서서히 감속
   useEffect(() => {
     const step = () => {
       const d = drag.current;
@@ -412,10 +368,8 @@ function GraphCanvas({ sel, onSelect, liveEdges }: GraphTabProps) {
   }, []);
 
   const onPointerDown = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
-    // setPointerCapture 금지 — 캡처는 click까지 svg로 리타게팅해 에지/노드 선택을 죽인다
     drag.current = { active: true, lastX: e.clientX, moved: 0, velocity: 0, lastAt: e.timeStamp };
   }, []);
-
   const onPointerMove = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
     const d = drag.current;
     if (!d.active) return;
@@ -426,23 +380,18 @@ function GraphCanvas({ sel, onSelect, liveEdges }: GraphTabProps) {
     d.velocity = dTheta;
     setTheta((t) => t + dTheta);
   }, []);
-
   const onPointerUp = useCallback(() => {
     drag.current.active = false;
   }, []);
-
-  // 드래그였다면 click 무시 — 회전 끝에 관계가 바뀌는 오조작 방지
   const guarded = useCallback(
-    (key: RelKey) => () => {
-      if (drag.current.moved < 6) onSelect(key);
+    (actorId: string | null) => () => {
+      if (drag.current.moved < 6) onSelect(actorId);
     },
     [onSelect],
   );
-
   const onWheel = useCallback((e: React.WheelEvent<SVGSVGElement>) => {
     setZoom((z) => Math.min(1.35, Math.max(0.7, z * (e.deltaY > 0 ? 0.93 : 1.075))));
   }, []);
-
   const onDoubleClick = useCallback(() => {
     drag.current.velocity = 0;
     setTheta(0);
@@ -455,7 +404,6 @@ function GraphCanvas({ sel, onSelect, liveEdges }: GraphTabProps) {
     return map;
   }, [nodes, orbits, theta, zoom]);
 
-  // 깊이 정렬 — 뒤의 노드가 먼저 그려진다 (중심 플레이어는 중간층)
   const nodesByDepth = useMemo(
     () => [...nodes].sort((a, b) => placed[a.name].depth - placed[b.name].depth),
     [nodes, placed],
@@ -482,11 +430,9 @@ function GraphCanvas({ sel, onSelect, liveEdges }: GraphTabProps) {
       onDoubleClick={onDoubleClick}
     >
       <defs>
-        {/* 도트 그리드 — 공간감 */}
         <pattern id="lf-dots" width="26" height="26" patternUnits="userSpaceOnUse">
           <circle cx="2" cy="2" r="1.3" fill="#DDE7F5" />
         </pattern>
-        {/* 중심 비네트 — 민지가 이야기의 중심임을 은은하게 */}
         <radialGradient id="lf-vignette" cx="50%" cy="48%" r="55%">
           <stop offset="0%" stopColor="#EDF3FD" />
           <stop offset="100%" stopColor="#EDF3FD" stopOpacity={0} />
@@ -502,7 +448,6 @@ function GraphCanvas({ sel, onSelect, liveEdges }: GraphTabProps) {
       <rect width="760" height="620" fill="url(#lf-dots)" />
       <rect width="760" height="620" fill="url(#lf-vignette)" />
 
-      {/* 궤도 가이드 타원 — 아주 옅게 (안: 가장 가까운 사람, 밖: 알게 된 반경) */}
       {[175, 300].map((radius) => (
         <ellipse
           key={radius}
@@ -520,12 +465,12 @@ function GraphCanvas({ sel, onSelect, liveEdges }: GraphTabProps) {
 
       {edges.map((edge) => (
         <EdgeGroup
-          key={edge.id}
+          key={edge.actorId}
           edge={edge}
           a={placed[edge.from]}
           b={placed[edge.to]}
-          selected={edge.selKey !== undefined && edge.selKey === sel}
-          onSelect={edge.selKey ? guarded(edge.selKey) : undefined}
+          selected={edge.actorId === selected}
+          onSelect={guarded(edge.actorId)}
         />
       ))}
 
@@ -534,16 +479,120 @@ function GraphCanvas({ sel, onSelect, liveEdges }: GraphTabProps) {
           key={node.name}
           node={node}
           at={placed[node.name]}
-          selected={node.selKeys?.includes(sel) ?? false}
-          onSelect={node.selKeys ? guarded(node.selKeys[0]) : undefined}
+          selected={node.actorId !== null && node.actorId === selected}
+          onSelect={node.isPlayer ? undefined : guarded(node.actorId)}
         />
       ))}
     </svg>
   );
 }
 
-export function GraphTab({ sel, onSelect, liveEdges, liveAvailable }: GraphTabProps) {
-  const rel = REL[sel];
+const DIM_META: { key: keyof RelDimensions; label: string; color: string }[] = [
+  { key: "trust", label: "신뢰", color: "#5FBF95" },
+  { key: "intimacy", label: "친밀", color: "#6D8DD6" },
+  { key: "respect", label: "존중", color: "#7FA3E8" },
+  { key: "attraction", label: "끌림", color: "#C76F93" },
+  { key: "resentment", label: "원한", color: "#E36F9A" },
+];
+
+function RelationshipPanel({
+  edge,
+  identity,
+  name,
+}: {
+  edge: LiveRelEdge;
+  identity: ActorIdentity | undefined;
+  name: string;
+}) {
+  return (
+    <>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ fontSize: 18, fontWeight: 900 }}>{name}</div>
+          <div
+            style={{
+              padding: "3px 12px",
+              background: "#EDF3FD",
+              color: "#5F7EC9",
+              borderRadius: 9999,
+              fontSize: 12,
+              fontWeight: 800,
+            }}
+          >
+            {STAGE_KO[edge.stage] ?? edge.stage}
+          </div>
+        </div>
+        <div style={{ fontSize: 13, fontWeight: 800, color: "#6B7691" }}>
+          관계도 {Math.round(edge.strength * 100)}%
+        </div>
+      </div>
+
+      {identity?.bio && (
+        <div style={{ fontSize: 13, lineHeight: 1.6, color: "#6B7691", fontWeight: 600 }}>
+          {identity.bio}
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: "#8C97AF" }}>관계의 결 (실측)</div>
+        {DIM_META.map((dim) => {
+          const value = edge.dimensions[dim.key];
+          const magnitude = Math.min(1, Math.abs(value));
+          return (
+            <div key={dim.key} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ width: 34, fontSize: 12, fontWeight: 700, color: "#6B7691" }}>
+                {dim.label}
+              </div>
+              <div
+                style={{
+                  flex: 1,
+                  height: 8,
+                  borderRadius: 9999,
+                  background: "#EEF3FB",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    width: `${Math.round(magnitude * 100)}%`,
+                    height: "100%",
+                    borderRadius: 9999,
+                    background: value < 0 ? "#C0808F" : dim.color,
+                  }}
+                />
+              </div>
+              <div style={{ width: 40, textAlign: "right", fontSize: 12, fontWeight: 700, color: "#8C97AF" }}>
+                {value >= 0 ? "" : "−"}
+                {Math.round(magnitude * 100)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div
+        style={{
+          background: "#EDF3FD",
+          borderRadius: 16,
+          padding: "13px 15px",
+          fontSize: 12,
+          lineHeight: 1.55,
+          color: "#6B7691",
+          fontWeight: 600,
+        }}
+      >
+        <span style={{ fontWeight: 800, color: "#3A4256" }}>개입할 수 있어요</span> — DM이나 댓글로
+        {` ${name}`}과의 관계가 실제로 움직입니다. 개입은 흔적을 남겨요.
+      </div>
+    </>
+  );
+}
+
+export function GraphTab({ edges, available, nameOf, identityOf, selected, onSelect }: GraphTabProps) {
+  const nodes = useMemo(() => buildNodes(edges, nameOf), [edges, nameOf]);
+  const edgeDefs = useMemo(() => buildEdges(edges, nameOf), [edges, nameOf]);
+  const selectedEdge = edges.find((e) => e.actorId === selected) ?? null;
+
   return (
     <>
       <div
@@ -557,15 +606,36 @@ export function GraphTab({ sel, onSelect, liveEdges, liveAvailable }: GraphTabPr
       >
         <div style={{ fontSize: 18, fontWeight: 900 }}>관계 그래프</div>
         <div style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600 }}>
-          관계를 클릭해 이야기의 이력을 보세요
+          노드를 클릭해 그 관계의 결을 보세요
         </div>
       </div>
 
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
         <div style={{ flex: 1, position: "relative", background: "#F8FBFF" }}>
-          <GraphCanvas sel={sel} onSelect={onSelect} liveEdges={liveEdges} />
+          {edges.length > 0 ? (
+            <GraphCanvas nodes={nodes} edges={edgeDefs} selected={selected} onSelect={onSelect} />
+          ) : (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 40,
+                textAlign: "center",
+                color: "#8C97AF",
+                fontSize: 14,
+                fontWeight: 600,
+                lineHeight: 1.7,
+              }}
+            >
+              아직 이어진 관계가 없어요.
+              <br />
+              피드나 DM으로 개입하면 세계가 당신을 관계망에 새깁니다.
+            </div>
+          )}
 
-          {/* 범례 + 조작 힌트 */}
           <div
             style={{
               position: "absolute",
@@ -600,14 +670,8 @@ export function GraphTab({ sel, onSelect, liveEdges, liveAvailable }: GraphTabPr
               드래그 회전 · 휠 확대 · 더블클릭 초기화
             </div>
             <div style={{ width: 1, height: 14, background: "#E2EAF6" }} />
-            <div
-              style={{
-                fontSize: 11.5,
-                fontWeight: 800,
-                color: liveAvailable ? "#3E8A66" : "#8C97AF",
-              }}
-            >
-              {liveAvailable ? "관계도 실측 연결됨" : "관계도 데모 값"}
+            <div style={{ fontSize: 11.5, fontWeight: 800, color: available ? "#3E8A66" : "#8C97AF" }}>
+              {available ? "관계도 실측 연결됨" : "관계 데이터 대기 중"}
             </div>
           </div>
         </div>
@@ -624,81 +688,19 @@ export function GraphTab({ sel, onSelect, liveEdges, liveAvailable }: GraphTabPr
             overflowY: "auto",
           }}
         >
-          <div style={{ display: "flex", gap: 8 }}>
-            {REL_TAB_DEFS.map((rt) => {
-              const active = sel === rt.key;
-              return (
-                <div
-                  key={rt.key}
-                  onClick={() => onSelect(rt.key)}
-                  style={{
-                    padding: "7px 14px",
-                    background: active ? "#3A4256" : "#F2F6FC",
-                    color: active ? "#ffffff" : "#6B7691",
-                    borderRadius: 9999,
-                    fontSize: 12,
-                    fontWeight: 800,
-                    cursor: "pointer",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {rt.label}
-                </div>
-              );
-            })}
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <div style={{ fontSize: 17, fontWeight: 900 }}>{rel.title}</div>
-            <div style={{ fontSize: 13, fontWeight: 800, color: rel.statusColor }}>
-              {rel.status}
+          {selectedEdge ? (
+            <RelationshipPanel
+              edge={selectedEdge}
+              identity={identityOf(selectedEdge.actorId)}
+              name={nameOf(selectedEdge.actorId)}
+            />
+          ) : (
+            <div style={{ fontSize: 13, lineHeight: 1.7, color: "#8C97AF", fontWeight: 600 }}>
+              {edges.length > 0
+                ? "왼쪽 그래프에서 인물을 클릭하면, 그 관계의 실측 결(신뢰·친밀·원한)과 현재 단계가 여기 나타납니다."
+                : "아직 관계가 없어요. 세계에 개입하면 관계망이 자라납니다."}
             </div>
-          </div>
-
-          <div style={{ fontSize: 13, lineHeight: 1.6, color: "#6B7691", fontWeight: 600 }}>
-            {rel.desc}
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <div style={{ fontSize: 12, fontWeight: 800, color: "#8C97AF", marginBottom: 10 }}>
-              이 관계의 이력
-            </div>
-            {rel.history.map((rh) => (
-              <div key={rh.title} style={{ display: "flex", gap: 12 }}>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                  <div
-                    style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: "50%",
-                      background: rh.dot,
-                      marginTop: 4,
-                    }}
-                  />
-                  <div style={{ width: 2, flex: 1, background: "#EEF3FB" }} />
-                </div>
-                <div style={{ paddingBottom: 13 }}>
-                  <div style={{ fontSize: 13, fontWeight: 800 }}>{rh.title}</div>
-                  <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}>{rh.meta}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div
-            style={{
-              background: "#EDF3FD",
-              borderRadius: 16,
-              padding: "13px 15px",
-              fontSize: 12,
-              lineHeight: 1.55,
-              color: "#6B7691",
-              fontWeight: 600,
-            }}
-          >
-            <span style={{ fontWeight: 800, color: "#3A4256" }}>개입할 수 있어요</span> —{" "}
-            {rel.hint}
-          </div>
+          )}
         </div>
       </div>
     </>
