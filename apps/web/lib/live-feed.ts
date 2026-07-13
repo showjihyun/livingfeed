@@ -35,7 +35,9 @@ export interface LivePost {
 /** feed-api 응답 아이템 — os-projector가 평탄화한 색인 문서 */
 interface FeedDoc {
   event_id: string;
-  actor_id: string;
+  /** 세계 사건(Director incident) 포스트는 작성자가 없다 */
+  actor_id: string | null;
+  participants: string[];
   occurred_at: string;
   title: string;
   body: string;
@@ -48,7 +50,8 @@ function fromDoc(doc: FeedDoc): LivePost {
     id: doc.event_id,
     title: doc.title,
     body: doc.body,
-    authorId: doc.actor_id,
+    // SSE 경로(fromEnvelope)와 같은 폴백 — 작성자 없는 세계 뉴스는 "?"
+    authorId: doc.actor_id ?? doc.participants[0] ?? "?",
     occurredAt: doc.occurred_at,
     dramaScore: doc.drama_score,
     tags: doc.tags,

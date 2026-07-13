@@ -145,3 +145,17 @@ def test_without_player_id_ranking_is_shared_and_cached():
     assert [i["actor_id"] for i in body["items"]] == ["a_far", "a_close"]  # OS 순서 유지
     assert graph.calls == []
     assert len(cache.store) == 1
+
+
+def test_authorless_world_news_survives_personalization():
+    # Director 세계 사건 포스트는 actor_id가 없다 — 근접도 항 없이 밑점수를 유지해야 한다
+    client, search, graph, _ = make_personalized_client()
+    search.items = [
+        {"event_id": "01JZK7Q3W0000000000000000B", "actor_id": None, "_score": 0.60},
+        {"event_id": "01JZK7Q3W0000000000000000A", "actor_id": "a_close", "_score": 0.45},
+    ]
+    body = client.get("/feed", params={"player_id": "p_observer_0417", "limit": 2}).json()
+    assert body["personalized"] is True
+    assert graph.calls[0][2] == ("a_close",)  # None은 근접도 질의에 실리지 않는다
+    # 세계 뉴스(0.60) > a_close(0.45+0.25*0.8=0.65)? — 0.65가 앞선다: 정렬만 확인
+    assert [i["event_id"][-1] for i in body["items"]] == ["A", "B"]

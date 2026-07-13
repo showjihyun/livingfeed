@@ -1,4 +1,7 @@
 import { ICON, MINJI_TIMELINE } from "@/lib/data";
+import { relativeTime } from "@/lib/live-feed";
+import type { ActorProfile } from "@/lib/profile";
+import { humanize } from "@/lib/profile";
 
 import { Face } from "./Face";
 import { Icon } from "./Icon";
@@ -8,9 +11,13 @@ interface ProfileTabProps {
   following: boolean;
   onToggleFollow: () => void;
   goDm: () => void;
+  /** pg-projector 실측 내면 (ADR-003/008) — null이면 데모 서사를 유지한다 */
+  profile: ActorProfile | null;
 }
 
-export function ProfileTab({ following, onToggleFollow, goDm }: ProfileTabProps) {
+export function ProfileTab({ following, onToggleFollow, goDm, profile }: ProfileTabProps) {
+  const aboutMe = profile?.aboutMe ?? [];
+  const episodes = profile?.episodes ?? [];
   return (
     <div style={{ flex: 1, overflowY: "auto" }}>
       <div style={{ height: 110, background: "#EDF3FD" }} />
@@ -102,31 +109,83 @@ export function ProfileTab({ following, onToggleFollow, goDm }: ProfileTabProps)
           }}
         >
           <Icon d={ICON.journey} size={18} color="#A87F24" />
-          <div style={{ fontSize: 13, color: "#6B7691", fontWeight: 600 }}>
-            <span style={{ fontWeight: 800, color: "#3A4256" }}>당신과의 역사</span> · 3월 2일 첫
-            댓글 → 아는 사이 · 3월 8일 DM으로 조언 →{" "}
-            <span style={{ fontWeight: 800, color: "#3A4256" }}>친한 사이</span> · 민지는 당신의
-            조언을 기억하고 있어요
+          {aboutMe.length > 0 ? (
+            // 실측 — 민지가 나에 대해 실제로 형성한 신념 (reflection, ADR-008)
+            <div style={{ fontSize: 13, color: "#6B7691", fontWeight: 600 }}>
+              <span style={{ fontWeight: 800, color: "#3A4256" }}>민지의 마음속</span>
+              {aboutMe.map((b) => (
+                <span key={b.kind}>
+                  {" · "}
+                  {humanize(b.statement)}{" "}
+                  <span style={{ color: "#A87F24", fontWeight: 700 }}>
+                    (확신 {Math.round(b.confidence * 100)}%
+                    {b.revisions > 1 ? ` · ${b.revisions}번 곱씹음` : ""})
+                  </span>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: 13, color: "#6B7691", fontWeight: 600 }}>
+              <span style={{ fontWeight: 800, color: "#3A4256" }}>당신과의 역사</span> · 3월 2일 첫
+              댓글 → 아는 사이 · 3월 8일 DM으로 조언 →{" "}
+              <span style={{ fontWeight: 800, color: "#3A4256" }}>친한 사이</span> · 민지는 당신의
+              조언을 기억하고 있어요
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>민지의 기억</div>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 800,
+              color: episodes.length > 0 ? "#3E8A66" : "#8C97AF",
+            }}
+          >
+            {episodes.length > 0 ? "기억 실측 연결됨" : "데모 서사"}
           </div>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {MINJI_TIMELINE.map((tp) => (
-            <div
-              key={tp.meta}
-              style={{
-                border: "1.5px solid #E2EAF6",
-                borderRadius: 18,
-                padding: "16px 20px",
-                display: "flex",
-                flexDirection: "column",
-                gap: 8,
-              }}
-            >
-              <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 700 }}>{tp.meta}</div>
-              <div style={{ fontSize: 14, lineHeight: 1.65, fontWeight: 500 }}>{tp.text}</div>
-            </div>
-          ))}
+          {episodes.length > 0
+            ? episodes.map((ep) => (
+                <div
+                  key={ep.id}
+                  style={{
+                    border: "1.5px solid #E2EAF6",
+                    borderRadius: 18,
+                    padding: "16px 20px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
+                >
+                  <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 700 }}>
+                    {relativeTime(ep.occurredAt)} · 마음에 남은 정도{" "}
+                    {Math.round(ep.importance * 100)}%
+                  </div>
+                  <div style={{ fontSize: 14, lineHeight: 1.65, fontWeight: 500 }}>
+                    {humanize(ep.summary)}
+                  </div>
+                </div>
+              ))
+            : MINJI_TIMELINE.map((tp) => (
+                <div
+                  key={tp.meta}
+                  style={{
+                    border: "1.5px solid #E2EAF6",
+                    borderRadius: 18,
+                    padding: "16px 20px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
+                >
+                  <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 700 }}>{tp.meta}</div>
+                  <div style={{ fontSize: 14, lineHeight: 1.65, fontWeight: 500 }}>{tp.text}</div>
+                </div>
+              ))}
         </div>
       </div>
     </div>

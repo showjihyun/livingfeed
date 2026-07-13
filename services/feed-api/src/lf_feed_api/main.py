@@ -175,8 +175,9 @@ def create_app(
         )
 
         if personalize and result["items"]:
-            authors = sorted({item["actor_id"] for item in result["items"]})
-            proximity = await graph.proximity(world_id, player_id, authors)
+            # 세계 사건(Director incident) 포스트는 작성자가 없다 — 근접도 항 제외
+            authors = sorted({a for item in result["items"] if (a := item["actor_id"]) is not None})
+            proximity = await graph.proximity(world_id, player_id, authors) if authors else {}
             if proximity:
                 # score = OS(0.4·drama + 0.2·시간감쇠) + 0.25·관계근접도 (ADR-014)
                 for item in result["items"]:

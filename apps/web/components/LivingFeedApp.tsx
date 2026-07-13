@@ -14,6 +14,8 @@ import {
 import { useRelationshipGraph } from "@/lib/graph";
 import type { LivePost } from "@/lib/live-feed";
 import { useLiveFeed } from "@/lib/live-feed";
+import { fetchDmHistory } from "@/lib/messages";
+import { useActorProfile } from "@/lib/profile";
 import { naturalDelayMs, useActorSession } from "@/lib/session";
 import type { DmMessage, FeedComment, RelKey, Screen, Tab, Toast } from "@/lib/types";
 
@@ -106,6 +108,23 @@ export function LivingFeedApp() {
 
   // 관계 그래프 실측 (kuzu-projector, ADR-006) — 미가용이면 데모 배치 유지
   const relGraph = useRelationshipGraph(screen === "app");
+
+  // 민지의 내면 실측 (pg-projector 신념·에피소드, ADR-003/008) — 미가용이면 데모 서사
+  const minjiProfile = useActorProfile(MINJI_ACTOR_ID, screen === "app");
+
+  // 지난 대화 이어받기 (read.messages) — 아직 데모 인트로 그대로일 때만 교체한다:
+  // 사용자가 이미 대화를 시작했다면 히스토리가 그 위를 덮어쓰면 안 된다
+  useEffect(() => {
+    if (screen !== "app") return;
+    let cancelled = false;
+    void fetchDmHistory(MINJI_ACTOR_ID).then((history) => {
+      if (cancelled || !history) return;
+      setDmMsgs((current) => (current === INITIAL_DM ? history : current));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [screen]);
 
   // 상호작용 세션 (WS) — DM/좋아요를 실세계에 꽂는다. 미가용이면 데모 폴백.
   const session = useActorSession({
@@ -349,6 +368,7 @@ export function LivingFeedApp() {
             following={followMinji}
             onToggleFollow={() => setFollowMinji((f) => !f)}
             goDm={goDm}
+            profile={minjiProfile.profile}
           />
         )}
         {tab === "dm" && (
