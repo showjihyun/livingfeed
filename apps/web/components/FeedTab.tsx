@@ -14,6 +14,8 @@ interface FeedTabProps {
   liveStatus: LiveStatus;
   likedLive: ReadonlySet<string>;
   onLikeLive: (post: LivePost) => void;
+  /** featured 카드의 대상 액터 표시 이름 — 라이브 identity에서 (하드코딩 금지) */
+  focusName: string;
   showCoach: boolean;
   onDismissCoach: () => void;
   streaming: boolean;
@@ -84,6 +86,7 @@ export function FeedTab({
   liveStatus,
   likedLive,
   onLikeLive,
+  focusName,
   showCoach,
   onDismissCoach,
   streaming,
@@ -241,7 +244,7 @@ export function FeedTab({
                     onClick={goProfile}
                     style={{ fontSize: 15, fontWeight: 800, cursor: "pointer" }}
                   >
-                    김민지
+                    {focusName}
                   </div>
                   <div
                     style={{

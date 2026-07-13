@@ -68,6 +68,7 @@ async def run() -> None:
             semantic=semantic,
             belief_ledger=BeliefLedger(redis),
             reflection_interval=int(os.environ.get("LF_REFLECT_INTERVAL", "30")),
+            identity_redis=redis,
         )
         # tick 루프와 메일박스 라우터(LF_PLAYER → Redis)가 나란히 돈다 (ADR-012)
         await asyncio.gather(

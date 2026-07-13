@@ -23,6 +23,7 @@ export interface FeedComment {
 }
 
 export interface DmMessage {
-  from: "me" | "minji";
+  /** 발신 주체 — 나(플레이어) 또는 상대 액터 (특정 인물에 묶지 않는다) */
+  from: "me" | "actor";
   text: string;
 }

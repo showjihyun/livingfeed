@@ -8,6 +8,19 @@ from __future__ import annotations
 
 from typing import Any
 
+_IDENTITY_SQL = """
+SELECT actor_id, name, archetype, bio, goals
+FROM read.actors
+WHERE world_id = %s AND actor_id = %s
+"""
+
+_ACTORS_SQL = """
+SELECT actor_id, name, archetype, bio, goals
+FROM read.actors
+WHERE world_id = %s
+ORDER BY actor_id
+"""
+
 _BELIEFS_SQL = """
 SELECT kind, NULLIF(about_id, '-') AS about_id, statement, confidence,
        source_event_ids, event_id, first_formed_at, updated_at, revisions
@@ -15,6 +28,8 @@ FROM read.actor_beliefs
 WHERE world_id = %s AND actor_id = %s
 ORDER BY confidence DESC, kind, about_id
 """
+
+_IDENTITY_COLS = ("actor_id", "name", "archetype", "bio", "goals")
 
 _EPISODES_SQL = """
 SELECT event_id, tick, occurred_at, summary, importance, factors, tags, source_event_ids
@@ -44,11 +59,20 @@ class ProfileReads:
     def __init__(self, pool: Any) -> None:
         self._pool = pool
 
+    async def actors(self, world_id: str) -> list[dict[str, Any]]:
+        """세계의 액터 명단 — FE가 이름·소개를 하드코딩하지 않고 여기서 읽는다 (ADR-012)."""
+        async with self._pool.connection() as conn:
+            rows = await (await conn.execute(_ACTORS_SQL, (world_id,))).fetchall()
+        return _rows_to_dicts(_IDENTITY_COLS, rows)
+
     async def actor_profile(
         self, world_id: str, actor_id: str, *, episode_limit: int, episode_cursor: str | None
     ) -> dict[str, Any]:
-        """신념 전체(확신 내림차순) + 최근 에피소드 페이지 — 액터의 내면이 읽힌다 (ADR-008)."""
+        """정체성 + 신념 전체(확신순) + 최근 에피소드 페이지 — 액터의 겉과 속 (ADR-012/008)."""
         async with self._pool.connection() as conn:
+            identity_row = await (await conn.execute(
+                _IDENTITY_SQL, (world_id, actor_id)
+            )).fetchone()
             beliefs = await (await conn.execute(
                 _BELIEFS_SQL, (world_id, actor_id)
             )).fetchall()
@@ -56,6 +80,9 @@ class ProfileReads:
                 _EPISODES_SQL,
                 (world_id, actor_id, episode_cursor, episode_cursor, episode_limit),
             )).fetchall()
+        identity = (
+            dict(zip(_IDENTITY_COLS, identity_row)) if identity_row is not None else None
+        )
         episode_items = _rows_to_dicts(
             ("event_id", "tick", "occurred_at", "summary", "importance",
              "factors", "tags", "source_event_ids"),
@@ -64,6 +91,7 @@ class ProfileReads:
         return {
             "world_id": world_id,
             "actor_id": actor_id,
+            "identity": identity,
             "beliefs": _rows_to_dicts(
                 ("kind", "about_id", "statement", "confidence", "source_event_ids",
                  "event_id", "first_formed_at", "updated_at", "revisions"),

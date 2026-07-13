@@ -11,6 +11,7 @@ import {
   WORLD_MIN_START,
   formatWorldTime,
 } from "@/lib/data";
+import { useActorDirectory } from "@/lib/actors";
 import { FOCUS_ACTOR_ID } from "@/lib/config";
 import { useRelationshipGraph } from "@/lib/graph";
 import type { LivePost } from "@/lib/live-feed";
@@ -30,13 +31,6 @@ import { ProfileTab } from "./ProfileTab";
 import { Sidebar } from "./Sidebar";
 import { Toasts } from "./Toasts";
 
-const INITIAL_DM: DmMessage[] = [
-  { from: "me", text: "기획안 얘기 봤어요. 그거 민지님 아이디어인 거 팀 사람들도 다 알 거예요." },
-  {
-    from: "minji",
-    text: "어제 그 얘기, 하루 종일 생각했어요. 고마워요. 사실 아무한테도 말 못 하고 있었거든요.",
-  },
-];
 
 export function LivingFeedApp() {
   const [screen, setScreen] = useState<Screen>("onboarding");
@@ -57,7 +51,7 @@ export function LivingFeedApp() {
   const [commentDraft, setCommentDraft] = useState("");
   const [minjiTyping, setMinjiTyping] = useState(false);
 
-  const [dmMsgs, setDmMsgs] = useState<DmMessage[]>(INITIAL_DM);
+  const [dmMsgs, setDmMsgs] = useState<DmMessage[]>([]);
   const [dmDraft, setDmDraft] = useState("");
   const [dmTyping, setDmTyping] = useState(false);
 
@@ -107,17 +101,21 @@ export function LivingFeedApp() {
   // 관계 그래프 실측 (kuzu-projector, ADR-006) — 미가용이면 데모 배치 유지
   const relGraph = useRelationshipGraph(screen === "app");
 
-  // 민지의 내면 실측 (pg-projector 신념·에피소드, ADR-003/008) — 미가용이면 데모 서사
-  const minjiProfile = useActorProfile(FOCUS_ACTOR_ID, screen === "app");
+  // 액터 명단(read.actors) — 표시 이름을 여기서 읽는다 (하드코딩 금지, ADR-012)
+  const directory = useActorDirectory(screen === "app");
+  const focusActor = directory.byId.get(FOCUS_ACTOR_ID);
+  const focusName = focusActor?.name ?? "상대";
 
-  // 지난 대화 이어받기 (read.messages) — 아직 데모 인트로 그대로일 때만 교체한다:
-  // 사용자가 이미 대화를 시작했다면 히스토리가 그 위를 덮어쓰면 안 된다
+  // 액터의 내면 실측 (pg-projector 신념·에피소드, ADR-003/008) — 미가용이면 데모 서사
+  const focusProfile = useActorProfile(FOCUS_ACTOR_ID, screen === "app");
+
+  // 지난 대화 이어받기 (read.messages) — 사용자가 아직 아무 말도 안 했을 때만 채운다
   useEffect(() => {
     if (screen !== "app") return;
     let cancelled = false;
     void fetchDmHistory(FOCUS_ACTOR_ID).then((history) => {
       if (cancelled || !history) return;
-      setDmMsgs((current) => (current === INITIAL_DM ? history : current));
+      setDmMsgs((current) => (current.length === 0 ? history : current));
     });
     return () => {
       cancelled = true;
@@ -140,7 +138,7 @@ export function LivingFeedApp() {
         setDmTyping(true);
         after(naturalDelayMs(), () => {
           setDmTyping(false);
-          setDmMsgs((list) => [...list, { from: "minji", text: reply.text }]);
+          setDmMsgs((list) => [...list, { from: "actor", text: reply.text }]);
         });
       } else if (reply.channel === "comment") {
         setMinjiTyping(true);
@@ -148,7 +146,7 @@ export function LivingFeedApp() {
           setMinjiTyping(false);
           setMinjiComments((list) => [
             ...list,
-            { author: "김민지", text: reply.text, bg: "#F8FAFD", avatarBg: "#AFC8F5" },
+            { author: focusName, text: reply.text, bg: "#F8FAFD", avatarBg: "#AFC8F5" },
           ]);
         });
       }
@@ -260,7 +258,7 @@ export function LivingFeedApp() {
       setMinjiTyping(false);
       setMinjiComments((list) => [
         ...list,
-        { author: "김민지", text: COMMENT_REPLIES[step], bg: "#F8FAFD", avatarBg: "#AFC8F5" },
+        { author: focusName, text: COMMENT_REPLIES[step], bg: "#F8FAFD", avatarBg: "#AFC8F5" },
       ]);
     });
     if (step === 0) {
@@ -309,7 +307,7 @@ export function LivingFeedApp() {
     after(naturalDelayMs(), () => {
       dmIdx.current += 1;
       setDmTyping(false);
-      setDmMsgs((list) => [...list, { from: "minji", text: DM_REPLIES[idx] }]);
+      setDmMsgs((list) => [...list, { from: "actor", text: DM_REPLIES[idx] }]);
     });
   }, [after, dmDraft, dmTyping, session]);
 
@@ -359,6 +357,7 @@ export function LivingFeedApp() {
             liveStatus={liveStatus}
             likedLive={likedLive}
             onLikeLive={likeLivePost}
+            focusName={focusName}
             showCoach={screen === "app" && !coachDismissed}
             onDismissCoach={() => setCoachDismissed(true)}
             streaming={screen === "app" && !streamDone}
@@ -386,12 +385,13 @@ export function LivingFeedApp() {
             following={followMinji}
             onToggleFollow={() => setFollowMinji((f) => !f)}
             goDm={goDm}
-            profile={minjiProfile.profile}
+            profile={focusProfile.profile}
           />
         )}
         {tab === "dm" && (
           <DmTab
             worldTime={worldTime}
+            partnerName={focusName}
             messages={dmMsgs}
             typing={dmTyping}
             draft={dmDraft}

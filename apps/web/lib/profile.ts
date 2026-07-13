@@ -10,6 +10,7 @@
 
 import { useEffect, useState } from "react";
 
+import type { ActorIdentity } from "./actors";
 import { PLAYER_ID } from "./config";
 
 const FEED_API_URL = process.env.NEXT_PUBLIC_LF_FEED_API_URL ?? "http://localhost:8001";
@@ -32,6 +33,8 @@ export interface ActorEpisode {
 }
 
 export interface ActorProfile {
+  /** 이름·소개·목표 — read.actors (없으면 null, 화면은 식별자 폴백) */
+  identity: ActorIdentity | null;
   /** 나(플레이어)에 대한 신념 — "그가 나를 어떻게 생각하는가" */
   aboutMe: ActorBelief[];
   beliefs: ActorBelief[];
@@ -40,6 +43,14 @@ export interface ActorProfile {
 
 /** feed-api GET /actors/{id}/profile 응답 (reads.py 계약) */
 interface ProfileResponse {
+  actor_id: string;
+  identity: {
+    actor_id: string;
+    name: string;
+    archetype: string;
+    bio: string;
+    goals: { description: string; priority: number }[];
+  } | null;
   beliefs: {
     kind: string;
     about_id: string | null;
@@ -80,7 +91,17 @@ function fromResponse(body: ProfileResponse): ActorProfile {
     confidence: b.confidence,
     revisions: b.revisions,
   }));
+  const id = body.identity;
   return {
+    identity: id
+      ? {
+          actorId: id.actor_id,
+          name: id.name,
+          archetype: id.archetype,
+          bio: id.bio,
+          goals: id.goals ?? [],
+        }
+      : null,
     aboutMe: beliefs.filter((b) => b.aboutId === PLAYER_ID),
     beliefs,
     episodes: body.episodes.items.map((e) => ({
@@ -119,8 +140,11 @@ export function useActorProfile(
     };
   }, [actorId, enabled]);
 
-  // 실측이 "있다"고 말하려면 내용이 있어야 한다 — 빈 응답은 데모가 더 낫다
+  // 실측이 "있다"고 말하려면 내용이 있어야 한다 — 정체성·신념·기억 중 하나라도
   const available =
-    profile !== null && (profile.episodes.length > 0 || profile.beliefs.length > 0);
+    profile !== null &&
+    (profile.identity !== null ||
+      profile.episodes.length > 0 ||
+      profile.beliefs.length > 0);
   return { profile: available ? profile : null, available };
 }

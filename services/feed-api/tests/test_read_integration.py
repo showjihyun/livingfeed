@@ -30,6 +30,7 @@ async def seed(pg) -> None:
     store = ReadStore(pg)
     await store.ensure()
     for name in (
+        "actor.identity.declared",
         "actor.memory.consolidated", "actor.belief.formed",
         "player.dm.sent", "actor.message.sent",
     ):
@@ -41,6 +42,9 @@ async def test_actor_profile_roundtrip(pg):
     profile = await ProfileReads(OneConnPool(pg)).actor_profile(
         WORLD, ACTOR, episode_limit=10, episode_cursor=None
     )
+    # 정체성(read.actors)이 프로필에 실린다 — FE는 이 이름을 쓴다 (하드코딩 금지)
+    assert profile["identity"]["name"] == "김아리"
+    assert profile["identity"]["archetype"] == "ambitious_journalist"
     [belief] = profile["beliefs"]
     assert belief["kind"] == "supporter"
     assert belief["about_id"] == PLAYER  # '-' 정규화가 아닌 실제 대상은 그대로
@@ -49,6 +53,13 @@ async def test_actor_profile_roundtrip(pg):
     assert "지지해줬다" in episode["summary"]
     assert episode["factors"]["emotion"] == 0.83  # jsonb → dict
     assert profile["episodes"]["next_cursor"] == episode["event_id"]
+
+
+async def test_actors_list_reads_identity(pg):
+    await seed(pg)
+    listing = await ProfileReads(OneConnPool(pg)).actors(WORLD)
+    assert [a["name"] for a in listing] == ["김아리"]
+    assert listing[0]["actor_id"] == ACTOR
 
 
 async def test_episode_cursor_pages_backwards(pg):

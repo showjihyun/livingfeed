@@ -205,6 +205,13 @@ def create_app(
             raise HTTPException(400, "cursor는 ULID여야 한다 (event id)")
         return cursor
 
+    @app.get("/actors")
+    async def actors(
+        world_id: str = Query("w_main", pattern=r"^w_[a-z0-9_]+$"),
+    ) -> dict:
+        """세계 액터 명단 — FE가 표시 이름·소개를 이 read 모델에서 읽는다 (하드코딩 금지)."""
+        return {"world_id": world_id, "actors": await _reads().actors(world_id)}
+
     @app.get("/actors/{actor_id}/profile")
     async def actor_profile(
         actor_id: str = Path(pattern=r"^a_[a-z0-9_]+$"),

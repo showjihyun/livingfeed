@@ -9,6 +9,8 @@ import styles from "./lf.module.css";
 
 interface DmTabProps {
   worldTime: string;
+  /** 대화 상대 표시 이름 — 라이브 identity에서 온다 (하드코딩 금지) */
+  partnerName: string;
   messages: DmMessage[];
   typing: boolean;
   draft: string;
@@ -16,7 +18,15 @@ interface DmTabProps {
   onSend: () => void;
 }
 
-export function DmTab({ worldTime, messages, typing, draft, onDraftChange, onSend }: DmTabProps) {
+export function DmTab({
+  worldTime,
+  partnerName,
+  messages,
+  typing,
+  draft,
+  onDraftChange,
+  onSend,
+}: DmTabProps) {
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") onSend();
   };
@@ -34,11 +44,11 @@ export function DmTab({ worldTime, messages, typing, draft, onDraftChange, onSen
       >
         <Face preset="dmHeader38" />
         <div style={{ display: "flex", flexDirection: "column" }}>
-          <div style={{ fontSize: 15, fontWeight: 800 }}>김민지</div>
+          <div style={{ fontSize: 15, fontWeight: 800 }}>{partnerName}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Icon d={ICON.moon} size={12} color="#8C97AF" />
             <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}>
-              지금 야근 중 · 답장이 느릴 수 있어요
+              답장이 느릴 수 있어요
             </div>
           </div>
         </div>
@@ -142,7 +152,9 @@ export function DmTab({ worldTime, messages, typing, draft, onDraftChange, onSen
                 }}
               />
             </div>
-            <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}>민지가 입력 중...</div>
+            <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}>
+              {partnerName}가 입력 중...
+            </div>
           </div>
         )}
       </div>
@@ -160,7 +172,7 @@ export function DmTab({ worldTime, messages, typing, draft, onDraftChange, onSen
           value={draft}
           onChange={(e) => onDraftChange(e.target.value)}
           onKeyDown={onKey}
-          placeholder="민지에게 답장하기..."
+          placeholder={`${partnerName}에게 답장하기...`}
           style={{
             flex: 1,
             background: "#F2F6FC",

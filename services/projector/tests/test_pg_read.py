@@ -72,6 +72,31 @@ async def test_apply_is_idempotent(pg):
     assert [r[0] for r in rows] == ["player", "actor"]
 
 
+async def test_identity_projects_and_upserts_forward(pg):
+    store = ReadStore(pg)
+    await store.ensure()
+    assert await store.apply(sample("actor.identity.declared"))
+    assert await store.apply(sample("actor.identity.declared"))  # 재선언 — 무변화
+
+    # 나중 선언(더 큰 ULID)은 갱신, 과거 ULID는 무시 (신념과 같은 순서 가드)
+    newer = sample("actor.identity.declared")
+    newer["event_id"] = newer["event_id"][:-1] + "Z"
+    newer["payload"]["name"] = "김아리(수정)"
+    await store.apply(newer)
+    stale = sample("actor.identity.declared")
+    stale["event_id"] = "0" * 26
+    stale["payload"]["name"] = "무시됨"
+    await store.apply(stale)
+
+    row = await (await pg.execute(
+        "SELECT name, archetype, goals FROM read.actors"
+        " WHERE world_id = 'w_main' AND actor_id = 'a_aria_kim'"
+    )).fetchone()
+    assert row[0] == "김아리(수정)"
+    assert row[1] == "ambitious_journalist"
+    assert any(g["priority"] == 0.9 for g in row[2])  # jsonb → list[dict]
+
+
 async def test_unknown_type_is_not_projected(pg):
     store = ReadStore(pg)
     await store.ensure()

@@ -33,7 +33,7 @@ export async function fetchDmHistory(actorId: string): Promise<DmMessage[] | nul
     // 응답은 최신부터 — 채팅은 과거부터 그린다
     return dm
       .reverse()
-      .map((m) => ({ from: m.sender === "player" ? "me" : "minji", text: m.text }));
+      .map((m) => ({ from: m.sender === "player" ? "me" : "actor", text: m.text }));
   } catch {
     return null;
   }

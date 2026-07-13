@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/actor.identity.declared.schema.json",
+  "title": "ActorIdentityDeclared",
+  "description": "액터가 세계에 등장하며 정체성을 선언한다 — 페르소나 정체성(agents/personas, ADR-012)이 read 모델로 노출되는 경로. 정체성은 불변이라 세계당 1회 발행되고, pg-projector가 read.actors로 프로젝션해 웹 클라이언트가 실제 이름·소개·목표를 읽는다 (표시 데이터 하드코딩 금지).",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "표시 이름 (프로필·DM·피드 헤더)",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "archetype": {
+      "type": "string",
+      "description": "원형 분류 — 검색·표시 태그",
+      "pattern": "^[a-z_]+$"
+    },
+    "bio": {
+      "type": "string",
+      "description": "identity_core 요약 — 프로필 소개문",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "goals": {
+      "type": "array",
+      "description": "공개 목표 (프로필 표시) — 우선순위순은 소비자 몫",
+      "items": {
+        "type": "object",
+        "properties": {
+          "description": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "priority": { "type": "number", "minimum": 0, "maximum": 1 }
+        },
+        "required": ["description", "priority"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["name", "archetype", "bio", "goals"],
+  "additionalProperties": false
+}

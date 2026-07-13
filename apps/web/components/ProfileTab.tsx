@@ -18,6 +18,14 @@ interface ProfileTabProps {
 export function ProfileTab({ following, onToggleFollow, goDm, profile }: ProfileTabProps) {
   const aboutMe = profile?.aboutMe ?? [];
   const episodes = profile?.episodes ?? [];
+  const identity = profile?.identity ?? null;
+  // 표시 이름·소개·목표는 라이브 데이터에서 — 없을 때만 데모 문구 (하드코딩 대체)
+  const displayName = identity?.name ?? "김민지";
+  const displayBio = identity?.bio ?? "28세 · 스타트업 마케터 · 밤에 글을 쓴다";
+  const topGoal = identity?.goals.slice().sort((a, b) => b.priority - a.priority)[0];
+  const tagline = topGoal
+    ? `요즘 몰두하는 것 — ${topGoal.description}`
+    : "요즘 마음이 복잡해 보여요 — 회사 이야기를 꺼낼 때 말이 짧아져요";
   return (
     <div style={{ flex: 1, overflowY: "auto" }}>
       <div style={{ height: 110, background: "#EDF3FD" }} />
@@ -41,7 +49,7 @@ export function ProfileTab({ following, onToggleFollow, goDm, profile }: Profile
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ fontSize: 26, fontWeight: 900 }}>김민지</div>
+              <div style={{ fontSize: 26, fontWeight: 900 }}>{displayName}</div>
               <div
                 style={{
                   padding: "3px 12px",
@@ -55,13 +63,11 @@ export function ProfileTab({ following, onToggleFollow, goDm, profile }: Profile
                 당신과 친한 사이
               </div>
             </div>
-            <div style={{ fontSize: 14, color: "#6B7691", fontWeight: 600 }}>
-              28세 · 스타트업 마케터 · 밤에 글을 쓴다
-            </div>
+            <div style={{ fontSize: 14, color: "#6B7691", fontWeight: 600 }}>{displayBio}</div>
             <div
               style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600, fontStyle: "italic" }}
             >
-              요즘 마음이 복잡해 보여요 — 회사 이야기를 꺼낼 때 말이 짧아져요
+              {tagline}
             </div>
           </div>
           <div style={{ display: "flex", gap: 10, paddingBottom: 8 }}>

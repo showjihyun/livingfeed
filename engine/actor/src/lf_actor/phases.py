@@ -38,6 +38,7 @@ from lf_actor.relationship import PRINCIPAL as REL_PRINCIPAL
 from lf_actor.relationship import PendingRelEvent, RelationshipAdapter
 from lf_actor.rules import fallback_action, fallback_reply
 from lf_actor.semantic import SemanticMemory
+from redis.asyncio import Redis
 
 logger = logging.getLogger("lf.actor.phases")
 
@@ -46,6 +47,10 @@ ACTION_TYPE = "actor.action.performed"
 MESSAGE_TYPE = "actor.message.sent"
 MEMORY_TYPE = "actor.memory.consolidated"
 BELIEF_TYPE = "actor.belief.formed"
+IDENTITY_TYPE = "actor.identity.declared"
+
+#: 프로필 소개문 상한 — identity_core를 이 길이로 자른다 (스키마 bio maxLength와 맞춘다)
+_BIO_MAX = 500
 
 #: 응답 의무가 있는 상호작용 (반응(like)은 지각·감정 입력일 뿐 응답하지 않는다)
 _REPLYABLE = {"player.dm.sent": "dm", "player.comment.posted": "comment"}
@@ -71,6 +76,7 @@ class ActorPhases:
         importance_weights: ImportanceWeights | None = None,
         belief_ledger: BeliefLedger | None = None,
         reflection_interval: int = 30,
+        identity_redis: Redis | None = None,
     ) -> None:
         if not personas:
             raise ValueError("액터가 없다 — 최소 1명의 페르소나가 필요하다")
@@ -84,6 +90,9 @@ class ActorPhases:
         self._weights = importance_weights or ImportanceWeights()
         self._ledger = belief_ledger
         self._reflection_interval = max(1, reflection_interval)
+        # 정체성 선언 1회 발행 가드 — Redis SETNX(재시작·다중 워커) + in-memory(tick당 재확인 회피)
+        self._identity_redis = identity_redis
+        self._declared: set[str] = set()
         # 첫 액터들은 세계의 주인공 — Hot으로 시작 (승격/강등은 관심 신호 소스가 생기면)
         self._lods: dict[str, ActorLod] = {
             actor_id: ActorLod(tier=Tier.HOT, last_interest_tick=0) for actor_id in self._personas
@@ -104,7 +113,49 @@ class ActorPhases:
         return scheduled_counts(self._lods, ctx.tick)
 
     async def world(self, ctx: TickContext) -> None:
-        return None  # 환경 이벤트/Director 개입은 ADR-013 단계에서
+        """정체성 선언 — 액터가 세계에 등장하며 이름·소개·목표를 read 모델에 노출한다.
+
+        세계당 1회(SETNX). 환경 이벤트·Director 개입은 별도 엔진(ADR-013)의 몫이다.
+        """
+        if self._identity_redis is None:
+            return
+        for actor_id in sorted(self._personas):
+            if actor_id in self._declared:
+                continue
+            marker = f"lf:iddecl:{ctx.world_id}:{actor_id}"
+            if await self._identity_redis.set(marker, "1", nx=True):
+                await self._declare_identity(ctx, self._personas[actor_id])
+            self._declared.add(actor_id)
+
+    async def _declare_identity(self, ctx: TickContext, persona: Persona) -> None:
+        bio = " ".join(persona.identity_core.split())[:_BIO_MAX]
+        goals = [
+            {"description": str(g["description"])[:200], "priority": float(g.get("priority", 0.5))}
+            for g in persona.goals
+            if g.get("description")
+        ]
+        head = await current_head(ctx.conn, ctx.world_id, "actor", persona.id)
+        await append(
+            ctx.conn, PRINCIPAL,
+            [
+                NewEvent(
+                    world_id=ctx.world_id,
+                    stream="actor",
+                    stream_key=persona.id,
+                    type=IDENTITY_TYPE,
+                    tick=ctx.tick,
+                    actor_id=persona.id,
+                    payload={
+                        "name": persona.name,
+                        "archetype": persona.archetype or "unknown",
+                        "bio": bio or persona.name,
+                        "goals": goals,
+                    },
+                )
+            ],
+            expected_head=head,
+        )
+        logger.info("정체성 선언: %s (%s) tick=%d", persona.id, persona.name, ctx.tick)
 
     async def perceive(self, ctx: TickContext) -> None:
         """메일박스 drain → appraise — 개입이 지각과 감정으로 들어온다 (ADR-012/015)."""

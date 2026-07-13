@@ -67,9 +67,21 @@ CREATE TABLE IF NOT EXISTS read.messages (
 );
 CREATE INDEX IF NOT EXISTS messages_conversation
     ON read.messages (world_id, player_id, actor_id, event_id DESC);
+
+CREATE TABLE IF NOT EXISTS read.actors (
+    world_id     TEXT NOT NULL,
+    actor_id     TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    archetype    TEXT NOT NULL,
+    bio          TEXT NOT NULL,
+    goals        JSONB NOT NULL,
+    event_id     TEXT NOT NULL,
+    declared_at  TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (world_id, actor_id)
+);
 """
 
-TABLES = ("read.actor_episodes", "read.actor_beliefs", "read.messages")
+TABLES = ("read.actor_episodes", "read.actor_beliefs", "read.messages", "read.actors")
 
 #: about_id null(자기 자신/세계에 대한 신념)의 PK 표현 — reflection의 자리 키와 동일 규약
 NO_ABOUT = "-"
@@ -105,6 +117,21 @@ INSERT INTO read.messages
      text, post_id, tick, occurred_at)
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::timestamptz)
 ON CONFLICT (event_id) DO NOTHING
+"""
+
+#: 정체성은 (world, actor) 자리 단위 upsert — 재선언(재시작 등)은 최신 ULID가 이긴다
+_ACTOR_SQL = """
+INSERT INTO read.actors
+    (world_id, actor_id, name, archetype, bio, goals, event_id, declared_at)
+VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s::timestamptz)
+ON CONFLICT (world_id, actor_id) DO UPDATE SET
+    name        = excluded.name,
+    archetype   = excluded.archetype,
+    bio         = excluded.bio,
+    goals       = excluded.goals,
+    event_id    = excluded.event_id,
+    declared_at = excluded.declared_at
+WHERE excluded.event_id > read.actors.event_id
 """
 
 
@@ -147,10 +174,20 @@ def message_params(envelope: dict[str, Any]) -> tuple:
     )
 
 
+def actor_params(envelope: dict[str, Any]) -> tuple:
+    p = envelope["payload"]
+    return (
+        envelope["world_id"], envelope["actor_id"], p["name"], p["archetype"],
+        p["bio"], json.dumps(p["goals"], ensure_ascii=False),
+        envelope["event_id"], envelope["occurred_at"],
+    )
+
+
 #: type → (SQL, 파라미터 변환) — 목록에 없는 타입은 프로젝션 대상이 아니다 (전방 호환 무시)
 PROJECTIONS: dict[str, tuple[str, Any]] = {
     "actor.memory.consolidated": (_EPISODE_SQL, episode_params),
     "actor.belief.formed": (_BELIEF_SQL, belief_params),
+    "actor.identity.declared": (_ACTOR_SQL, actor_params),
     "actor.message.sent": (_MESSAGE_SQL, message_params),
     "player.dm.sent": (_MESSAGE_SQL, message_params),
     "player.comment.posted": (_MESSAGE_SQL, message_params),

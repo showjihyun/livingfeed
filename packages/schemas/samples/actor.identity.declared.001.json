@@ -1,0 +1,20 @@
+{
+  "event_id": "01JZK7Q3W0000000000000000W",
+  "stream": "actor",
+  "type": "actor.identity.declared",
+  "schema_version": 1,
+  "world_id": "w_main",
+  "actor_id": "a_aria_kim",
+  "tick": 1,
+  "occurred_at": "2026-07-11T09:00:00Z",
+  "causation_id": null,
+  "correlation_id": "01JZK7Q3W0000000000000000W",
+  "payload": {
+    "name": "김아리",
+    "archetype": "ambitious_journalist",
+    "bio": "29세 탐사보도 기자. 진실을 밝히는 것이 자기 존재 증명이라 믿는다. 성공을 위해 관계를 도구화하는 습관이 있고, 그 사실을 스스로는 부정한다.",
+    "goals": [
+      { "description": "시 정부 재개발 비리 특종 보도", "priority": 0.9 }
+    ]
+  }
+}

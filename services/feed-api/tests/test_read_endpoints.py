@@ -20,9 +20,13 @@ class FakeReads:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
 
+    async def actors(self, world_id):
+        self.calls.append(("actors", world_id))
+        return [{"actor_id": "a_x", "name": "이름", "archetype": "arch", "bio": "b", "goals": []}]
+
     async def actor_profile(self, world_id, actor_id, *, episode_limit, episode_cursor):
         self.calls.append(("profile", world_id, actor_id, episode_limit, episode_cursor))
-        return {"world_id": world_id, "actor_id": actor_id, "beliefs": [],
+        return {"world_id": world_id, "actor_id": actor_id, "identity": None, "beliefs": [],
                 "episodes": {"items": [], "next_cursor": None}}
 
     async def conversation(self, world_id, player_id, actor_id, *, limit, cursor):
@@ -93,6 +97,14 @@ def test_personal_excludes_private_and_pages_by_cursor():
     ).json()
     assert [i["event_id"][-1] for i in paged["items"]] == ["B", "A"]  # 커서 이후 + private 포함
     assert paged["next_cursor"] == "01JZK7Q3W0000000000000000A"
+
+
+def test_actors_list_delegates():
+    client, reads, _ = make_client()
+    resp = client.get("/actors", params={"world_id": "w_main"})
+    assert resp.status_code == 200
+    assert resp.json()["actors"][0]["name"] == "이름"
+    assert reads.calls[-1] == ("actors", "w_main")
 
 
 def test_profile_and_messages_delegate_with_clamped_limits():
