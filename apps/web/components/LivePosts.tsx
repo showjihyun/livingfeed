@@ -2,42 +2,122 @@
 
 /**
  * 라이브 피드 섹션 — 실 백엔드(feed.post.published)에서 흐르는 포스트.
- * 데모 시나리오 카드(민지/철수)와 공존한다: 백엔드가 없으면 이 섹션은
- * "오프라인" 칩만 남기고 데모가 화면을 채운다.
+ * 좋아요·댓글이 실제 포스트(post_id)에 붙는다: 댓글은 작성 액터에게 닿고
+ * (player.comment.posted), 응답은 actor.message.sent로 돌아와 인라인 렌더된다.
+ * 백엔드 미가용이면 "오프라인" 칩만 남는다 (하드코딩 데모 카드 없음).
  */
 
+import { useState, type KeyboardEvent } from "react";
+
+import { ICON } from "@/lib/data";
 import type { LivePost, LiveStatus } from "@/lib/live-feed";
 import { relativeTime } from "@/lib/live-feed";
+import type { FeedComment } from "@/lib/types";
+
+import { Icon } from "./Icon";
 
 const STATUS_CHIP: Record<LiveStatus, { label: string; bg: string; color: string; dot: string }> = {
   live: { label: "LIVE — 세계와 연결됨", bg: "#E3F5EC", color: "#3E8A66", dot: "#5FBF95" },
   connecting: { label: "연결 중...", bg: "#FFF6DE", color: "#A87F24", dot: "#E0B84F" },
-  offline: { label: "오프라인 — 데모 데이터", bg: "#F2F6FC", color: "#8C97AF", dot: "#B7C2D8" },
+  offline: { label: "오프라인 — 세계와 끊김", bg: "#F2F6FC", color: "#8C97AF", dot: "#B7C2D8" },
 };
 
 const AVATAR_COLORS = ["#AFC8F5", "#F2B8CF", "#BFE3CF", "#E8D5A8", "#CBBDE8", "#A8D8E8"];
 
-function avatarColor(authorId: string): string {
+function avatarColor(seed: string): string {
   let hash = 0;
-  for (const ch of authorId) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  for (const ch of seed) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
   return AVATAR_COLORS[hash % AVATAR_COLORS.length];
 }
 
-/** "a_aria_kim" → "AK", "김아리, ..."식 제목의 표시 이니셜 */
-function initials(post: LivePost): string {
-  const name = post.title.split(",")[0]?.trim() ?? post.authorId;
-  return name.slice(0, 1).toUpperCase();
+/** 세계 사건(작성 액터 없음) 포스트는 댓글 대상이 아니다 — 실제 액터 포스트만 */
+function isCommentable(post: LivePost): boolean {
+  return post.authorId.startsWith("a_");
+}
+
+function Avatar({ seed, label, size }: { seed: string; label: string; size: number }) {
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: "50%",
+        background: avatarColor(seed),
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: size * 0.4,
+        fontWeight: 800,
+        color: "#3A4256",
+        flexShrink: 0,
+      }}
+    >
+      {label.slice(0, 1).toUpperCase()}
+    </div>
+  );
+}
+
+function TypingDots() {
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", paddingLeft: 4 }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 4,
+          alignItems: "center",
+          padding: "8px 12px",
+          background: "#F2F6FC",
+          borderRadius: 9999,
+        }}
+      >
+        {[0, 0.2, 0.4].map((delay, i) => (
+          <div
+            key={i}
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: ["#6B7691", "#9AA6BF", "#CBD5E8"][i],
+              animation: `lf-blink 1s ${delay}s infinite`,
+            }}
+          />
+        ))}
+      </div>
+      <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}>답을 쓰고 있어요...</div>
+    </div>
+  );
 }
 
 function LivePostCard({
   post,
   liked,
   onLike,
+  comments,
+  typing,
+  onComment,
+  authorLabel,
 }: {
   post: LivePost;
   liked: boolean;
   onLike: (post: LivePost) => void;
+  comments: FeedComment[];
+  typing: boolean;
+  onComment: (post: LivePost, text: string) => void;
+  authorLabel: string;
 }) {
+  const [draft, setDraft] = useState("");
+  const commentable = isCommentable(post);
+
+  const submit = () => {
+    const text = draft.trim();
+    if (!text) return;
+    onComment(post, text);
+    setDraft("");
+  };
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") submit();
+  };
+
   return (
     <div
       style={{
@@ -51,23 +131,7 @@ function LivePostCard({
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <div
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: "50%",
-            background: avatarColor(post.authorId),
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 16,
-            fontWeight: 800,
-            color: "#3A4256",
-            flexShrink: 0,
-          }}
-        >
-          {initials(post)}
-        </div>
+        <Avatar seed={post.authorId} label={authorLabel} size={40} />
         <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
           <div style={{ fontSize: 15, fontWeight: 800 }}>{post.title}</div>
           <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}>
@@ -96,12 +160,81 @@ function LivePostCard({
         >
           ♥ {liked ? "전달됨" : "좋아요"}
         </div>
-        {liked && (
-          <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}>
-            세계가 당신의 반응을 알아차렸어요
+        {commentable && comments.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "6px 13px",
+              background: "#F2F6FC",
+              color: "#6B7691",
+              borderRadius: 9999,
+              fontSize: 13,
+              fontWeight: 800,
+            }}
+          >
+            <Icon d={ICON.messageCircle} size={14} /> {comments.length}
           </div>
         )}
       </div>
+
+      {comments.map((cm, i) => (
+        <div
+          key={i}
+          style={{
+            display: "flex",
+            gap: 10,
+            padding: "12px 14px",
+            background: cm.bg,
+            borderRadius: 14,
+          }}
+        >
+          <Avatar seed={cm.author} label={cm.author} size={28} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <div style={{ fontSize: 13, fontWeight: 800 }}>{cm.author}</div>
+            <div style={{ fontSize: 14, lineHeight: 1.55, fontWeight: 500 }}>{cm.text}</div>
+          </div>
+        </div>
+      ))}
+
+      {typing && <TypingDots />}
+
+      {commentable && (
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={onKey}
+            placeholder={`${authorLabel}에게 댓글 남기기... (개입은 흔적을 남겨요)`}
+            style={{
+              flex: 1,
+              background: "#F2F6FC",
+              border: "none",
+              outline: "none",
+              borderRadius: 9999,
+              padding: "11px 18px",
+              fontSize: 14,
+              color: "#3A4256",
+              fontWeight: 500,
+            }}
+          />
+          <div
+            onClick={submit}
+            style={{
+              padding: "10px 18px",
+              background: "#6D8DD6",
+              color: "#fff",
+              borderRadius: 9999,
+              fontSize: 14,
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            전송
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -111,11 +244,19 @@ export function LivePosts({
   status,
   liked,
   onLike,
+  commentsByPost,
+  typingPosts,
+  onComment,
+  authorName,
 }: {
   posts: LivePost[];
   status: LiveStatus;
   liked: ReadonlySet<string>;
   onLike: (post: LivePost) => void;
+  commentsByPost: Record<string, FeedComment[]>;
+  typingPosts: ReadonlySet<string>;
+  onComment: (post: LivePost, text: string) => void;
+  authorName: (actorId: string) => string;
 }) {
   const chip = STATUS_CHIP[status];
   return (
@@ -147,8 +288,32 @@ export function LivePosts({
           {chip.label}
         </div>
       </div>
+      {posts.length === 0 && status !== "live" && (
+        <div
+          style={{
+            border: "1.5px dashed #D8E1F0",
+            borderRadius: 18,
+            padding: "28px 24px",
+            textAlign: "center",
+            color: "#8C97AF",
+            fontSize: 14,
+            fontWeight: 600,
+          }}
+        >
+          아직 흐르는 이야기가 없어요 — 세계가 깨어나면 여기에 채워집니다.
+        </div>
+      )}
       {posts.map((post) => (
-        <LivePostCard key={post.id} post={post} liked={liked.has(post.id)} onLike={onLike} />
+        <LivePostCard
+          key={post.id}
+          post={post}
+          liked={liked.has(post.id)}
+          onLike={onLike}
+          comments={commentsByPost[post.id] ?? []}
+          typing={typingPosts.has(post.id)}
+          onComment={onComment}
+          authorLabel={authorName(post.authorId)}
+        />
       ))}
     </>
   );

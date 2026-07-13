@@ -22,6 +22,7 @@ import hmac
 import json
 import logging
 import re
+import sys
 from contextlib import asynccontextmanager
 
 import nats
@@ -51,6 +52,12 @@ from lf_gateway.session import (
 )
 
 logger = logging.getLogger("lf.gateway.main")
+
+# psycopg async는 Windows ProactorEventLoop에서 동작하지 않는다 (WS 세션이 커맨드
+# 적재에 psycopg를 쓴다). 루프가 만들어지기 전에 정책이 서야 하므로 uvicorn CLI로는
+# 부족하다 — Windows 로컬은 `python -m lf_gateway.main`(아래 main)으로 실행하라.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 ULID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
 
@@ -235,3 +242,19 @@ def create_app(cfg: Config | None = None, nc: nats.NATS | None = None) -> FastAP
 
 
 app = create_app()
+
+
+def main() -> None:
+    """로컬 실행 진입점 — 루프를 직접 만든다 (uvicorn.run은 win32에서 Proactor를 강제)."""
+    import os
+
+    import uvicorn
+
+    server = uvicorn.Server(
+        uvicorn.Config(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))
+    )
+    asyncio.run(server.serve())  # 위 정책(win32=Selector)의 루프에서 psycopg가 돈다
+
+
+if __name__ == "__main__":
+    main()

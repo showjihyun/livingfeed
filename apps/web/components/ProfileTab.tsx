@@ -1,4 +1,4 @@
-import { ICON, MINJI_TIMELINE } from "@/lib/data";
+import { ICON } from "@/lib/data";
 import { relativeTime } from "@/lib/live-feed";
 import type { ActorProfile } from "@/lib/profile";
 import { humanize } from "@/lib/profile";
@@ -19,13 +19,11 @@ export function ProfileTab({ following, onToggleFollow, goDm, profile }: Profile
   const aboutMe = profile?.aboutMe ?? [];
   const episodes = profile?.episodes ?? [];
   const identity = profile?.identity ?? null;
-  // 표시 이름·소개·목표는 라이브 데이터에서 — 없을 때만 데모 문구 (하드코딩 대체)
-  const displayName = identity?.name ?? "김민지";
-  const displayBio = identity?.bio ?? "28세 · 스타트업 마케터 · 밤에 글을 쓴다";
+  // 표시 이름·소개·목표는 라이브 identity에서 — 없으면 중립 문구 (특정 인물 하드코딩 금지)
+  const displayName = identity?.name ?? "프로필";
+  const displayBio = identity?.bio ?? "아직 소개가 연결되지 않았어요";
   const topGoal = identity?.goals.slice().sort((a, b) => b.priority - a.priority)[0];
-  const tagline = topGoal
-    ? `요즘 몰두하는 것 — ${topGoal.description}`
-    : "요즘 마음이 복잡해 보여요 — 회사 이야기를 꺼낼 때 말이 짧아져요";
+  const tagline = topGoal ? `요즘 몰두하는 것 — ${topGoal.description}` : "";
   return (
     <div style={{ flex: 1, overflowY: "auto" }}>
       <div style={{ height: 110, background: "#EDF3FD" }} />
@@ -60,15 +58,17 @@ export function ProfileTab({ following, onToggleFollow, goDm, profile }: Profile
                   fontWeight: 800,
                 }}
               >
-                당신과 친한 사이
+                당신이 지켜보는 사람
               </div>
             </div>
             <div style={{ fontSize: 14, color: "#6B7691", fontWeight: 600 }}>{displayBio}</div>
-            <div
-              style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600, fontStyle: "italic" }}
-            >
-              {tagline}
-            </div>
+            {tagline && (
+              <div
+                style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600, fontStyle: "italic" }}
+              >
+                {tagline}
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", gap: 10, paddingBottom: 8 }}>
             <div
@@ -149,49 +149,47 @@ export function ProfileTab({ following, onToggleFollow, goDm, profile }: Profile
               color: episodes.length > 0 ? "#3E8A66" : "#8C97AF",
             }}
           >
-            {episodes.length > 0 ? "기억 실측 연결됨" : "데모 서사"}
+            {episodes.length > 0 ? "기억 실측 연결됨" : "아직 비어 있음"}
           </div>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {episodes.length > 0
-            ? episodes.map((ep) => (
-                <div
-                  key={ep.id}
-                  style={{
-                    border: "1.5px solid #E2EAF6",
-                    borderRadius: 18,
-                    padding: "16px 20px",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 8,
-                  }}
-                >
-                  <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 700 }}>
-                    {relativeTime(ep.occurredAt)} · 마음에 남은 정도{" "}
-                    {Math.round(ep.importance * 100)}%
-                  </div>
-                  <div style={{ fontSize: 14, lineHeight: 1.65, fontWeight: 500 }}>
-                    {humanize(ep.summary)}
-                  </div>
+          {episodes.length > 0 ? (
+            episodes.map((ep) => (
+              <div
+                key={ep.id}
+                style={{
+                  border: "1.5px solid #E2EAF6",
+                  borderRadius: 18,
+                  padding: "16px 20px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 700 }}>
+                  {relativeTime(ep.occurredAt)} · 마음에 남은 정도 {Math.round(ep.importance * 100)}%
                 </div>
-              ))
-            : MINJI_TIMELINE.map((tp) => (
-                <div
-                  key={tp.meta}
-                  style={{
-                    border: "1.5px solid #E2EAF6",
-                    borderRadius: 18,
-                    padding: "16px 20px",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 8,
-                  }}
-                >
-                  <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 700 }}>{tp.meta}</div>
-                  <div style={{ fontSize: 14, lineHeight: 1.65, fontWeight: 500 }}>{tp.text}</div>
+                <div style={{ fontSize: 14, lineHeight: 1.65, fontWeight: 500 }}>
+                  {humanize(ep.summary)}
                 </div>
-              ))}
+              </div>
+            ))
+          ) : (
+            <div
+              style={{
+                border: "1.5px dashed #D8E1F0",
+                borderRadius: 18,
+                padding: "24px 20px",
+                textAlign: "center",
+                color: "#8C97AF",
+                fontSize: 14,
+                fontWeight: 600,
+              }}
+            >
+              아직 쌓인 기억이 없어요 — 함께 겪은 일이 생기면 여기에 남습니다.
+            </div>
+          )}
         </div>
       </div>
     </div>

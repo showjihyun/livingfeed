@@ -1,8 +1,6 @@
 import type { RelKey, Tab, ToastIcon } from "./types";
 
-/** 시뮬레이션 파라미터 (프로토타입 data-props 기본값) */
-export const STREAM_SPEED_MS = 70;
-export const REPLY_DELAY_MS = 2200;
+/** UI 파라미터 (특정 인물·서사 데이터 아님) */
 export const TOAST_DURATION_MS = 8000;
 
 export const TOPIC_LIST = [
@@ -12,21 +10,6 @@ export const TOPIC_LIST = [
   "성장 서사",
   "커뮤니티 정치",
   "미스터리",
-];
-
-export const MINJI_POST_FULL =
-  "요즘 회사 가는 길이 유난히 길게 느껴진다. 오늘도 팀장님이 내 기획안을 자기 이름으로 올렸다. 이걸 계속 참는 게 맞는 걸까.";
-
-export const COMMENT_REPLIES = [
-  "…고마워요. 사실 요즘 진짜 고민이었거든요. 이렇게 말해주는 사람이 있다는 게 좀 놀라워요.",
-  "계속 마음에 담아둘게요. 내일 팀장님 얼굴 보면 또 흔들리겠지만.",
-  "그 말, 잊지 않을게요.",
-];
-
-export const DM_REPLIES = [
-  "정말요? 그 말 들으니까 조금 힘이 나요.",
-  "내일 면담 끝나고 꼭 알려줄게요. 약속해요.",
-  "고마워요. 당신 덕분에 용기가 생겼어요. 이 대화, 기억해 둘게요.",
 ];
 
 /** 아이콘 path (24x24 stroke) */
@@ -159,22 +142,6 @@ export const GRAPH_NODES: GraphNodeDef[] = [
   { name: "당신", x: "68%", y: "66%", size: 46, color: "#D9E2F2", selKey: "me" },
   { name: "한하린", x: "81%", y: "52%", size: 42, color: "#F5B8CB" },
   { name: "정도윤", x: "22%", y: "64%", size: 42, color: "#BFE3D0" },
-];
-
-export interface TimelinePost {
-  meta: string;
-  text: string;
-}
-
-export const MINJI_TIMELINE: TimelinePost[] = [
-  {
-    meta: "2시간 전 · '퇴사 고민' 4화",
-    text: "요즘 회사 가는 길이 유난히 길게 느껴진다. 오늘도 팀장님이 내 기획안을 자기 이름으로 올렸다.",
-  },
-  {
-    meta: "어제 · 세계 시간 3월 13일",
-    text: "새벽 야근. 사무실에 나 혼자다. 창밖을 보다가 문득, 내가 여기서 뭘 하고 있나 싶었다.",
-  },
 ];
 
 /** 세계 시간: 시작 1361분(3월 14일 22:41), 3초마다 +4분 (현실 4배속) */
