@@ -30,6 +30,9 @@ OBSERVATION_STREAM_KEY = "observations"
 PROMOTE_TOOL = "promote_actor"
 SPOTLIGHT_TYPE = "system.director.spotlighted"
 SPOTLIGHT_STREAM_KEY = "spotlight"
+SEASON_TOOL = "set_season_theme"
+SEASON_TYPE = "system.director.season_set"
+SEASON_STREAM_KEY = "season"
 
 
 @dataclass(frozen=True)

@@ -46,3 +46,17 @@ incidents:
     description: "갑작스런 폭우 — 우산 없는 사람들이 같은 처마 밑으로 모여들었다"
     location_id: null
     intensity: 0.4
+
+# set_season_theme 라이브러리 — 시즌 페이싱(갈등 빈도) 테마 (ADR-013).
+# 각 테마는 개입 빈도 노브를 조정한다: quiet_ticks_to_fire(침체를 얼마나 참는가,
+# 낮을수록 더 자주 개입) + max_interventions(창당 개입 상한). LLM은 이 목록에서만 고른다.
+season_themes:
+  - name: calm
+    quiet_ticks_to_fire: 45   # 느긋하게 — 웬만하면 세계에 맡긴다
+    max_interventions: 1
+  - name: rising_tension
+    quiet_ticks_to_fire: 20   # 침체를 덜 참는다 — 더 자주 불씨를 놓는다
+    max_interventions: 3
+  - name: turmoil
+    quiet_ticks_to_fire: 12   # 격동 — 몰아친다
+    max_interventions: 4

@@ -30,7 +30,7 @@ from lf_director.planner import (
     intervention_from_plan,
     plan_schema,
 )
-from lf_director.rules import BudgetState, Intervention, decide, is_fireable
+from lf_director.rules import SEASON_TYPE, BudgetState, Intervention, decide, is_fireable
 from lf_director.signals import DramaWindow, default_params
 
 logger = logging.getLogger("lf.director")
@@ -60,6 +60,7 @@ class Director:
             base["observation"]["quiet_threshold"] = cfg.quiet_threshold_override
         self._params = base
         self._incidents = base["incidents"]
+        self._themes = base.get("season_themes", [])
         self._window = DramaWindow(self._params)
         self._budget = BudgetState()
         self._seen_audits: set[str] = set()
@@ -76,15 +77,19 @@ class Director:
         LLM이 화이트리스트 밖을 고르면 intervention_from_plan이 None → 규칙 폴백.
         """
         if self._ai is not None and is_fireable(snapshot, self._budget, self._params):
-            schema = plan_schema([inc["kind"] for inc in self._incidents])
-            user = build_plan_user(snapshot, tension, self._incidents, self._names)
+            theme_names = [t["name"] for t in self._themes]
+            schema = plan_schema([inc["kind"] for inc in self._incidents], theme_names)
+            user = build_plan_user(
+                snapshot, tension, self._incidents, self._names, self._themes
+            )
             output, model = await self._ai.plan_intervention(
                 DIRECTOR_SYSTEM, user, schema,
                 world_id=self._cfg.world_id, tick=snapshot.tick,
             )
             if output is not None:
                 chosen = intervention_from_plan(
-                    output, snapshot, tension, self._incidents, self._names, model=model
+                    output, snapshot, tension, self._incidents, self._names,
+                    themes=self._themes, model=model,
                 )
                 if chosen is not None:
                     return chosen
@@ -168,6 +173,21 @@ class Director:
             envelope["tick"], envelope["payload"].get("target_correlation_id")
         )
 
+    def _apply_season(self, envelope: dict[str, Any]) -> None:
+        """자기 season_set 이벤트를 소비해 시즌 페이싱 파라미터를 갱신한다 (ADR-013).
+
+        시즌 상태는 이벤트에서 복원된다. 재시작 시 durable이 지난 이벤트를 다시 읽지
+        않으므로 마지막 테마가 유실될 수 있다 — budget 복원과 같은 MVP 허용 오차다.
+        갱신 노브는 개입 빈도(갈등 빈도)뿐이라 DramaWindow(quiet_threshold)는 무관하다.
+        """
+        p = envelope["payload"]
+        self._params["observation"]["quiet_ticks_to_fire"] = int(p["quiet_ticks_to_fire"])
+        self._params["budget"]["max_interventions"] = int(p["max_interventions"])
+        logger.info(
+            "시즌 테마: %s — quiet_to_fire=%d max_interventions=%d (tick=%d)",
+            p["theme"], p["quiet_ticks_to_fire"], p["max_interventions"], envelope["tick"],
+        )
+
     async def run(self, *, stop: asyncio.Event | None = None) -> None:
         stop = stop or asyncio.Event()
         cfg = self._cfg
@@ -212,6 +232,8 @@ class Director:
                                     await self.evaluate(conn, snapshot, graph)
                                 elif envelope["type"] == AUDIT_TYPE:
                                     self._restore_budget(envelope)
+                                elif envelope["type"] == SEASON_TYPE:
+                                    self._apply_season(envelope)
                             except Exception:
                                 # 관찰은 최선 노력이다 — 세계를 멈추지 않는다 (기록 후 전진)
                                 logger.exception("관찰 처리 실패 — 건너뜀")

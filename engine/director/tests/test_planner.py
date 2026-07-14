@@ -21,14 +21,19 @@ INCIDENTS = [
 TENSION = [["a_minji", "a_seongho", 0.8, 0.2], ["a_aria", "a_junho", 0.5, 0.3]]
 NAMES = {"a_minji": "김민지", "a_seongho": "박성호"}
 SNAP = Snapshot(tick=120, drama_ma=0.05, quiet_ticks=30)
+THEMES = [
+    {"name": "calm", "quiet_ticks_to_fire": 45, "max_interventions": 1},
+    {"name": "turmoil", "quiet_ticks_to_fire": 12, "max_interventions": 4},
+]
 
 
 def test_plan_schema_selects_tool_and_lists_kinds():
-    schema = plan_schema(["chance_encounter", "rumor_spread"])
+    schema = plan_schema(["chance_encounter", "rumor_spread"], ["calm", "turmoil"])
     assert schema["properties"]["tool"]["enum"] == [
-        "inject_incident", "nudge_perception", "promote_actor"
+        "inject_incident", "nudge_perception", "promote_actor", "set_season_theme"
     ]
     assert schema["properties"]["incident_kind"]["enum"] == ["chance_encounter", "rumor_spread"]
+    assert schema["properties"]["season_theme"]["enum"] == ["calm", "turmoil"]
     assert schema["additionalProperties"] is False
     # 도구별 인자는 선택적 — 필수는 tool·rationale뿐(유효성은 매핑이 재집행)
     assert set(schema["required"]) == {"tool", "rationale"}
@@ -255,11 +260,42 @@ def test_incident_and_nudge_stream_to_world():
     assert incident.stream == "world" and nudge.stream == "world"
 
 
+# --- set_season_theme 도구 ----------------------------------------------------
+
+
+def test_valid_season_carries_resolved_params_on_system_stream():
+    plan = {
+        "tool": "set_season_theme",
+        "season_theme": "turmoil",
+        "rationale": "세계 전체가 격동으로 접어들 때다",
+    }
+    result = intervention_from_plan(
+        plan, SNAP, TENSION, INCIDENTS, NAMES, themes=THEMES, model="qwen3:8b"
+    )
+    assert result is not None
+    assert result.tool == "set_season_theme"
+    assert result.stream == "system"  # 시즌 페이싱 제어 신호
+    assert result.event_type == "system.director.season_set"
+    assert result.stream_key == "season"
+    # 해석된 파라미터를 payload에 실어 소비자가 곧 적용한다
+    assert result.payload == {
+        "theme": "turmoil", "quiet_ticks_to_fire": 12, "max_interventions": 4,
+    }
+
+
+def test_season_outside_library_returns_none():
+    # 라이브러리 밖 테마는 존재하지 않는다 — 규칙 폴백
+    plan = {"tool": "set_season_theme", "season_theme": "apocalypse", "rationale": "x"}
+    assert intervention_from_plan(plan, SNAP, TENSION, INCIDENTS, NAMES, themes=THEMES) is None
+
+
 def test_build_plan_user_grounds_names_kinds_and_all_tools():
-    user = build_plan_user(SNAP, TENSION, INCIDENTS, NAMES)
+    user = build_plan_user(SNAP, TENSION, INCIDENTS, NAMES, THEMES)
     assert "김민지" in user and "박성호" in user  # 이름으로 그라운딩
     assert "chance_encounter" in user and "rumor_spread" in user  # 라이브러리 종류 제시
     assert "a_minji" in user  # 후보 id 명시 (대상 화이트리스트)
-    # 세 도구 모두 제시
-    assert "inject_incident" in user and "nudge_perception" in user and "promote_actor" in user
+    # 네 도구 모두 제시
+    assert "inject_incident" in user and "nudge_perception" in user
+    assert "promote_actor" in user and "set_season_theme" in user
+    assert "calm" in user and "turmoil" in user  # 시즌 테마 라이브러리 제시
     assert str(SNAP.quiet_ticks) in user

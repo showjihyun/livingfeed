@@ -1,0 +1,17 @@
+{
+  "event_id": "01JZK7Q3W0000000000000000U",
+  "stream": "system",
+  "type": "system.director.season_set",
+  "schema_version": 1,
+  "world_id": "w_main",
+  "actor_id": null,
+  "tick": 200,
+  "occurred_at": "2026-07-11T11:20:00Z",
+  "causation_id": "01JZK7Q3W0000000000000000Q",
+  "correlation_id": "01JZK7Q3W0000000000000000U",
+  "payload": {
+    "theme": "rising_tension",
+    "quiet_ticks_to_fire": 20,
+    "max_interventions": 3
+  }
+}

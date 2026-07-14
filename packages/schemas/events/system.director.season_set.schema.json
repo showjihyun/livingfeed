@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/system.director.season_set.schema.json",
+  "title": "SystemDirectorSeasonSet",
+  "description": "Director의 set_season_theme 산출 — 세계의 시즌 페이싱 테마를 바꾼다 (ADR-013 §개입 도구). 개별 사건이 아니라 저빈도의 구조적 조정이다: 갈등 빈도(개입 발화 임계·예산)를 시즌 톤에 맞춘다. Director가 자기 이벤트를 소비해 파라미터를 갱신한다(상태는 이벤트에서 복원). payload는 해석된 파라미터를 실어 소비자가 곧바로 적용한다.",
+  "type": "object",
+  "properties": {
+    "theme": {
+      "type": "string",
+      "description": "시즌 테마 이름 (calm, rising_tension, turmoil, ... — params.yaml season_themes)",
+      "pattern": "^[a-z_]+$"
+    },
+    "quiet_ticks_to_fire": {
+      "type": "integer",
+      "description": "침체를 이 tick 수만큼 참은 뒤 개입한다 (낮을수록 더 자주)",
+      "minimum": 1
+    },
+    "max_interventions": {
+      "type": "integer",
+      "description": "창(세계 1시간)당 개입 상한 (높을수록 더 자주)",
+      "minimum": 0
+    }
+  },
+  "required": ["theme", "quiet_ticks_to_fire", "max_interventions"],
+  "additionalProperties": false
+}

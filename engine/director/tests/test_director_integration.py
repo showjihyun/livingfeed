@@ -212,3 +212,40 @@ async def test_llm_promote_spotlights_actor_on_system_stream(conn):
     # 세계 사건이 아니다 — world 스트림에는 없다
     assert await read_stream(conn, WORLD, "world", "incidents") == []
     assert await read_stream(conn, WORLD, "world", "observations") == []
+
+
+async def test_llm_set_season_theme_records_on_system_stream(conn):
+    # 네 번째 도구: set_season_theme → system.director.season_set (시즌 페이싱 제어)
+    plan = {
+        "tool": "set_season_theme",
+        "season_theme": "turmoil",
+        "rationale": "세계가 격동으로 접어들 때다",
+    }
+    ai = _StubAiClient(plan)
+    director = make_llm_director(ai)
+    fired = await director.evaluate(
+        conn, Snapshot(tick=123, drama_ma=0.05, quiet_ticks=30), graph=None
+    )
+    assert fired
+
+    [audit] = [s.envelope for s in await read_stream(conn, WORLD, "system", "director")]
+    assert audit["payload"]["tool"] == "set_season_theme"
+
+    [season] = [s.envelope for s in await read_stream(conn, WORLD, "system", "season")]
+    assert season["type"] == "system.director.season_set"
+    assert season["payload"]["theme"] == "turmoil"
+    assert season["payload"]["quiet_ticks_to_fire"] == 12  # 라이브러리 해석값
+    assert season["payload"]["max_interventions"] == 4
+    assert await read_stream(conn, WORLD, "world", "incidents") == []
+
+
+def test_apply_season_updates_pacing_params():
+    # 자기 season_set 이벤트 소비 → 개입 빈도 파라미터 갱신 (이벤트 소싱 상태)
+    director = make_director()
+    director._apply_season(
+        {"tick": 5, "payload": {
+            "theme": "turmoil", "quiet_ticks_to_fire": 12, "max_interventions": 4,
+        }}
+    )
+    assert director._params["observation"]["quiet_ticks_to_fire"] == 12
+    assert director._params["budget"]["max_interventions"] == 4

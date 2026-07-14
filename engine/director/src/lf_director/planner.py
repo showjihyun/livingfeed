@@ -27,6 +27,9 @@ from lf_director.rules import (
     OBSERVATION_STREAM_KEY,
     OBSERVATION_TYPE,
     PROMOTE_TOOL,
+    SEASON_STREAM_KEY,
+    SEASON_TOOL,
+    SEASON_TYPE,
     SPOTLIGHT_STREAM_KEY,
     SPOTLIGHT_TYPE,
     SYSTEM_STREAM,
@@ -46,26 +49,31 @@ def candidate_actor_ids(tension_pairs: list[list[Any]]) -> list[str]:
     return seen
 
 
-def plan_schema(incident_kinds: list[str]) -> dict[str, Any]:
+def plan_schema(incident_kinds: list[str], theme_names: list[str]) -> dict[str, Any]:
     """director_plan 응답 스키마 — tool로 도구를 고르고 도구별 인자를 채운다.
 
     도구별 인자는 선택적(optional)이고, 필수는 tool·rationale뿐이다 — 어떤 인자가
-    유효/필수인지는 intervention_from_plan이 도구별로 재집행한다(하드룰). incident_kind
-    enum만 스키마에서 직접 좁힌다(닫힌 라이브러리 = 도구 인자 화이트리스트).
+    유효/필수인지는 intervention_from_plan이 도구별로 재집행한다(하드룰). incident_kind·
+    season_theme enum만 스키마에서 직접 좁힌다(닫힌 라이브러리 = 도구 인자 화이트리스트).
     """
     return {
         "type": "object",
         "properties": {
-            "tool": {"type": "string", "enum": [INCIDENT_TOOL, NUDGE_TOOL, PROMOTE_TOOL]},
+            "tool": {
+                "type": "string",
+                "enum": [INCIDENT_TOOL, NUDGE_TOOL, PROMOTE_TOOL, SEASON_TOOL],
+            },
             # inject_incident 인자
             "incident_kind": {"type": "string", "enum": incident_kinds},
             "affected_actor_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
             "description": {"type": "string", "maxLength": 300},
             "intensity": {"type": "number", "minimum": 0, "maximum": 1},
-            # nudge_perception 인자
+            # nudge_perception / promote_actor 인자
             "target_actor_id": {"type": "string"},
             "observation": {"type": "string", "maxLength": 300},
             "about_actor_id": {"type": ["string", "null"]},
+            # set_season_theme 인자
+            "season_theme": {"type": "string", "enum": theme_names},
             # 공통
             "rationale": {"type": "string", "minLength": 1, "maxLength": 300},
         },
@@ -78,10 +86,11 @@ DIRECTOR_SYSTEM = (
     "너는 살아있는 세계의 '연출가(Director)'다. 규칙: 너는 액터를 조종하지 않는다. "
     "침체된 서사에 밀도를 되돌리되 직접 결정을 쓰지 않고 간접적으로만 개입한다 — "
     "반응은 액터의 몫이다. "
-    "세 도구 중 하나를 고른다: 공개 환경 사건을 놓거나(inject_incident), "
+    "네 도구 중 하나를 고른다: 공개 환경 사건을 놓거나(inject_incident), "
     "후보 액터 한 명에게 사적 관측을 심거나(nudge_perception — 그 사람만 알아차린다), "
-    "잠재적 드라마의 인물을 무대 중앙으로 끌어올린다(promote_actor — 더 자주 움직이게). "
-    "제시된 후보 액터·사건 종류 안에서만 고르고, 없는 인물·장소를 지어내지 마라. "
+    "잠재적 드라마의 인물을 무대 중앙으로 끌어올리거나(promote_actor — 더 자주 움직이게), "
+    "시즌 전체의 페이싱 톤을 바꾼다(set_season_theme — 드물게, 구조적 전환일 때). "
+    "제시된 후보 액터·사건 종류·시즌 테마 안에서만 고르고, 없는 인물·장소를 지어내지 마라. "
     "서술은 특정 인물의 긴장에 뿌리내린 한 줄이어야 하며, 조종하는 명령이 아니다."
 )
 
@@ -95,6 +104,7 @@ def build_plan_user(
     tension_pairs: list[list[Any]],
     incidents: list[dict[str, Any]],
     names: dict[str, str],
+    themes: list[dict[str, Any]] | None = None,
 ) -> str:
     """개입 선택 프롬프트의 user 섹션 — 신호·긴장 후보·사건 라이브러리를 근거로 제시."""
     lines = [
@@ -130,6 +140,9 @@ def build_plan_user(
         "about_actor_id는 그 관측이 향한 상대(후보 중 하나, 없으면 null).",
         "· tool=promote_actor (잠자던 인물을 무대로 — 사건 없이 그를 더 자주 움직이게 한다): "
         "target_actor_id는 후보 한 명. 지금 조명이 필요한 인물이 있을 때.",
+        "· tool=set_season_theme (시즌 페이싱 톤 전환 — 드문 구조적 조정): "
+        f"season_theme는 다음 중 하나: {', '.join(t['name'] for t in (themes or [])) or '(없음)'}. "
+        "개별 사건이 아니라 세계 전체의 갈등 빈도를 바꾸고 싶을 때만.",
         "",
         "rationale은 왜 지금 이 개입인지 한 줄.",
     ]
@@ -163,6 +176,7 @@ def intervention_from_plan(
     incidents: list[dict[str, Any]],
     names: dict[str, str],
     *,
+    themes: list[dict[str, Any]] | None = None,
     model: str | None = None,
 ) -> Intervention | None:
     """검증된 LLM 응답 → Intervention. 도구별로 hard rule을 방어적으로 재집행한다.
@@ -178,6 +192,8 @@ def intervention_from_plan(
         return _nudge_intervention(plan, tension_pairs, rationale, signals)
     if tool == PROMOTE_TOOL:
         return _promote_intervention(plan, tension_pairs, rationale, signals)
+    if tool == SEASON_TOOL:
+        return _season_intervention(plan, themes or [], rationale, signals)
     return None  # 화이트리스트 밖 도구 — 존재하지 않는다
 
 
@@ -259,6 +275,31 @@ def _promote_intervention(
         event_type=SPOTLIGHT_TYPE,
         stream_key=SPOTLIGHT_STREAM_KEY,
         payload={"target_actor_id": target},
+        reason=rationale,
+        signals=signals,
+    )
+
+
+def _season_intervention(
+    plan: dict[str, Any], themes: list[dict[str, Any]],
+    rationale: str, signals: dict[str, Any],
+) -> Intervention | None:
+    # 시즌 테마는 닫힌 라이브러리 안에서만 (밖이면 존재하지 않는 테마 → 폴백).
+    # 파라미터를 payload에 실어 보낸다 — 소비자(Director)가 라이브러리 없이 곧 적용한다.
+    library = {t["name"]: t for t in themes}
+    theme = library.get(plan.get("season_theme"))
+    if theme is None:
+        return None
+    return Intervention(
+        tool=SEASON_TOOL,
+        stream=SYSTEM_STREAM,  # 세계 사건이 아니라 시즌 페이싱 제어 신호다
+        event_type=SEASON_TYPE,
+        stream_key=SEASON_STREAM_KEY,
+        payload={
+            "theme": theme["name"],
+            "quiet_ticks_to_fire": int(theme["quiet_ticks_to_fire"]),
+            "max_interventions": int(theme["max_interventions"]),
+        },
         reason=rationale,
         signals=signals,
     )
