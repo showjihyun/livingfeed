@@ -52,6 +52,21 @@ class BudgetState:
         return max(0, int(budget["max_interventions"]) - len(self.recent_ticks))
 
 
+def is_fireable(
+    snapshot: Snapshot, budget: BudgetState, params: dict[str, Any] | None = None
+) -> bool:
+    """개입 발화 조건 — 침체 임계 초과 + 예산 잔여 (hard rule 게이트, ADR-013).
+
+    규칙 경로(decide)와 LLM 경로(planner)가 공유한다 — LLM 호출은 반드시 이
+    게이트를 통과한 뒤에만 일어난다. 게이트 자체는 결정적 통계다.
+    """
+    params = params or default_params()
+    obs = params["observation"]
+    if snapshot.quiet_ticks < int(obs["quiet_ticks_to_fire"]):
+        return False
+    return budget.remaining(snapshot.tick, params) > 0
+
+
 def decide(
     snapshot: Snapshot,
     budget: BudgetState,
@@ -62,10 +77,7 @@ def decide(
     """신호가 임계를 넘고 예산이 남았을 때만 개입한다. 아니면 None — 세계는 자율이다."""
     params = params or default_params()
     obs = params["observation"]
-    if snapshot.quiet_ticks < int(obs["quiet_ticks_to_fire"]):
-        return None
-    remaining = budget.remaining(snapshot.tick, params)
-    if remaining <= 0:
+    if not is_fireable(snapshot, budget, params):
         return None
 
     # 같은 도구 반복의 기계감 방지 — 누적 개입 수 기준 결정적 순환 (ADR-013 완화책)
@@ -94,5 +106,6 @@ def decide(
             "drama_ma": snapshot.drama_ma,
             "quiet_ticks": snapshot.quiet_ticks,
             "tension_top": tension_pairs[:3],
+            "selector": "rule",  # 개입 선택 주체 — 감사에서 규칙/LLM 구분 (ADR-013)
         },
     )

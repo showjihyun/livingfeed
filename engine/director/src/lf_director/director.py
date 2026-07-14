@@ -22,8 +22,15 @@ from lf_eventstore import NewEvent, append, current_head, new_ulid
 from lf_projector.graph_api import GraphQueryClient
 from psycopg import AsyncConnection
 
+from lf_director.client import DirectorAiClient
 from lf_director.config import Config
-from lf_director.rules import BudgetState, decide
+from lf_director.planner import (
+    DIRECTOR_SYSTEM,
+    build_plan_user,
+    intervention_from_plan,
+    plan_schema,
+)
+from lf_director.rules import BudgetState, Intervention, decide, is_fireable
 from lf_director.signals import DramaWindow, default_params
 
 logger = logging.getLogger("lf.director")
@@ -38,7 +45,14 @@ AUDIT_STREAM_KEY = "director"
 
 
 class Director:
-    def __init__(self, cfg: Config, *, params: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        cfg: Config,
+        *,
+        params: dict[str, Any] | None = None,
+        ai_client: DirectorAiClient | None = None,
+        names: dict[str, str] | None = None,
+    ) -> None:
         self._cfg = cfg
         base = copy.deepcopy(params or default_params())
         if cfg.quiet_ticks_override is not None:
@@ -46,9 +60,37 @@ class Director:
         if cfg.quiet_threshold_override is not None:
             base["observation"]["quiet_threshold"] = cfg.quiet_threshold_override
         self._params = base
+        self._incidents = base["incidents"]
         self._window = DramaWindow(self._params)
         self._budget = BudgetState()
         self._seen_audits: set[str] = set()
+        #: 개입 선택 LLM 경로 — None이면 규칙 decide만 (dev 기본·replay). run()이 배선한다
+        self._ai = ai_client
+        self._names = names or {}
+
+    async def _select(
+        self, snapshot: Any, tension: list[list[Any]]
+    ) -> Intervention | None:
+        """개입을 고른다 — LLM 맥락 선택을 시도하고, 없거나 실패하면 규칙 폴백.
+
+        LLM 호출은 반드시 발화 게이트를 통과한 뒤에만 일어난다(비용·hard rule 선행).
+        LLM이 화이트리스트 밖을 고르면 intervention_from_plan이 None → 규칙 폴백.
+        """
+        if self._ai is not None and is_fireable(snapshot, self._budget, self._params):
+            schema = plan_schema([inc["kind"] for inc in self._incidents])
+            user = build_plan_user(snapshot, tension, self._incidents, self._names)
+            output, model = await self._ai.plan_intervention(
+                DIRECTOR_SYSTEM, user, schema,
+                world_id=self._cfg.world_id, tick=snapshot.tick,
+            )
+            if output is not None:
+                chosen = intervention_from_plan(
+                    output, snapshot, tension, self._incidents, self._names, model=model
+                )
+                if chosen is not None:
+                    return chosen
+            # LLM 실패/무효 → 규칙 폴백 (세계는 계속 돈다, ADR-013 단계적 도입)
+        return decide(snapshot, self._budget, tension, params=self._params)
 
     async def evaluate(
         self, conn: AsyncConnection, snapshot: Any, graph: GraphQueryClient | None
@@ -58,7 +100,7 @@ class Director:
         tension = (
             await graph.tension_pairs(cfg.world_id) if graph is not None else []
         )
-        intervention = decide(snapshot, self._budget, tension, params=self._params)
+        intervention = await self._select(snapshot, tension)
         if intervention is None:
             return False
 
@@ -113,7 +155,8 @@ class Director:
         self._seen_audits.add(audit_id)
         self._window.reset_quiet()
         logger.info(
-            "개입: %s(%s) tick=%d — %s",
+            "개입[%s]: %s(%s) tick=%d — %s",
+            intervention.signals.get("selector", "rule"),
             intervention.tool, intervention.incident_kind, snapshot.tick, intervention.reason,
         )
         return True
@@ -138,6 +181,10 @@ class Director:
             try:
                 js = nc.jetstream()
                 graph = GraphQueryClient(nc, cfg.env)
+                # LLM 개입 선택 배선 — 명시 주입(테스트)이 없고 켜져 있을 때만.
+                # rule 프로바이더면 director_plan이 미지원이라 자동 규칙 폴백된다.
+                if self._ai is None and cfg.llm_selection:
+                    self._ai = DirectorAiClient(nc, cfg.env)
                 observe = await js.pull_subscribe(
                     f"lf.{cfg.env}.{cfg.world_id}.actor.>",
                     durable=cfg.observe_durable, stream="LF_ACTOR",
@@ -147,8 +194,9 @@ class Director:
                     durable=cfg.sys_durable, stream="LF_SYS",
                 )
                 logger.info(
-                    "director 대기 — world=%s quiet_to_fire=%s",
+                    "director 대기 — world=%s quiet_to_fire=%s 개입선택=%s",
                     cfg.world_id, self._params["observation"]["quiet_ticks_to_fire"],
+                    "LLM+규칙폴백" if self._ai is not None else "규칙",
                 )
                 while not stop.is_set():
                     # 관찰 먼저 비우고 tick 경계를 처리한다 (신호가 경계에 선행)
