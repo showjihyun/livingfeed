@@ -66,6 +66,28 @@ def test_progress_publishes_only_past_threshold():
     assert adv.progress > 0.2
 
 
+def test_goal_completes_once_and_marks_achieved():
+    # 높은 우선순위 목표를 반복 행동으로 완주시킨다
+    goals = [{"id": "g_x", "description": "특종", "priority": 1.0, "need": "achievement"}]
+    bias = {"achievement": 0.9, "belonging": 0.4, "security": 0.3}
+    state = initial_state(goals, bias)
+    achieved_events = []
+    for _ in range(20):
+        result = appraise_action(state, "work", goals, bias)
+        state = result.state
+        achieved_events += [a for a in result.advances if a.achieved]
+        if state.goals["g_x"] >= 1.0:
+            break
+    assert state.goals["g_x"] == 1.0
+    assert len(achieved_events) == 1  # 완주는 딱 한 번 마디가 된다
+    assert achieved_events[0].progress == 1.0
+
+    # 이미 이룬 목표는 더 진행하지도, 재발행하지도 않는다 (스팸 없음)
+    after = appraise_action(state, "work", goals, bias)
+    assert after.state.goals["g_x"] == 1.0
+    assert not any(a.goal_id == "g_x" for a in after.advances)
+
+
 def test_interaction_fills_belonging_without_goal_progress():
     state = initial_state(MINJI_GOALS, MINJI_BIAS)
     after = satisfy_from_interaction(state, "player.dm.sent")

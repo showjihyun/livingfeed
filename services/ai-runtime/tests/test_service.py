@@ -28,7 +28,14 @@ async def ai_service():
     task = asyncio.create_task(
         serve(Config(nats_url=NATS_URL, env=env, provider="rule"), stop=stop)
     )
-    await asyncio.sleep(0.2)  # 구독 준비
+    # 구독 준비를 폴링으로 기다린다 — 고정 sleep은 콜드 스타트(첫 import openai)에서
+    # 레이스가 난다. 응답이 오면(파싱 실패라도) 구독이 선 것이다 (NoRespondersError 소멸)
+    for _ in range(100):
+        try:
+            await probe.request(infer_subject(env), b"{}", timeout=0.2)
+            break
+        except (nats.errors.NoRespondersError, nats.errors.TimeoutError):
+            await asyncio.sleep(0.1)
     try:
         yield probe, env
     finally:

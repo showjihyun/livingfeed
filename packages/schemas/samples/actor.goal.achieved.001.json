@@ -1,0 +1,17 @@
+{
+  "event_id": "01JZK7Q3W0000000000000000Y",
+  "stream": "actor",
+  "type": "actor.goal.achieved",
+  "schema_version": 1,
+  "world_id": "w_main",
+  "actor_id": "a_minji_kim",
+  "tick": 140,
+  "occurred_at": "2026-07-11T10:40:00Z",
+  "causation_id": "01JZK7Q3W0000000000000000R",
+  "correlation_id": "01JZK7Q3W0000000000000000B",
+  "payload": {
+    "goal_id": "g_side_project",
+    "description": "몰래 진행 중인 사이드 프로젝트를 완성한다",
+    "need": "achievement"
+  }
+}

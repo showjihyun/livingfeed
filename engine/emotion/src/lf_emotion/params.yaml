@@ -43,6 +43,10 @@ appraisal:
     type: joy
     base_intensity: 0.5
     pad: { pleasure: 0.6, arousal: 0.15, dominance: 0.35 }
+  goal.achieved:              # 완주 — 서사의 마디, 벅찬 기쁨
+    type: joy
+    base_intensity: 0.85
+    pad: { pleasure: 0.85, arousal: 0.4, dominance: 0.5 }
   goal.frustrated:
     type: distress
     base_intensity: 0.45

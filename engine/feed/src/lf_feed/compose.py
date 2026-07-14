@@ -128,6 +128,53 @@ def build_post_event(
     )
 
 
+#: 목표 완주는 서사의 큰 마디 — 대인 갈등에 준하는 드라마 (docs/plan/04 사슬의 끝)
+GOAL_ACHIEVED_DRAMA = 0.8
+
+
+def evaluate_goal_achievement(
+    envelope: dict[str, Any], cfg: ScoringConfig
+) -> tuple[float, float]:
+    """목표 완주의 (drama, worthiness) — 희소한 마디 + 편집 부스트로 항상 승격."""
+    score = worthiness(GOAL_ACHIEVED_DRAMA, 0.0, 1.0, 1.0, cfg)
+    return GOAL_ACHIEVED_DRAMA, score
+
+
+def build_goal_post_event(
+    envelope: dict[str, Any], *, drama: float, score: float, actor_names: dict[str, str]
+) -> NewEvent:
+    """actor.goal.achieved → feed.post.published (인물의 마디, ADR-014)."""
+    payload = envelope["payload"]
+    author_id = envelope["actor_id"]
+    author = actor_names.get(author_id, author_id)
+    post_id = derive_post_id(envelope["event_id"])
+    return NewEvent(
+        world_id=envelope["world_id"],
+        stream="feed",
+        stream_key=post_id,
+        type=FEED_POST_TYPE,
+        tick=envelope["tick"],
+        actor_id=author_id,
+        causation_id=envelope["event_id"],
+        correlation_id=envelope["correlation_id"],  # 목표를 이룬 행동의 사슬을 잇는다
+        event_id=post_id,
+        payload={
+            "visibility": "world",
+            "title": f"{author}, 오랜 목표를 이루다"[:200],
+            "body": f"마침내 — {payload['description']}"[:2000],
+            "narration_kind": "template",
+            "participants": [author_id],
+            "community_id": None,
+            "location_id": None,
+            "drama_score": round(drama, 4),
+            "worthiness": round(score, 4),
+            "source_event_type": envelope["type"],
+            "tags": ["goal_achieved", payload["need"]],
+            "media": [],
+        },
+    )
+
+
 def evaluate(
     envelope: dict[str, Any], rarity: RarityTracker, cfg: ScoringConfig
 ) -> tuple[float, float]:

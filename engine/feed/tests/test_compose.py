@@ -5,7 +5,13 @@ import re
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
-from lf_feed.compose import build_post_event, derive_post_id, evaluate
+from lf_feed.compose import (
+    build_goal_post_event,
+    build_post_event,
+    derive_post_id,
+    evaluate,
+    evaluate_goal_achievement,
+)
 from lf_feed.scoring import RarityTracker, ScoringConfig
 from lf_schemas import registry
 
@@ -56,6 +62,34 @@ def test_build_post_event_payload_matches_schema():
 def test_build_post_event_without_names_falls_back_to_ids():
     event = build_post_event(SAMPLE, drama=0.5, score=0.4, actor_names={})
     assert "a_aria_kim" in event.payload["title"]
+
+
+GOAL_ACHIEVED = json.loads(
+    (
+        Path(__file__).resolve().parents[3]
+        / "packages" / "schemas" / "samples" / "actor.goal.achieved.001.json"
+    ).read_text(encoding="utf-8")
+)
+
+
+def test_goal_achievement_always_promotes_as_world_news():
+    cfg = ScoringConfig()
+    drama, score = evaluate_goal_achievement(GOAL_ACHIEVED, cfg)
+    assert score >= cfg.threshold  # 완주는 언제나 피드감이다 (희소 + 부스트)
+    event = build_goal_post_event(
+        GOAL_ACHIEVED, drama=drama, score=score, actor_names={"a_minji_kim": "김민지"}
+    )
+    # 스키마 적합 + 내레이션
+    errors = list(Draft202012Validator(registry.payload_schema("feed.post.published")).iter_errors(event.payload))
+    assert errors == []
+    assert event.payload["visibility"] == "world"
+    assert "김민지" in event.payload["title"] and "이루다" in event.payload["title"]
+    assert "마침내" in event.payload["body"]
+    assert GOAL_ACHIEVED["payload"]["description"] in event.payload["body"]
+    assert "goal_achieved" in event.payload["tags"]
+    assert event.payload["source_event_type"] == "actor.goal.achieved"
+    # 사슬 승계 — 목표를 이룬 행동의 correlation을 잇는다
+    assert event.correlation_id == GOAL_ACHIEVED["correlation_id"]
 
 
 def test_evaluate_passes_interpersonal_speak_but_filters_spam():

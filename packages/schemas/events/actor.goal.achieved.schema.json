@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/actor.goal.achieved.schema.json",
+  "title": "ActorGoalAchieved",
+  "description": "액터가 목표를 이뤘다 (progress가 1.0에 도달, ADR-012/014). actor.goal.advanced가 한 걸음이라면 이것은 서사의 마디다 — FeedComposer가 '세계 뉴스'로 승격하고 강한 기쁨을 낳는다. 세계당 목표당 1회.",
+  "type": "object",
+  "properties": {
+    "goal_id": {
+      "type": "string",
+      "description": "이룬 목표의 식별자 (agents/personas goals[].id)",
+      "pattern": "^[a-z0-9_]+$"
+    },
+    "description": {
+      "type": "string",
+      "description": "목표 서술 — 피드 내레이션에 실린다",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "need": {
+      "type": "string",
+      "description": "이 목표가 걸린 욕구 축 (achievement, belonging, security)",
+      "pattern": "^[a-z_]+$"
+    }
+  },
+  "required": ["goal_id", "description", "need"],
+  "additionalProperties": false
+}

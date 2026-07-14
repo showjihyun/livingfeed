@@ -21,9 +21,11 @@ from psycopg import AsyncConnection
 
 from lf_feed.compose import (
     PRINCIPAL,
+    build_goal_post_event,
     build_incident_post_event,
     build_post_event,
     evaluate,
+    evaluate_goal_achievement,
     evaluate_incident,
     load_actor_names,
 )
@@ -34,6 +36,7 @@ logger = logging.getLogger("lf.feed.composer")
 
 SOURCE_EVENT_TYPE = "actor.action.performed"
 INCIDENT_EVENT_TYPE = "world.incident.occurred"
+GOAL_ACHIEVED_TYPE = "actor.goal.achieved"
 
 
 class FeedComposer:
@@ -52,6 +55,12 @@ class FeedComposer:
             # Director boost 항이 실값(1.0)인 유일한 소스 (ADR-013/014)
             drama, score = evaluate_incident(envelope, self._rarity, self._cfg.scoring)
             event = build_incident_post_event(envelope, drama=drama, score=score)
+        elif envelope["type"] == GOAL_ACHIEVED_TYPE:
+            # 목표 완주 — 인물의 마디, 세계 뉴스로 승격 (ADR-012/014)
+            drama, score = evaluate_goal_achievement(envelope, self._cfg.scoring)
+            event = build_goal_post_event(
+                envelope, drama=drama, score=score, actor_names=self._names
+            )
         else:
             drama, score = evaluate(envelope, self._rarity, self._cfg.scoring)
             event = build_post_event(
@@ -111,7 +120,7 @@ class FeedComposer:
             nc = await nats.connect(cfg.nats_url)
             try:
                 js = nc.jetstream()
-                # 편집 소스 2종: 액터 행동(LF_ACTOR) + 세계 사건(LF_WORLD, Director)
+                # 편집 소스 3종: 액터 행동·목표 완주(LF_ACTOR) + 세계 사건(LF_WORLD)
                 subs = [
                     await js.pull_subscribe(
                         f"lf.{cfg.env}.*.{SOURCE_EVENT_TYPE}",
@@ -121,9 +130,13 @@ class FeedComposer:
                         f"lf.{cfg.env}.*.{INCIDENT_EVENT_TYPE}",
                         durable=f"{cfg.durable}-world", stream="LF_WORLD",
                     ),
+                    await js.pull_subscribe(
+                        f"lf.{cfg.env}.*.{GOAL_ACHIEVED_TYPE}",
+                        durable=f"{cfg.durable}-goal", stream=cfg.source_stream,
+                    ),
                 ]
                 logger.info(
-                    "feed composer 대기 — durable=%s threshold=%.2f (소스: 행동+세계사건)",
+                    "feed composer 대기 — durable=%s threshold=%.2f (소스: 행동+세계사건+목표완주)",
                     cfg.durable, cfg.scoring.threshold,
                 )
                 while not stop.is_set():

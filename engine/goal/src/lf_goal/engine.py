@@ -50,13 +50,18 @@ def default_params() -> dict[str, Any]:
 
 @dataclass(frozen=True)
 class GoalAdvance:
-    """발행 임계를 넘긴 목표 진행 — actor.goal.advanced의 재료."""
+    """발행 임계를 넘긴 목표 진행 — actor.goal.advanced의 재료.
+
+    achieved=True면 이번 행동이 목표를 완주시켰다 (progress가 1.0에 도달) —
+    한 걸음이 아니라 서사의 마디다 (actor.goal.achieved로 승격, ADR-014).
+    """
 
     goal_id: str
     description: str
     progress: float
     need: str
     congruence: float
+    achieved: bool = False
 
 
 @dataclass(frozen=True)
@@ -113,12 +118,16 @@ def appraise_action(
         if goal.get("need") != need:
             continue
         gid = str(goal["id"])
-        priority = float(goal.get("priority", 0.5))
         before = goals.get(gid, 0.0)
+        if before >= 1.0:
+            continue  # 이미 이룬 목표 — 더 진행하지 않는다 (재발행 없음)
+        priority = float(goal.get("priority", 0.5))
         after = clamp01(before + step * priority)
         goals[gid] = after
+        achieved = after >= 1.0
         pend = pending.get(gid, 0.0) + (after - before)
-        if pend >= threshold or after >= 1.0:
+        # 완주는 무조건 마디다. 그 외엔 누적 진행이 임계를 넘을 때만 발행한다
+        if achieved or pend >= threshold:
             advances.append(
                 GoalAdvance(
                     goal_id=gid,
@@ -126,6 +135,7 @@ def appraise_action(
                     progress=round(after, 4),
                     need=need,
                     congruence=round(care, 4),
+                    achieved=achieved,
                 )
             )
             pend = 0.0

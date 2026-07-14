@@ -32,13 +32,18 @@ logger = logging.getLogger("lf.actor.goal")
 
 PRINCIPAL = "engine.goal"
 ADVANCED_TYPE = "actor.goal.advanced"
+ACHIEVED_TYPE = "actor.goal.achieved"
 
 
 @dataclass(frozen=True)
 class PendingGoalEvent:
-    """CONSOLIDATE에서 적재될 목표 진행 이벤트 — 원인 행동의 인과를 승계한다."""
+    """CONSOLIDATE에서 적재될 목표 이벤트 — 원인 행동의 인과를 승계한다.
+
+    type은 actor.goal.advanced(한 걸음) 또는 actor.goal.achieved(완주 마디).
+    """
 
     actor_id: str
+    type: str
     payload: dict[str, Any]
     causation_id: str | None
     correlation_id: str | None
@@ -80,36 +85,50 @@ class GoalAdapter:
 
     async def record_action(
         self, world_id: str, persona: Persona, action_envelope: dict[str, Any]
-    ) -> tuple[float, list[PendingGoalEvent]]:
+    ) -> tuple[float, list[PendingGoalEvent], bool]:
         """확정 행동을 평가한다 (CONSOLIDATE) — 욕구 충족 + 목표 진행.
 
-        반환: (congruence, 임계 넘긴 목표 진행 이벤트들). congruence는 이번 tick
-        에피소드의 goal 중요도 항이 된다 (ADR-008 §중요도 0.20).
+        반환: (congruence, 목표 이벤트들, 이번에 목표를 완주했는가). congruence는
+        이번 tick 에피소드의 goal 중요도 항이 된다 (ADR-008 §중요도 0.20).
         """
         payload = action_envelope["payload"]
         state = await self.load(world_id, persona)
         result = appraise_action(state, payload["action_kind"], list(persona.goals), persona.needs_bias)
         await self.save(world_id, persona.id, result.state)
-        events = [self._advance_event(persona.id, action_envelope, adv) for adv in result.advances]
+        events = [self._goal_event(persona.id, action_envelope, adv) for adv in result.advances]
+        achieved = any(a.achieved for a in result.advances)
         if events:
             logger.info(
-                "목표 진행: %s %s congruence=%.2f",
-                persona.id, [a.goal_id for a in result.advances], result.congruence,
+                "목표 %s: %s congruence=%.2f",
+                "완주" if achieved else "진행",
+                persona.id, result.congruence,
             )
-        return result.congruence, events
+        return result.congruence, events, achieved
 
-    def _advance_event(
+    def _goal_event(
         self, actor_id: str, cause: dict[str, Any], advance: GoalAdvance
     ) -> PendingGoalEvent:
-        return PendingGoalEvent(
-            actor_id=actor_id,
-            payload={
+        # 완주는 서사의 마디(achieved) — 진행 델타가 아니라 사실만 싣는다
+        if advance.achieved:
+            payload = {
+                "goal_id": advance.goal_id,
+                "description": advance.description,
+                "need": advance.need,
+            }
+            event_type = ACHIEVED_TYPE
+        else:
+            payload = {
                 "goal_id": advance.goal_id,
                 "description": advance.description,
                 "progress": advance.progress,
                 "need": advance.need,
                 "congruence": advance.congruence,
-            },
+            }
+            event_type = ADVANCED_TYPE
+        return PendingGoalEvent(
+            actor_id=actor_id,
+            type=event_type,
+            payload=payload,
             causation_id=cause["event_id"],
             correlation_id=cause.get("correlation_id"),
         )

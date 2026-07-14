@@ -405,8 +405,10 @@ class ActorPhases:
         by_actor: dict[str, list[PendingGoalEvent]] = {}
         #: 목표 진전 → 기쁨의 근거: actor → (최대 congruence, 원인 행동)
         joy_cause: dict[str, tuple[float, dict[str, Any]]] = {}
+        #: 이번 tick에 목표를 완주한 액터 → 원인 행동 (강한 기쁨의 근거)
+        achieved_cause: dict[str, dict[str, Any]] = {}
         for actor_id, envelope in self._resolved_action_all:
-            congruence, events = await self._goal.record_action(
+            congruence, events, achieved = await self._goal.record_action(
                 ctx.world_id, self._personas[actor_id], envelope
             )
             relevance[actor_id] = max(relevance.get(actor_id, 0.0), congruence)
@@ -416,6 +418,8 @@ class ActorPhases:
                 prior = joy_cause.get(actor_id)
                 if prior is None or congruence > prior[0]:
                     joy_cause[actor_id] = (congruence, envelope)
+            if achieved:
+                achieved_cause[actor_id] = envelope
 
         for actor_id in sorted(by_actor):
             head = await current_head(ctx.conn, ctx.world_id, "actor", actor_id)
@@ -424,7 +428,7 @@ class ActorPhases:
                     world_id=ctx.world_id,
                     stream="actor",
                     stream_key=actor_id,
-                    type=GOAL_TYPE,
+                    type=e.type,  # actor.goal.advanced 또는 actor.goal.achieved
                     tick=ctx.tick,
                     actor_id=actor_id,
                     causation_id=e.causation_id,
@@ -434,18 +438,19 @@ class ActorPhases:
                 for e in by_actor[actor_id]
             ]
             await append(ctx.conn, GOAL_PRINCIPAL, events, expected_head=head)
-            logger.info("목표 진행 적재: %s %d건 tick=%d", actor_id, len(events), ctx.tick)
+            logger.info("목표 이벤트 적재: %s %d건 tick=%d", actor_id, len(events), ctx.tick)
 
-        # 목표 결과 → 감정 (ADR-015 goal_congruence): 진전은 기쁨, 결핍은 괴로움
+        # 목표 결과 → 감정 (ADR-015 goal_congruence): 완주는 큰 기쁨, 진전은 기쁨, 결핍은 괴로움
         if self._emotion is not None:
             acted = sorted({actor_id for actor_id, _ in self._resolved_action_all})
-            await self._emit_goal_emotions(ctx, joy_cause, acted)
+            await self._emit_goal_emotions(ctx, joy_cause, achieved_cause, acted)
         return relevance, advanced_actions
 
     async def _emit_goal_emotions(
         self,
         ctx: TickContext,
         joy_cause: dict[str, tuple[float, dict[str, Any]]],
+        achieved_cause: dict[str, dict[str, Any]],
         acted: list[str],
     ) -> None:
         """행동한 액터별로 목표-감정 신호를 모아 actor.emotion.shifted로 적재한다."""
@@ -453,7 +458,14 @@ class ActorPhases:
         for actor_id in acted:
             persona = self._personas[actor_id]
             signals: list[tuple[str, float, str | None, str | None, str | None]] = []
-            if actor_id in joy_cause:
+            if actor_id in achieved_cause:
+                # 완주는 서사의 마디 — 강한 기쁨 (magnitude 1.0)
+                env = achieved_cause[actor_id]
+                signals.append(
+                    ("goal.achieved", 1.0, env["event_id"],
+                     env["event_id"], env.get("correlation_id"))
+                )
+            elif actor_id in joy_cause:
                 congruence, env = joy_cause[actor_id]
                 signals.append(
                     ("goal.advanced", congruence, env["event_id"],

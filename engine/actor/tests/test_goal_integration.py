@@ -65,6 +65,49 @@ async def test_action_advances_goal_and_scores_memory(conn, redis, nc, ai_servic
     assert any(v > 0 for v in state.goals.values())
 
 
+async def test_goal_completion_fires_achieved_event_and_big_joy(conn, redis, nc, ai_service):  # noqa: F811
+    """목표를 완주 직전(0.95)으로 시드 → 완성하는 행동에 goal.achieved + 벅찬 기쁨."""
+    from lf_goal import GoalState, initial_state
+
+    goal = GoalAdapter(redis)
+    persona = load_persona(PERSONAS_DIR / "minji-kim.yaml")
+    # g_decide_resignation(security, 0.9)을 완주 직전으로 — 한 번의 security 행동이면 넘는다
+    seeded = initial_state(list(persona.goals), persona.needs_bias)
+    seeded = GoalState(needs=seeded.needs, goals={**seeded.goals, "g_decide_resignation": 0.95})
+    await goal.save(WORLD, "a_minji_kim", seeded)
+
+    phases = ActorPhases(
+        [persona],
+        ai=AiRuntimeClient(nc, ai_service, timeout_s=5),
+        memory=WorkingMemory(redis),
+        emotion=EmotionAdapter(redis),
+        goal=goal,
+    )
+    head = 0
+    for tick in range(1, 9):
+        head = await run_tick(conn, phases, CLOCK, WORLD, tick=tick, head=head)
+
+    events = [s.envelope for s in await read_stream(conn, WORLD, "actor", "a_minji_kim")]
+    achieved = [e for e in events if e["type"] == "actor.goal.achieved"]
+    assert achieved, "완주 직전 목표가 security 행동으로 이뤄져야 한다"
+    assert achieved[0]["payload"]["goal_id"] == "g_decide_resignation"
+    assert achieved[0]["payload"]["need"] == "security"
+    assert "progress" not in achieved[0]["payload"]  # 마디는 사실만 싣는다
+
+    # 완주는 벅찬 기쁨을 낳는다 — 강한 joy 인스턴스 (base 0.85)
+    joy_after = [
+        inst
+        for e in events if e["type"] == "actor.emotion.shifted"
+        for inst in e["payload"]["emotions"]
+        if inst["type"] == "joy" and inst["intensity"] >= 0.5
+    ]
+    assert joy_after, "완주 tick에 강한 기쁨(joy)이 섰어야 한다"
+
+    # 이룬 목표는 1.0에 고정 — 이후 재발행 없음
+    final = await goal.load(WORLD, phases._personas["a_minji_kim"])
+    assert final.goals["g_decide_resignation"] == 1.0
+
+
 async def test_no_goal_adapter_leaves_importance_zero(conn, redis, nc, ai_service):  # noqa: F811
     """goal 어댑터 미주입이면 중요도 goal 항은 0으로 흐른다 (정직한 폴백)."""
     phases = ActorPhases(
