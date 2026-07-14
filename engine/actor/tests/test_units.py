@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from jsonschema import Draft202012Validator
 from lf_actor.context import WorldContext, build
 from lf_actor.persona import load_persona, load_personas
+from lf_actor.phases import sanitize_target
 from lf_actor.rules import fallback_action
 from lf_schemas import registry
 
@@ -58,3 +59,33 @@ def test_fallback_action_is_valid_and_personalized():
     assert action["action_kind"] == "work"  # achievement가 최강 욕구
     assert action["decision_trace"]["tier"] == "cold_rule"
     assert action == fallback_action(aria, tick=42, trace_id="t-1")  # 결정적
+
+
+VALID_IDS = {"a_aria_kim", "a_junho_park"}
+
+
+def test_sanitize_target_keeps_real_actor():
+    payload = {"action_kind": "confront", "target_actor_id": "a_junho_park"}
+    out = sanitize_target(payload, VALID_IDS, "a_aria_kim")
+    assert out["target_actor_id"] == "a_junho_park"  # 유효 대상은 유지
+
+
+def test_sanitize_target_nulls_hallucinated_id():
+    # LLM이 지어낸 없는 대상 — 이벤트로 굳기 전에 끊는다 (피드·관계·그래프로 번짐 방지)
+    payload = {"action_kind": "speak", "target_actor_id": "a_grandson_kang", "intent": "x"}
+    out = sanitize_target(payload, VALID_IDS, "a_aria_kim")
+    assert out["target_actor_id"] is None
+    assert payload["target_actor_id"] == "a_grandson_kang"  # 입력 불변(새 dict 반환)
+    assert out["intent"] == "x"  # 나머지 필드는 보존
+
+
+def test_sanitize_target_nulls_self_target():
+    payload = {"action_kind": "help", "target_actor_id": "a_aria_kim"}
+    out = sanitize_target(payload, VALID_IDS, "a_aria_kim")
+    assert out["target_actor_id"] is None  # 자기 자신은 대상이 아니다
+
+
+def test_sanitize_target_passes_none_through_unchanged():
+    payload = {"action_kind": "work", "target_actor_id": None}
+    out = sanitize_target(payload, VALID_IDS, "a_aria_kim")
+    assert out is payload  # 손댈 것 없으면 그대로 (불필요한 복사 없음)

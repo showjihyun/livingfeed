@@ -64,6 +64,28 @@ def test_build_post_event_without_names_falls_back_to_ids():
     assert "a_aria_kim" in event.payload["title"]
 
 
+def test_llm_headline_becomes_title_with_llm_narration():
+    # LLM이 지은 headline이 있으면 그것이 제목, narration_kind=llm (ADR-014 §제목 폴리시)
+    withline = {**SAMPLE, "payload": {**SAMPLE["payload"], "headline": "특종을 손에 쥐다"}}
+    event = build_post_event(withline, drama=0.55, score=0.47, actor_names=NAMES)
+    assert event.payload["title"] == "특종을 손에 쥐다"
+    assert event.payload["narration_kind"] == "llm"
+    assert event.payload["body"] == SAMPLE["payload"]["intent"]  # 본문은 여전히 intent (중복 없음)
+    schema = registry.payload_schema("feed.post.published")
+    assert list(Draft202012Validator(schema).iter_errors(event.payload)) == []
+
+
+def test_missing_or_blank_headline_falls_back_to_template():
+    event = build_post_event(SAMPLE, drama=0.5, score=0.4, actor_names=NAMES)
+    assert event.payload["narration_kind"] == "template"
+    assert "김아리" in event.payload["title"]  # action_kind 템플릿
+    # 공백뿐인 headline도 템플릿 폴백 (빈 제목 방지)
+    blank = {**SAMPLE, "payload": {**SAMPLE["payload"], "headline": "   "}}
+    assert build_post_event(blank, drama=0.5, score=0.4, actor_names=NAMES).payload[
+        "narration_kind"
+    ] == "template"
+
+
 GOAL_ACHIEVED = json.loads(
     (
         Path(__file__).resolve().parents[3]
@@ -80,7 +102,8 @@ def test_goal_achievement_always_promotes_as_world_news():
         GOAL_ACHIEVED, drama=drama, score=score, actor_names={"a_minji_kim": "김민지"}
     )
     # 스키마 적합 + 내레이션
-    errors = list(Draft202012Validator(registry.payload_schema("feed.post.published")).iter_errors(event.payload))
+    schema = registry.payload_schema("feed.post.published")
+    errors = list(Draft202012Validator(schema).iter_errors(event.payload))
     assert errors == []
     assert event.payload["visibility"] == "world"
     assert "김민지" in event.payload["title"] and "이루다" in event.payload["title"]

@@ -89,12 +89,19 @@ def build_post_event(
     author = actor_names.get(author_id, author_id)
     target = actor_names.get(target_id, target_id) if target_id else None
 
-    with_target, without_target = _TITLES.get(payload["action_kind"], _TITLE_DEFAULT)
-    title = (
-        with_target.format(author=author, target=target)
-        if target
-        else without_target.format(author=author)
-    )
+    # LLM이 지은 제목(headline)이 있으면 그것이 곧 헤드라인 — 이 순간에 맞는 서사 제목
+    # (ADR-014 §제목 폴리시). 없으면 action_kind 템플릿으로 폴백한다.
+    headline = (payload.get("headline") or "").strip()
+    if headline:
+        title, narration_kind = headline, "llm"
+    else:
+        with_target, without_target = _TITLES.get(payload["action_kind"], _TITLE_DEFAULT)
+        title = (
+            with_target.format(author=author, target=target)
+            if target
+            else without_target.format(author=author)
+        )
+        narration_kind = "template"
 
     participants = [author_id] + ([target_id] if target_id else [])
     post_id = derive_post_id(envelope["event_id"])
@@ -115,7 +122,7 @@ def build_post_event(
             "visibility": "world",
             "title": title[:200],
             "body": payload["intent"][:2000],
-            "narration_kind": "template",
+            "narration_kind": narration_kind,
             "participants": participants,
             "community_id": None,
             "location_id": payload.get("location_id"),

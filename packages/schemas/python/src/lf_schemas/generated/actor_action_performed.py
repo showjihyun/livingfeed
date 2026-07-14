@@ -38,6 +38,10 @@ class ActorActionPerformed(BaseModel):
     intent: constr(max_length=500) = Field(
         ..., description="행동 의도 한 줄 요약 (피드 내레이션 입력)"
     )
+    headline: constr(max_length=80) | None = Field(
+        None,
+        description="행동의 짧은 제목 한 줄 (피드 헤드라인, ADR-014 §제목 폴리시). LLM이 이 인물답게 지어낸다 — 없으면 피드가 action_kind 템플릿 제목으로 폴백한다. 선택적.",
+    )
     target_actor_id: str | None
     location_id: str | None
     params: dict[str, Any] = Field(..., description="action_kind별 상세 파라미터")

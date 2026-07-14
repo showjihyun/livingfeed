@@ -17,6 +17,10 @@ export interface ActorActionPerformed {
    * 행동 의도 한 줄 요약 (피드 내레이션 입력)
    */
   intent: string;
+  /**
+   * 행동의 짧은 제목 한 줄 (피드 헤드라인, ADR-014 §제목 폴리시). LLM이 이 인물답게 지어낸다 — 없으면 피드가 action_kind 템플릿 제목으로 폴백한다. 선택적.
+   */
+  headline?: string;
   target_actor_id: string | null;
   location_id: string | null;
   /**

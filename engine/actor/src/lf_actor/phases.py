@@ -17,6 +17,7 @@ from lf_eventstore import NewEvent, append, current_head
 from lf_schemas import registry
 from lf_tick.lod import ActorLod, Tier, due_by_tier, scheduled_counts
 from lf_tick.pipeline import TickContext
+from redis.asyncio import Redis
 
 from lf_actor.client import AiRuntimeClient
 from lf_actor.consolidation import (
@@ -30,7 +31,6 @@ from lf_actor.context import WorldContext, build
 from lf_actor.conversation import conversation_turns
 from lf_actor.emotion import PRINCIPAL as EMOTION_PRINCIPAL
 from lf_actor.emotion import SHIFT_TYPE, EmotionAdapter, PendingShift
-from lf_actor.goal import ADVANCED_TYPE as GOAL_TYPE
 from lf_actor.goal import PRINCIPAL as GOAL_PRINCIPAL
 from lf_actor.goal import GoalAdapter, PendingGoalEvent
 from lf_actor.mailbox import Mailbox
@@ -41,7 +41,6 @@ from lf_actor.relationship import PRINCIPAL as REL_PRINCIPAL
 from lf_actor.relationship import PendingRelEvent, RelationshipAdapter
 from lf_actor.rules import fallback_action, fallback_reply
 from lf_actor.semantic import SemanticMemory
-from redis.asyncio import Redis
 
 logger = logging.getLogger("lf.actor.phases")
 
@@ -57,6 +56,21 @@ _BIO_MAX = 500
 
 #: 응답 의무가 있는 상호작용 (반응(like)은 지각·감정 입력일 뿐 응답하지 않는다)
 _REPLYABLE = {"player.dm.sent": "dm", "player.comment.posted": "comment"}
+
+
+def sanitize_target(payload: dict[str, Any], valid_ids: set[str], actor_id: str) -> dict[str, Any]:
+    """LLM이 지어낸 대상을 소스에서 끊는다 (ADR-014 §대상 폴리시).
+
+    target_actor_id가 세계의 유효 액터가 아니거나 자기 자신이면 None으로 만든다.
+    유효 액터 집합(self._personas)이 권위다. 환각 대상을 그대로 두면 피드 제목·
+    participants뿐 아니라 관계 엣지·그래프 노드·drama 점수까지 유령이 번지므로,
+    이벤트로 굳기 전에 끊는다 — 대상이 사라진 행동은 단독 행동이 된다(반응할
+    상대가 애초에 없었으므로). 반환은 새 dict(입력 불변).
+    """
+    target = payload.get("target_actor_id")
+    if target is not None and (target == actor_id or target not in valid_ids):
+        return {**payload, "target_actor_id": None}
+    return payload
 
 
 class ActorPhases:
@@ -213,6 +227,8 @@ class ActorPhases:
                 )
                 if payload is None:
                     payload = fallback_action(persona, ctx.tick, bundle.trace_id)
+                # LLM이 지어낸 대상을 소스에서 끊는다 — 피드·관계·그래프로 번지기 전에
+                payload = sanitize_target(payload, set(self._personas), actor_id)
                 self._intents.append((actor_id, tier.value, payload))
                 decided[tier.value] += 1
 
