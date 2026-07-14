@@ -15,6 +15,7 @@ from lf_actor.phases import ActorPhases
 from lf_eventstore import new_ulid, read_stream
 from lf_tick.clock import TickClock
 from lf_tick.engine import run_tick
+from lf_tick.lod import ActorLod, Tier
 
 from .conftest import PERSONAS_DIR
 from .test_phases import ai_service, nc  # noqa: F401 — 픽스처 재사용
@@ -90,6 +91,20 @@ async def test_player_dm_gets_reply_through_tick(conn, redis, nc, ai_service):  
     recent = await WorkingMemory(redis).recent(WORLD, "a_aria_kim")
     assert any("플레이어 p_observer_0417의 DM" in m for m in recent)
     assert any("답했다" in m for m in recent)
+
+
+async def test_player_dm_repromotes_demoted_actor_to_hot(conn, redis, nc, ai_service):  # noqa: F811
+    """강등된 액터도 플레이어가 말을 걸면 즉시 Hot 복귀 (상호작용 우선, ADR-011/012)."""
+    mailbox = Mailbox(redis)
+    phases = make_phases(nc, redis, ai_service, mailbox)
+    # 관심이 끊겨 Cold까지 내려간 상태로 시드
+    phases._lods["a_aria_kim"] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
+    dm = player_envelope("player.dm.sent", {"text": "오랜만이에요"})
+    await mailbox.push(WORLD, "a_aria_kim", dm)
+
+    await run_tick(conn, phases, CLOCK, WORLD, tick=5, head=0)
+    assert phases._lods["a_aria_kim"].tier is Tier.HOT  # DM이 관심 신호 → 재승격
+    assert phases._lods["a_aria_kim"].last_interest_tick == 5
 
 
 async def test_reaction_is_perceived_but_not_replied(conn, redis, nc, ai_service):  # noqa: F811

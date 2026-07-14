@@ -16,6 +16,7 @@ from lf_actor.phases import ActorPhases
 from lf_eventstore import read_stream
 from lf_tick.clock import TickClock
 from lf_tick.engine import run_tick
+from lf_tick.lod import COLD_INTERVAL, ActorLod, Tier, phase_offset
 
 from .conftest import NATS_URL, PERSONAS_DIR
 
@@ -114,3 +115,30 @@ async def test_working_memory_feeds_next_tick_context(conn, redis, nc, ai_servic
     recent = await memory.recent(WORLD, "a_aria_kim")
     assert len(recent) == 2
     assert "tick 1" in recent[0]  # 최신 우선
+
+
+async def test_idle_actor_demotes_hot_to_warm(conn, redis, nc, ai_service):
+    """관심이 끊긴 액터는 히스테리시스를 지나면 Hot→Warm으로 강등된다 (ADR-011).
+
+    강등이 곧 비용 정책 — 유휴 액터가 매 tick LLM을 부르지 않게 한다.
+    """
+    phases = make_phases(nc, redis, ai_service)
+    head = 0
+    for tick in range(0, 11):  # HOT_DEMOTION_GRACE(10) 유휴 tick
+        head = await run_tick(conn, phases, CLOCK, WORLD, tick=tick, head=head)
+    assert phases._lods["a_aria_kim"].tier is Tier.WARM  # 강등됨
+
+
+async def test_cold_actor_uses_rule_action_without_llm(conn, redis, nc, ai_service):
+    """Cold 티어는 통계 일괄 처리 — due일 때 LLM 없이 규칙 행동만 (ADR-012)."""
+    phases = make_phases(nc, redis, ai_service)
+    phases._lods["a_aria_kim"] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
+    due_tick = phase_offset("a_aria_kim", COLD_INTERVAL)  # 이 tick에 cold가 due
+    await run_tick(conn, phases, CLOCK, WORLD, tick=due_tick, head=0)
+
+    [action] = await read_stream(conn, WORLD, "actor", "a_aria_kim")
+    payload = action.envelope["payload"]
+    assert payload["params"].get("fallback") is True       # 규칙 행동 (LLM 미호출)
+    assert payload["decision_trace"]["tier"] == "cold_rule"
+    events = await read_stream(conn, WORLD, "system", "tick")
+    assert events[-1].envelope["payload"]["actors_decided"]["cold"] == 1

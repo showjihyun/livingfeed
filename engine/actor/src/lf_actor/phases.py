@@ -15,7 +15,15 @@ from typing import Any
 
 from lf_eventstore import NewEvent, append, current_head
 from lf_schemas import registry
-from lf_tick.lod import ActorLod, Tier, due_by_tier, scheduled_counts
+from lf_tick.lod import (
+    ActorLod,
+    Tier,
+    due_by_tier,
+    maybe_demote,
+    promote,
+    scheduled_counts,
+    touch,
+)
 from lf_tick.pipeline import TickContext
 from redis.asyncio import Redis
 
@@ -71,6 +79,18 @@ def sanitize_target(payload: dict[str, Any], valid_ids: set[str], actor_id: str)
     if target is not None and (target == actor_id or target not in valid_ids):
         return {**payload, "target_actor_id": None}
     return payload
+
+
+def lod_after_perception(lod: ActorLod, item_types: set[str], tick: int) -> ActorLod:
+    """지각한 항목 유형들 → LOD 갱신 (ADR-011 §관심 신호).
+
+    응답 의무가 있는 상호작용(dm/comment)은 즉시 응답 대상이라 Hot 승격한다
+    (상호작용 우선, ADR-012 규칙 2). 그 밖의 지각(Director 지목·반응·세계 사건)은
+    관심 신호이므로 티어는 유지하고 강등 타이머만 리셋한다(touch).
+    """
+    if item_types & set(_REPLYABLE):
+        return promote(lod, tick)
+    return touch(lod, tick)
 
 
 class ActorPhases:
@@ -178,16 +198,23 @@ class ActorPhases:
         logger.info("정체성 선언: %s (%s) tick=%d", persona.id, persona.name, ctx.tick)
 
     async def perceive(self, ctx: TickContext) -> None:
-        """메일박스 drain → appraise — 개입이 지각과 감정으로 들어온다 (ADR-012/015)."""
+        """메일박스 drain → appraise — 개입이 지각과 감정으로 들어온다 (ADR-012/015).
+
+        지각은 곧 관심 신호다 — 지각한 액터는 승격/유지(LOD), 지각 없는 액터는
+        유휴 강등(Hot→Warm→Cold, 히스테리시스). 강등이 곧 비용 정책이다 (ADR-011).
+        """
         self._inbox = {}
         self._shifts = []
-        if self._mailbox is None:
-            return
         for actor_id in self._personas:
-            items = await self._mailbox.drain(ctx.world_id, actor_id)
+            items = await self._mailbox.drain(ctx.world_id, actor_id) if self._mailbox else []
             if not items:
+                # 관심 없는 액터는 히스테리시스를 지나면 한 단계 강등된다 (ADR-011)
+                self._lods[actor_id] = maybe_demote(self._lods[actor_id], ctx.tick)
                 continue
             self._inbox[actor_id] = items
+            self._lods[actor_id] = lod_after_perception(
+                self._lods[actor_id], {e["type"] for e in items}, ctx.tick
+            )
             for envelope in items:
                 await self._memory.add(ctx.world_id, actor_id, describe_interaction(envelope))
             if self._emotion is not None:
@@ -253,7 +280,14 @@ class ActorPhases:
                     text = fallback_reply(persona, envelope["payload"]["text"])
                 self._replies.append((actor_id, envelope, text))
 
-        # Cold 티어는 ColdSimulator(통계 일괄 처리)의 몫 — Phase 1은 대상 없음 (ADR-012)
+        # Cold 티어 — 통계 일괄 처리(ADR-012): LLM 없이 규칙 행동만, due일 때만(100 tick
+        # 케이던스). 강등된 액터가 얼지 않게 최소 생존시킨다 — 비용은 near-zero.
+        for actor_id in due[Tier.COLD]:
+            persona = self._personas[actor_id]
+            payload = fallback_action(persona, ctx.tick, f"cold-{actor_id}-{ctx.tick}")
+            payload = sanitize_target(payload, set(self._personas), actor_id)
+            self._intents.append((actor_id, Tier.COLD.value, payload))
+            decided["cold"] += 1
         return decided
 
     async def _recall(self, world_id: str, actor_id: str, working: list[str]) -> list[str]:

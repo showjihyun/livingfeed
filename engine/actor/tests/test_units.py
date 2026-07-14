@@ -5,9 +5,10 @@ from datetime import UTC, datetime
 from jsonschema import Draft202012Validator
 from lf_actor.context import WorldContext, build
 from lf_actor.persona import load_persona, load_personas
-from lf_actor.phases import sanitize_target
+from lf_actor.phases import lod_after_perception, sanitize_target
 from lf_actor.rules import fallback_action
 from lf_schemas import registry
+from lf_tick.lod import ActorLod, Tier
 
 from .conftest import PERSONAS_DIR
 
@@ -89,3 +90,26 @@ def test_sanitize_target_passes_none_through_unchanged():
     payload = {"action_kind": "work", "target_actor_id": None}
     out = sanitize_target(payload, VALID_IDS, "a_aria_kim")
     assert out is payload  # 손댈 것 없으면 그대로 (불필요한 복사 없음)
+
+
+def test_lod_reply_obligation_promotes_to_hot():
+    # dm/comment는 즉시 응답 대상 → 어느 티어에서든 Hot 승격 (상호작용 우선)
+    warm = ActorLod(tier=Tier.WARM, last_interest_tick=0)
+    out = lod_after_perception(warm, {"player.dm.sent"}, tick=42)
+    assert out.tier is Tier.HOT
+    assert out.last_interest_tick == 42
+    # 다른 신호와 섞여도 응답 의무가 있으면 승격
+    mixed = lod_after_perception(warm, {"world.incident.occurred", "player.comment.posted"}, 42)
+    assert mixed.tier is Tier.HOT
+
+
+def test_lod_soft_signal_touches_without_promoting():
+    # Director 지목·반응·세계 사건은 관심 신호 — 티어 유지, 강등 타이머만 리셋
+    warm = ActorLod(tier=Tier.WARM, last_interest_tick=0)
+    out = lod_after_perception(warm, {"world.observation.surfaced"}, tick=42)
+    assert out.tier is Tier.WARM  # 승격 안 함
+    assert out.last_interest_tick == 42  # 하지만 관심은 갱신(강등 지연)
+    cold = lod_after_perception(
+        ActorLod(tier=Tier.COLD, last_interest_tick=0), {"player.reaction.added"}, 42
+    )
+    assert cold.tier is Tier.COLD and cold.last_interest_tick == 42
