@@ -1,0 +1,15 @@
+{
+  "event_id": "01JZK7Q3W0000000000000000T",
+  "stream": "system",
+  "type": "system.director.spotlighted",
+  "schema_version": 1,
+  "world_id": "w_main",
+  "actor_id": null,
+  "tick": 145,
+  "occurred_at": "2026-07-11T10:45:00Z",
+  "causation_id": "01JZK7Q3W0000000000000000Q",
+  "correlation_id": "01JZK7Q3W0000000000000000T",
+  "payload": {
+    "target_actor_id": "a_seongho_park"
+  }
+}

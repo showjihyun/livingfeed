@@ -107,6 +107,24 @@ async def test_player_dm_repromotes_demoted_actor_to_hot(conn, redis, nc, ai_ser
     assert phases._lods["a_aria_kim"].last_interest_tick == 5
 
 
+async def test_director_spotlight_promotes_lod_without_entering_memory(
+    conn, redis, nc, ai_service  # noqa: F811
+):
+    """Director 승격 신호(promote_actor)는 LOD만 Hot으로 올린다 — 지각이 아니라
+    제어라 액터가 '눈치채지' 않는다(작업 기억에 안 남는다, ADR-013)."""
+    mailbox = Mailbox(redis)
+    phases = make_phases(nc, redis, ai_service, mailbox)
+    phases._lods["a_aria_kim"] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
+    spot = player_envelope("system.director.spotlighted", {"target_actor_id": "a_aria_kim"})
+    await mailbox.push(WORLD, "a_aria_kim", spot)
+
+    await run_tick(conn, phases, CLOCK, WORLD, tick=7, head=0)
+    assert phases._lods["a_aria_kim"].tier is Tier.HOT  # 승격됨
+    # 제어 신호 자체는 작업 기억에 남지 않는다 (지각한 것이 아니다)
+    recent = await WorkingMemory(redis).recent(WORLD, "a_aria_kim")
+    assert not any("spotlight" in m.lower() for m in recent)
+
+
 async def test_reaction_is_perceived_but_not_replied(conn, redis, nc, ai_service):  # noqa: F811
     mailbox = Mailbox(redis)
     like = player_envelope(

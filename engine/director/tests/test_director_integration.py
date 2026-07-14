@@ -186,3 +186,29 @@ async def test_llm_nudge_surfaces_private_observation(conn):
     assert obs["payload"]["about_actor_id"] == "a_seongho_park"
     # 사적 관측 — 공개 사건 스트림에는 들어가지 않는다
     assert await read_stream(conn, WORLD, "world", "incidents") == []
+
+
+async def test_llm_promote_spotlights_actor_on_system_stream(conn):
+    # 세 번째 도구: promote_actor → system.director.spotlighted (제어 신호, world 아님)
+    tension = [["a_minji_kim", "a_seongho_park", 0.8, 0.2]]
+    plan = {
+        "tool": "promote_actor",
+        "target_actor_id": "a_seongho_park",
+        "rationale": "박성호를 무대 중앙으로 — 더 자주 움직이게",
+    }
+    ai = _StubAiClient(plan)
+    director = make_llm_director(ai)
+    fired = await director.evaluate(
+        conn, Snapshot(tick=122, drama_ma=0.05, quiet_ticks=30), _StubGraph(tension)
+    )
+    assert fired
+
+    [audit] = [s.envelope for s in await read_stream(conn, WORLD, "system", "director")]
+    assert audit["payload"]["tool"] == "promote_actor"
+
+    [spot] = [s.envelope for s in await read_stream(conn, WORLD, "system", "spotlight")]
+    assert spot["type"] == "system.director.spotlighted"
+    assert spot["payload"] == {"target_actor_id": "a_seongho_park"}
+    # 세계 사건이 아니다 — world 스트림에는 없다
+    assert await read_stream(conn, WORLD, "world", "incidents") == []
+    assert await read_stream(conn, WORLD, "world", "observations") == []

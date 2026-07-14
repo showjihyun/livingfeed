@@ -25,7 +25,9 @@ SNAP = Snapshot(tick=120, drama_ma=0.05, quiet_ticks=30)
 
 def test_plan_schema_selects_tool_and_lists_kinds():
     schema = plan_schema(["chance_encounter", "rumor_spread"])
-    assert schema["properties"]["tool"]["enum"] == ["inject_incident", "nudge_perception"]
+    assert schema["properties"]["tool"]["enum"] == [
+        "inject_incident", "nudge_perception", "promote_actor"
+    ]
     assert schema["properties"]["incident_kind"]["enum"] == ["chance_encounter", "rumor_spread"]
     assert schema["additionalProperties"] is False
     # 도구별 인자는 선택적 — 필수는 tool·rationale뿐(유효성은 매핑이 재집행)
@@ -214,10 +216,50 @@ def test_nudge_hallucinated_about_is_dropped_but_kept():
     assert result.payload["about_actor_id"] is None
 
 
-def test_build_plan_user_grounds_names_kinds_and_both_tools():
+# --- promote_actor 도구 -------------------------------------------------------
+
+
+def test_valid_promote_spotlights_candidate_on_system_stream():
+    plan = {
+        "tool": "promote_actor",
+        "target_actor_id": "a_seongho",
+        "rationale": "박성호가 잠재 드라마의 중심 — 무대로 끌어올린다",
+    }
+    result = intervention_from_plan(plan, SNAP, TENSION, INCIDENTS, NAMES, model="qwen3:8b")
+    assert result is not None
+    assert result.tool == "promote_actor"
+    assert result.stream == "system"  # 세계 사건이 아니라 제어 신호
+    assert result.event_type == "system.director.spotlighted"
+    assert result.stream_key == "spotlight"
+    assert result.payload == {"target_actor_id": "a_seongho"}
+    assert result.signals["selector"] == "llm"
+
+
+def test_promote_target_outside_candidates_returns_none():
+    # 없는 액터는 승격할 대상이 없다 — 규칙 폴백
+    plan = {"tool": "promote_actor", "target_actor_id": "a_ghost", "rationale": "x"}
+    assert intervention_from_plan(plan, SNAP, TENSION, INCIDENTS, NAMES) is None
+
+
+def test_incident_and_nudge_stream_to_world():
+    incident = intervention_from_plan(
+        {"tool": "inject_incident", "incident_kind": "chance_encounter",
+         "affected_actor_ids": ["a_minji"], "description": "x", "intensity": 0.5, "rationale": "x"},
+        SNAP, TENSION, INCIDENTS, NAMES,
+    )
+    nudge = intervention_from_plan(
+        {"tool": "nudge_perception", "target_actor_id": "a_minji", "observation": "x",
+         "about_actor_id": None, "rationale": "x"},
+        SNAP, TENSION, INCIDENTS, NAMES,
+    )
+    assert incident.stream == "world" and nudge.stream == "world"
+
+
+def test_build_plan_user_grounds_names_kinds_and_all_tools():
     user = build_plan_user(SNAP, TENSION, INCIDENTS, NAMES)
     assert "김민지" in user and "박성호" in user  # 이름으로 그라운딩
     assert "chance_encounter" in user and "rumor_spread" in user  # 라이브러리 종류 제시
     assert "a_minji" in user  # 후보 id 명시 (대상 화이트리스트)
-    assert "inject_incident" in user and "nudge_perception" in user  # 두 도구 다 제시
+    # 세 도구 모두 제시
+    assert "inject_incident" in user and "nudge_perception" in user and "promote_actor" in user
     assert str(SNAP.quiet_ticks) in user

@@ -127,15 +127,15 @@ class Director:
             ],
             expected_head=head,
         )
-        # 산출 world.* 이벤트 — 도구별 타입/파티션/payload는 Intervention이 안다.
+        # 산출 이벤트 — 도구별 스트림/타입/파티션/payload는 Intervention이 안다.
         # director는 도구를 모른 채 적재한다 (도구가 늘어도 여기는 그대로).
-        head = await current_head(conn, cfg.world_id, "world", intervention.stream_key)
+        head = await current_head(conn, cfg.world_id, intervention.stream, intervention.stream_key)
         await append(
             conn, PRINCIPAL,
             [
                 NewEvent(
                     world_id=cfg.world_id,
-                    stream="world",
+                    stream=intervention.stream,
                     stream_key=intervention.stream_key,
                     type=intervention.event_type,
                     tick=snapshot.tick,

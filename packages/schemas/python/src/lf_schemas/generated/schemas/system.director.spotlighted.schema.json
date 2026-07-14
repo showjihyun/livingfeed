@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/system.director.spotlighted.schema.json",
+  "title": "SystemDirectorSpotlighted",
+  "description": "Director의 promote_actor 산출 — 한 액터의 LOD를 Hot으로 올린다 (ADR-013/011). 세계 사건이 아니라 시뮬레이션 제어 신호다: 액터는 이걸 '지각'하지 않는다(작업 기억에 남지 않는다). 잠재 드라마 참여자를 활성화해 더 자주 결정하게 만들 뿐, 무엇을 결정할지는 액터의 몫이다. Actor Runtime이 소비해 티어를 승격한다.",
+  "type": "object",
+  "properties": {
+    "target_actor_id": {
+      "type": "string",
+      "description": "Hot으로 승격할 액터 (Actor Runtime의 LOD 대상)",
+      "pattern": "^[a-z0-9_]+$"
+    }
+  },
+  "required": ["target_actor_id"],
+  "additionalProperties": false
+}

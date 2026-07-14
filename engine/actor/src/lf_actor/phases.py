@@ -58,6 +58,8 @@ MESSAGE_TYPE = "actor.message.sent"
 MEMORY_TYPE = "actor.memory.consolidated"
 BELIEF_TYPE = "actor.belief.formed"
 IDENTITY_TYPE = "actor.identity.declared"
+#: Director의 LOD 승격 신호 — 지각이 아니라 제어다 (ADR-013). perceive가 LOD만 올린다
+SPOTLIGHT_TYPE = "system.director.spotlighted"
 
 #: 프로필 소개문 상한 — identity_core를 이 길이로 자른다 (스키마 bio maxLength와 맞춘다)
 _BIO_MAX = 500
@@ -207,14 +209,21 @@ class ActorPhases:
         self._shifts = []
         for actor_id in self._personas:
             items = await self._mailbox.drain(ctx.world_id, actor_id) if self._mailbox else []
-            if not items:
-                # 관심 없는 액터는 히스테리시스를 지나면 한 단계 강등된다 (ADR-011)
+            # Director의 승격 신호는 지각이 아니라 제어 — 지각 항목과 분리한다
+            promoted = any(e["type"] == SPOTLIGHT_TYPE for e in items)
+            items = [e for e in items if e["type"] != SPOTLIGHT_TYPE]
+            # LOD 갱신: 승격이 최우선(Hot), 없으면 지각 규칙, 지각도 없으면 유휴 강등 (ADR-011)
+            if promoted:
+                self._lods[actor_id] = promote(self._lods[actor_id], ctx.tick)
+            elif items:
+                self._lods[actor_id] = lod_after_perception(
+                    self._lods[actor_id], {e["type"] for e in items}, ctx.tick
+                )
+            else:
                 self._lods[actor_id] = maybe_demote(self._lods[actor_id], ctx.tick)
-                continue
+            if not items:
+                continue  # 승격 신호는 기억·감정·목표에 들어가지 않는다 (메타 제어)
             self._inbox[actor_id] = items
-            self._lods[actor_id] = lod_after_perception(
-                self._lods[actor_id], {e["type"] for e in items}, ctx.tick
-            )
             for envelope in items:
                 await self._memory.add(ctx.world_id, actor_id, describe_interaction(envelope))
             if self._emotion is not None:

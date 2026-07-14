@@ -26,6 +26,11 @@ from lf_director.rules import (
     NUDGE_TOOL,
     OBSERVATION_STREAM_KEY,
     OBSERVATION_TYPE,
+    PROMOTE_TOOL,
+    SPOTLIGHT_STREAM_KEY,
+    SPOTLIGHT_TYPE,
+    SYSTEM_STREAM,
+    WORLD_STREAM,
     Intervention,
 )
 from lf_director.signals import Snapshot
@@ -51,7 +56,7 @@ def plan_schema(incident_kinds: list[str]) -> dict[str, Any]:
     return {
         "type": "object",
         "properties": {
-            "tool": {"type": "string", "enum": [INCIDENT_TOOL, NUDGE_TOOL]},
+            "tool": {"type": "string", "enum": [INCIDENT_TOOL, NUDGE_TOOL, PROMOTE_TOOL]},
             # inject_incident 인자
             "incident_kind": {"type": "string", "enum": incident_kinds},
             "affected_actor_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
@@ -73,8 +78,9 @@ DIRECTOR_SYSTEM = (
     "너는 살아있는 세계의 '연출가(Director)'다. 규칙: 너는 액터를 조종하지 않는다. "
     "침체된 서사에 밀도를 되돌리되 직접 결정을 쓰지 않고 간접적으로만 개입한다 — "
     "반응은 액터의 몫이다. "
-    "두 도구 중 하나를 고른다: 공개 환경 사건을 놓거나(inject_incident), "
-    "후보 액터 한 명에게 사적 관측을 심는다(nudge_perception — 그 사람만 알아차린다). "
+    "세 도구 중 하나를 고른다: 공개 환경 사건을 놓거나(inject_incident), "
+    "후보 액터 한 명에게 사적 관측을 심거나(nudge_perception — 그 사람만 알아차린다), "
+    "잠재적 드라마의 인물을 무대 중앙으로 끌어올린다(promote_actor — 더 자주 움직이게). "
     "제시된 후보 액터·사건 종류 안에서만 고르고, 없는 인물·장소를 지어내지 마라. "
     "서술은 특정 인물의 긴장에 뿌리내린 한 줄이어야 하며, 조종하는 명령이 아니다."
 )
@@ -122,6 +128,8 @@ def build_plan_user(
         "· tool=nudge_perception (사적 관측 — 소동 없이 한 사람의 다음 선택을 흔든다): "
         "target_actor_id는 후보 한 명, observation은 그가 문득 알아차리는 것 한 줄, "
         "about_actor_id는 그 관측이 향한 상대(후보 중 하나, 없으면 null).",
+        "· tool=promote_actor (잠자던 인물을 무대로 — 사건 없이 그를 더 자주 움직이게 한다): "
+        "target_actor_id는 후보 한 명. 지금 조명이 필요한 인물이 있을 때.",
         "",
         "rationale은 왜 지금 이 개입인지 한 줄.",
     ]
@@ -168,6 +176,8 @@ def intervention_from_plan(
         return _incident_intervention(plan, tension_pairs, incidents, rationale, signals)
     if tool == NUDGE_TOOL:
         return _nudge_intervention(plan, tension_pairs, rationale, signals)
+    if tool == PROMOTE_TOOL:
+        return _promote_intervention(plan, tension_pairs, rationale, signals)
     return None  # 화이트리스트 밖 도구 — 존재하지 않는다
 
 
@@ -190,6 +200,7 @@ def _incident_intervention(
     intensity = _clamp(plan.get("intensity"), 0.0, 1.0, float(inc["intensity"]))
     return Intervention(
         tool=INCIDENT_TOOL,
+        stream=WORLD_STREAM,
         event_type=INCIDENT_TYPE,
         stream_key=INCIDENT_STREAM_KEY,
         payload={
@@ -220,6 +231,7 @@ def _nudge_intervention(
     about = about if about in candidates else None  # 없는 상대는 버린다(관측 자체는 남는다)
     return Intervention(
         tool=NUDGE_TOOL,
+        stream=WORLD_STREAM,
         event_type=OBSERVATION_TYPE,
         stream_key=OBSERVATION_STREAM_KEY,
         payload={
@@ -227,6 +239,26 @@ def _nudge_intervention(
             "observation": observation,
             "about_actor_id": about,
         },
+        reason=rationale,
+        signals=signals,
+    )
+
+
+def _promote_intervention(
+    plan: dict[str, Any], tension_pairs: list[list[Any]],
+    rationale: str, signals: dict[str, Any],
+) -> Intervention | None:
+    # LOD 승격은 실재하는 후보 액터에게만 (없는 액터는 승격할 대상이 없다 → 폴백)
+    candidates = set(candidate_actor_ids(tension_pairs))
+    target = plan.get("target_actor_id")
+    if target not in candidates:
+        return None
+    return Intervention(
+        tool=PROMOTE_TOOL,
+        stream=SYSTEM_STREAM,  # 세계 사건이 아니라 시뮬레이션 제어 신호다
+        event_type=SPOTLIGHT_TYPE,
+        stream_key=SPOTLIGHT_STREAM_KEY,
+        payload={"target_actor_id": target},
         reason=rationale,
         signals=signals,
     )

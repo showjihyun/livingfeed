@@ -16,25 +16,33 @@ from typing import Any
 
 from lf_director.signals import Snapshot, default_params
 
-#: 개입 도구 → (산출 이벤트 타입, world 스트림 파티션). 화이트리스트가 곧 이 표다 (ADR-013).
+#: 개입 도구 → (산출 스트림, 이벤트 타입, 파티션). 화이트리스트가 곧 이 표다 (ADR-013).
+#: 대부분은 world.*(perceive 대상)지만, promote_actor는 world 사건이 아니라
+#: 시뮬레이션 제어 신호라 system.director.*로 낸다 (액터가 지각하지 않는다).
+WORLD_STREAM = "world"
+SYSTEM_STREAM = "system"
 INCIDENT_TOOL = "inject_incident"
 INCIDENT_TYPE = "world.incident.occurred"
 INCIDENT_STREAM_KEY = "incidents"
 NUDGE_TOOL = "nudge_perception"
 OBSERVATION_TYPE = "world.observation.surfaced"
 OBSERVATION_STREAM_KEY = "observations"
+PROMOTE_TOOL = "promote_actor"
+SPOTLIGHT_TYPE = "system.director.spotlighted"
+SPOTLIGHT_STREAM_KEY = "spotlight"
 
 
 @dataclass(frozen=True)
 class Intervention:
     """Director가 고른 개입 — 도구 불문 표현.
 
-    tool은 감사(system.director.intervened.tool 화이트리스트)에, event_type/stream_key/
-    payload는 산출 world.* 이벤트 적재에 쓰인다. 도구가 늘어도 director는 그대로다 —
+    tool은 감사(system.director.intervened.tool 화이트리스트)에, stream/event_type/
+    stream_key/payload는 산출 이벤트 적재에 쓰인다. 도구가 늘어도 director는 그대로다 —
     payload를 만드는 곳(rules.decide/planner)만 도구를 안다.
     """
 
     tool: str
+    stream: str
     event_type: str
     stream_key: str
     payload: dict[str, Any]
@@ -103,6 +111,7 @@ def decide(
 
     return Intervention(
         tool=INCIDENT_TOOL,
+        stream=WORLD_STREAM,
         event_type=INCIDENT_TYPE,
         stream_key=INCIDENT_STREAM_KEY,
         payload={
