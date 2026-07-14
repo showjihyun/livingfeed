@@ -214,6 +214,7 @@ class OpenAICompatProvider:
         token_param: str = "max_tokens",
         max_tokens: int = 1024,
         reasoning_effort: str | None = None,
+        no_think: bool = False,
     ) -> None:
         import openai
 
@@ -224,6 +225,7 @@ class OpenAICompatProvider:
         self._token_param = token_param
         self._max_tokens = max_tokens
         self._reasoning_effort = reasoning_effort
+        self._no_think = no_think
 
     async def complete(
         self,
@@ -245,6 +247,12 @@ class OpenAICompatProvider:
                 "\n\n[수정 요청] 직전 응답이 출력 스키마를 위반했다. 위반 사항을 고쳐 "
                 "스키마에 맞는 JSON만 다시 출력하라:\n- " + "\n- ".join(repair_errors)
             )
+        system_content = request.bundle.system
+        # Qwen3 thinking 하이브리드는 기본 ON이라 추론 토큰으로 지연이 ~6배 커진다
+        # (Ollama 실측 30s→5s). 구조화 출력·tick 예산을 위해 /no_think 소프트 스위치로
+        # 끈다 — qwen3 계열에만 적용(다른 로컬 모델엔 무의미한 토큰이라 건드리지 않는다).
+        if self._no_think and model.startswith("qwen3"):
+            system_content = f"{system_content} /no_think"
         kwargs: dict[str, Any] = {self._token_param: self._max_tokens}
         if self._json_mode:
             kwargs["response_format"] = {"type": "json_object"}
@@ -255,7 +263,7 @@ class OpenAICompatProvider:
             response = await self._client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": request.bundle.system},
+                    {"role": "system", "content": system_content},
                     {"role": "user", "content": user_content},
                 ],
                 **kwargs,

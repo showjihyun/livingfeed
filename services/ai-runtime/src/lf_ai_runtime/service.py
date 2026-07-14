@@ -58,6 +58,8 @@ def make_providers(cfg: Config) -> dict[str, Provider]:
         api_key=os.environ.get("LF_LOCAL_API_KEY", "local"),
         base_url=os.environ.get("LF_LOCAL_BASE_URL", LOCAL_BASE_URL_DEFAULT),
         max_tokens=1024,
+        # qwen3 계열의 thinking을 기본으로 끈다(지연 6배) — LF_LOCAL_THINK=1로 켠다
+        no_think=os.environ.get("LF_LOCAL_THINK", "0") != "1",
     )
     if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
         providers["anthropic"] = AnthropicProvider()

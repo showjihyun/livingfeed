@@ -1,10 +1,12 @@
 """AI Runtime 코어 검증 — 라우팅, 구조화 출력 검증, 수정 재시도 (ADR-018)."""
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from lf_ai_runtime.model import ContextBundle, InferenceRequest
 from lf_ai_runtime.providers import (
+    OpenAICompatProvider,
     ProviderError,
     RuleBasedProvider,
     _sanitize_schema,
@@ -132,6 +134,46 @@ def test_extract_json_object_tolerates_fences_and_prose():
     assert extract_json_object('결과는 다음과 같다:\n{"a": {"b": 2}} 이상.') == {"a": {"b": 2}}
     with pytest.raises(ProviderError):
         extract_json_object("JSON 없음")
+
+
+def _fake_openai_provider(no_think: bool) -> tuple[OpenAICompatProvider, dict]:
+    """실 API 없이 client를 페이크로 대체 — 전송된 messages를 캡처한다."""
+    provider = OpenAICompatProvider("local", api_key="x", no_think=no_think)
+    captured: dict[str, Any] = {}
+
+    async def fake_create(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"ok": 1}'))]
+        )
+
+    provider._client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create))
+    )
+    return provider, captured
+
+
+async def test_no_think_appended_only_for_qwen3():
+    # qwen3 계열 + no_think → system 접미에 /no_think (thinking 끄기, 지연 방지)
+    provider, captured = _fake_openai_provider(no_think=True)
+    await provider.complete(request(), "qwen3:8b")
+    system = captured["messages"][0]
+    assert system["role"] == "system"
+    assert system["content"].endswith("/no_think")
+
+
+async def test_no_think_skips_non_qwen3_models():
+    # 같은 no_think 플래그라도 qwen3가 아니면 무의미한 토큰을 붙이지 않는다
+    provider, captured = _fake_openai_provider(no_think=True)
+    await provider.complete(request(), "qwen2.5:14b")
+    assert "/no_think" not in captured["messages"][0]["content"]
+
+
+async def test_no_think_disabled_leaves_qwen3_untouched():
+    # LF_LOCAL_THINK=1 등으로 thinking을 켜면 스위치를 붙이지 않는다
+    provider, captured = _fake_openai_provider(no_think=False)
+    await provider.complete(request(), "qwen3:8b")
+    assert "/no_think" not in captured["messages"][0]["content"]
     with pytest.raises(ProviderError):
         extract_json_object("[1, 2]")  # 객체가 아니다
 

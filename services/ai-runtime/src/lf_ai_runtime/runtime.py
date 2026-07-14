@@ -45,7 +45,8 @@ DEFAULT_TIER_MODELS: dict[str, dict[str, str]] = {
     "glm": {"hot": "glm-4.6", "warm": "glm-4-flash", "system": "glm-4-flash"},
     # 로컬(Ollama/LM Studio): 12GB VRAM은 상주 모델 1개가 현실적 —
     # 티어를 나누면 모델 스왑(언로드/로드)이 tick 예산을 잡아먹는다. 전 티어 단일 모델.
-    "local": {"hot": "qwen2.5:14b", "warm": "qwen2.5:14b", "system": "qwen2.5:14b"},
+    # qwen3:8b(Q4 ≈ 5GB)는 12GB에 여유롭고 한국어·JSON에 강하다 (thinking 하이브리드 — 지연 주의).
+    "local": {"hot": "qwen3:8b", "warm": "qwen3:8b", "system": "qwen3:8b"},
 }
 
 
