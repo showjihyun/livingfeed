@@ -18,3 +18,4 @@ from lf_schemas.generated import system_director_intervened as system_director_i
 from lf_schemas.generated import system_tick_completed as system_tick_completed
 from lf_schemas.generated import system_tick_started as system_tick_started
 from lf_schemas.generated import world_incident_occurred as world_incident_occurred
+from lf_schemas.generated import world_observation_surfaced as world_observation_surfaced

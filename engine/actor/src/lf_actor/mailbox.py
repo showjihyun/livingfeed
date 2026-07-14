@@ -77,7 +77,9 @@ async def run_mailbox_router(
     """
     stop = stop or asyncio.Event()
     js = nc.jetstream()
-    # 지각 소스 2종: 플레이어 개입(대상 1명) + 세계 사건(영향권 전원, ADR-013)
+    # 지각 소스 3종: 플레이어 개입(대상 1명) + 세계 사건(영향권 전원) +
+    # Director의 사적 관측 nudge(대상 1명, ADR-013). 관측은 공개 사건이 아니라
+    # 한 사람의 지각일 뿐이라 target_actor_id 한 명에게만 배달된다.
     subs = [
         await js.pull_subscribe(
             f"lf.{env}.*.player.>", durable=DURABLE, stream=SOURCE_STREAM
@@ -86,12 +88,17 @@ async def run_mailbox_router(
             f"lf.{env}.*.world.incident.occurred",
             durable=f"{DURABLE}-incident", stream="LF_WORLD",
         ),
+        await js.pull_subscribe(
+            f"lf.{env}.*.world.observation.surfaced",
+            durable=f"{DURABLE}-observation", stream="LF_WORLD",
+        ),
     ]
-    logger.info("메일박스 라우터 대기 — durable=%s (플레이어+세계사건)", DURABLE)
+    logger.info("메일박스 라우터 대기 — durable=%s (플레이어+세계사건+관측)", DURABLE)
 
     def targets_of(envelope: dict[str, Any]) -> list[str]:
         if envelope["type"] == "world.incident.occurred":
             return list(envelope["payload"]["affected_actor_ids"])
+        # player.*(target_actor_id) + world.observation.surfaced(대상 1명)
         return [envelope["payload"]["target_actor_id"]]
 
     async def route(msg: Any) -> None:

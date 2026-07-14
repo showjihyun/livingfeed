@@ -46,6 +46,19 @@ def test_incident_perception_is_rare_and_memorable():
     assert "세계 사건" in episode.summary
 
 
+def test_observation_nudge_folds_as_private_noticing():
+    # Director의 nudge_perception 관측은 공개 사건이 아니라 '문득 알아차린 것'으로 스민다
+    obs = player_envelope(
+        "world.observation.surfaced",
+        {"observation": "박준호의 메모에서 앞뒤 안 맞는 대목을 봤다",
+         "about_actor_id": "a_junho_park"},
+    )
+    episode = build_episode(TickMaterials(interactions=[obs]))
+    assert episode is not None
+    assert "문득 알아차렸다" in episode.summary
+    assert "앞뒤 안 맞는" in episode.summary
+
+
 def test_routine_action_alone_is_low_importance():
     action_env = {
         "event_id": "01JZK7Q3W0000000000000000A",

@@ -98,6 +98,7 @@ def make_llm_director(ai: _StubAiClient) -> Director:
 async def test_llm_selection_places_contextual_incident(conn):
     tension = [["a_minji_kim", "a_seongho_park", 0.8, 0.2]]
     plan = {
+        "tool": "inject_incident",
         "incident_kind": "rumor_spread",
         "affected_actor_ids": ["a_minji_kim"],
         "description": "박성호를 둘러싼 말이 김민지에게까지 닿았다",
@@ -130,7 +131,7 @@ async def test_llm_selection_places_contextual_incident(conn):
 async def test_llm_invalid_kind_falls_back_to_rule(conn):
     # 화이트리스트 밖 사건 → intervention_from_plan None → 규칙 decide 폴백
     ai = _StubAiClient(
-        {"incident_kind": "earthquake", "affected_actor_ids": [],
+        {"tool": "inject_incident", "incident_kind": "earthquake", "affected_actor_ids": [],
          "description": "지진", "intensity": 0.9, "rationale": "x"}
     )
     director = make_llm_director(ai)
@@ -145,7 +146,7 @@ async def test_llm_invalid_kind_falls_back_to_rule(conn):
 async def test_llm_not_called_below_threshold(conn):
     # 발화 게이트 미통과 → 모델 호출 없음 (비용·hard rule이 LLM에 선행)
     ai = _StubAiClient(
-        {"incident_kind": "rumor_spread", "affected_actor_ids": [],
+        {"tool": "inject_incident", "incident_kind": "rumor_spread", "affected_actor_ids": [],
          "description": "x", "intensity": 0.5, "rationale": "y"}
     )
     director = make_llm_director(ai)
@@ -154,4 +155,34 @@ async def test_llm_not_called_below_threshold(conn):
     )
     assert not fired
     assert ai.calls == []
+    assert await read_stream(conn, WORLD, "world", "incidents") == []
+
+
+async def test_llm_nudge_surfaces_private_observation(conn):
+    # 다른 도구 선택: nudge_perception → world.observation.surfaced (비공개, 피드 승격 안 됨)
+    tension = [["a_minji_kim", "a_seongho_park", 0.8, 0.2]]
+    plan = {
+        "tool": "nudge_perception",
+        "target_actor_id": "a_minji_kim",
+        "observation": "박성호의 메모에서 앞뒤 안 맞는 대목을 우연히 봤다",
+        "about_actor_id": "a_seongho_park",
+        "rationale": "공개 소동 없이 민지의 다음 선택을 흔든다",
+    }
+    ai = _StubAiClient(plan)
+    director = make_llm_director(ai)
+    fired = await director.evaluate(
+        conn, Snapshot(tick=121, drama_ma=0.05, quiet_ticks=30), _StubGraph(tension)
+    )
+    assert fired
+
+    [audit] = [s.envelope for s in await read_stream(conn, WORLD, "system", "director")]
+    assert audit["payload"]["tool"] == "nudge_perception"  # 감사에 도구 기록
+    assert audit["payload"]["signals"]["selector"] == "llm"
+
+    [obs] = [s.envelope for s in await read_stream(conn, WORLD, "world", "observations")]
+    assert obs["type"] == "world.observation.surfaced"
+    assert obs["payload"]["target_actor_id"] == "a_minji_kim"
+    assert obs["payload"]["observation"] == plan["observation"]
+    assert obs["payload"]["about_actor_id"] == "a_seongho_park"
+    # 사적 관측 — 공개 사건 스트림에는 들어가지 않는다
     assert await read_stream(conn, WORLD, "world", "incidents") == []

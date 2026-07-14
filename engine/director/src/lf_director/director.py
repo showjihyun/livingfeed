@@ -36,11 +36,10 @@ from lf_director.signals import DramaWindow, default_params
 logger = logging.getLogger("lf.director")
 
 PRINCIPAL = "engine.director"
-INCIDENT_TYPE = "world.incident.occurred"
 AUDIT_TYPE = "system.director.intervened"
 
-#: 세계 스트림의 사건 파티션 — Director는 세계당 1 인스턴스라 CAS 경합이 없다
-INCIDENT_STREAM_KEY = "incidents"
+#: 감사 스트림 파티션 — Director는 세계당 1 인스턴스라 CAS 경합이 없다.
+#: 산출 world.* 이벤트의 타입/파티션은 Intervention이 도구별로 안다 (rules/planner).
 AUDIT_STREAM_KEY = "director"
 
 
@@ -128,25 +127,21 @@ class Director:
             ],
             expected_head=head,
         )
-        head = await current_head(conn, cfg.world_id, "world", INCIDENT_STREAM_KEY)
+        # 산출 world.* 이벤트 — 도구별 타입/파티션/payload는 Intervention이 안다.
+        # director는 도구를 모른 채 적재한다 (도구가 늘어도 여기는 그대로).
+        head = await current_head(conn, cfg.world_id, "world", intervention.stream_key)
         await append(
             conn, PRINCIPAL,
             [
                 NewEvent(
                     world_id=cfg.world_id,
                     stream="world",
-                    stream_key=INCIDENT_STREAM_KEY,
-                    type=INCIDENT_TYPE,
+                    stream_key=intervention.stream_key,
+                    type=intervention.event_type,
                     tick=snapshot.tick,
                     causation_id=audit_id,
                     correlation_id=audit_id,  # 개입이 시작한 새 서사 사슬
-                    payload={
-                        "incident_kind": intervention.incident_kind,
-                        "description": intervention.description,
-                        "location_id": intervention.location_id,
-                        "affected_actor_ids": intervention.affected_actor_ids,
-                        "intensity": intervention.intensity,
-                    },
+                    payload=intervention.payload,
                 )
             ],
             expected_head=head,
@@ -155,9 +150,9 @@ class Director:
         self._seen_audits.add(audit_id)
         self._window.reset_quiet()
         logger.info(
-            "개입[%s]: %s(%s) tick=%d — %s",
+            "개입[%s]: %s → %s tick=%d — %s",
             intervention.signals.get("selector", "rule"),
-            intervention.tool, intervention.incident_kind, snapshot.tick, intervention.reason,
+            intervention.tool, intervention.event_type, snapshot.tick, intervention.reason,
         )
         return True
 

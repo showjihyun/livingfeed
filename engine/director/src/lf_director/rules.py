@@ -16,17 +16,28 @@ from typing import Any
 
 from lf_director.signals import Snapshot, default_params
 
+#: 개입 도구 → (산출 이벤트 타입, world 스트림 파티션). 화이트리스트가 곧 이 표다 (ADR-013).
+INCIDENT_TOOL = "inject_incident"
+INCIDENT_TYPE = "world.incident.occurred"
+INCIDENT_STREAM_KEY = "incidents"
+NUDGE_TOOL = "nudge_perception"
+OBSERVATION_TYPE = "world.observation.surfaced"
+OBSERVATION_STREAM_KEY = "observations"
+
 
 @dataclass(frozen=True)
 class Intervention:
-    """규칙이 고른 개입 — MVP 도구는 inject_incident뿐이다."""
+    """Director가 고른 개입 — 도구 불문 표현.
+
+    tool은 감사(system.director.intervened.tool 화이트리스트)에, event_type/stream_key/
+    payload는 산출 world.* 이벤트 적재에 쓰인다. 도구가 늘어도 director는 그대로다 —
+    payload를 만드는 곳(rules.decide/planner)만 도구를 안다.
+    """
 
     tool: str
-    incident_kind: str
-    description: str
-    location_id: str | None
-    affected_actor_ids: list[str]
-    intensity: float
+    event_type: str
+    stream_key: str
+    payload: dict[str, Any]
     reason: str
     signals: dict[str, Any]
 
@@ -91,12 +102,16 @@ def decide(
     affected = [tension_pairs[0][0], tension_pairs[0][1]] if tension_pairs else []
 
     return Intervention(
-        tool="inject_incident",
-        incident_kind=incident["kind"],
-        description=incident["description"],
-        location_id=incident.get("location_id"),
-        affected_actor_ids=affected,
-        intensity=float(incident["intensity"]),
+        tool=INCIDENT_TOOL,
+        event_type=INCIDENT_TYPE,
+        stream_key=INCIDENT_STREAM_KEY,
+        payload={
+            "incident_kind": incident["kind"],
+            "description": incident["description"],
+            "location_id": incident.get("location_id"),
+            "affected_actor_ids": affected,
+            "intensity": float(incident["intensity"]),
+        },
         reason=(
             f"침체 감지 — drama 이동평균 {snapshot.drama_ma}이 "
             f"{snapshot.quiet_ticks} tick 지속 (임계 {obs['quiet_threshold']}/"

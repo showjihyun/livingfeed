@@ -23,6 +23,9 @@ def describe_interaction(envelope: dict[str, Any]) -> str:
         return f"플레이어 {p['player_id']}가 내 글에 좋아요를 눌렀다"
     if kind == "world.incident.occurred":
         return f"세계 사건: {p['description']}"
+    if kind == "world.observation.surfaced":
+        # Director의 사적 관측 nudge — 공개 사건이 아니라 문득 알아차린 것 (ADR-013)
+        return f"문득 알아차렸다: {p['observation']}"
     return f"플레이어 상호작용: {kind}"
 
 
