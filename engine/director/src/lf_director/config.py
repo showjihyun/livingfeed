@@ -18,6 +18,8 @@ class Config:
     quiet_threshold_override: float | None = None
     #: LLM 개입 선택(director_plan) 활성화. False면 순수 규칙 — replay 결정성·비용 킬스위치
     llm_selection: bool = True
+    #: 시즌 계획 케이던스(tick). 기본 360 = 세계 하루(1 tick=240 세계초). 저빈도 (ADR-013)
+    season_interval_ticks: int = 360
     #: 개입 서술 그라운딩용 표시 이름 원천 (id→이름). 없으면 id로 표기
     personas_dir: Path = Path("agents/personas")
     observe_durable: str = "director-observe"
@@ -29,6 +31,7 @@ class Config:
     def from_env(cls) -> Config:
         quiet = os.environ.get("LF_DIRECTOR_QUIET_TICKS")
         threshold = os.environ.get("LF_DIRECTOR_QUIET_THRESHOLD")
+        season = os.environ.get("LF_DIRECTOR_SEASON_TICKS")
         return cls(
             pg_dsn=os.environ.get(
                 "LF_PG_DSN", "postgresql://livingfeed:livingfeed@localhost:5432/livingfeed"
@@ -40,4 +43,5 @@ class Config:
             quiet_threshold_override=float(threshold) if threshold else None,
             llm_selection=os.environ.get("LF_DIRECTOR_LLM", "1") != "0",
             personas_dir=Path(os.environ.get("LF_PERSONAS_DIR", "agents/personas")),
+            season_interval_ticks=int(season) if season else 360,
         )

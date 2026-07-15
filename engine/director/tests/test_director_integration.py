@@ -214,19 +214,15 @@ async def test_llm_promote_spotlights_actor_on_system_stream(conn):
     assert await read_stream(conn, WORLD, "world", "observations") == []
 
 
-async def test_llm_set_season_theme_records_on_system_stream(conn):
-    # 네 번째 도구: set_season_theme → system.director.season_set (시즌 페이싱 제어)
-    plan = {
-        "tool": "set_season_theme",
-        "season_theme": "turmoil",
-        "rationale": "세계가 격동으로 접어들 때다",
-    }
+async def test_plan_season_records_on_system_stream_without_budget(conn):
+    # 저빈도 시즌 계획 — 드라마 게이트·예산과 분리된 별도 경로 (ADR-013)
+    plan = {"season_theme": "turmoil", "rationale": "세계가 격동으로 접어들 때다"}
     ai = _StubAiClient(plan)
     director = make_llm_director(ai)
-    fired = await director.evaluate(
-        conn, Snapshot(tick=123, drama_ma=0.05, quiet_ticks=30), graph=None
+    planned = await director.plan_season(
+        conn, Snapshot(tick=360, drama_ma=0.05, quiet_ticks=30)
     )
-    assert fired
+    assert planned
 
     [audit] = [s.envelope for s in await read_stream(conn, WORLD, "system", "director")]
     assert audit["payload"]["tool"] == "set_season_theme"
@@ -236,11 +232,13 @@ async def test_llm_set_season_theme_records_on_system_stream(conn):
     assert season["payload"]["theme"] == "turmoil"
     assert season["payload"]["quiet_ticks_to_fire"] == 12  # 라이브러리 해석값
     assert season["payload"]["max_interventions"] == 4
+    # 시즌 계획은 드라마 예산을 쓰지 않는다 (분리된 케이던스)
+    assert director._budget.interventions_total == 0
     assert await read_stream(conn, WORLD, "world", "incidents") == []
 
 
-def test_apply_season_updates_pacing_params():
-    # 자기 season_set 이벤트 소비 → 개입 빈도 파라미터 갱신 (이벤트 소싱 상태)
+def test_apply_season_updates_pacing_params_and_current_theme():
+    # 자기 season_set 이벤트 소비 → 개입 빈도 파라미터 + 현재 테마 갱신 (이벤트 소싱)
     director = make_director()
     director._apply_season(
         {"tick": 5, "payload": {
@@ -249,3 +247,19 @@ def test_apply_season_updates_pacing_params():
     )
     assert director._params["observation"]["quiet_ticks_to_fire"] == 12
     assert director._params["budget"]["max_interventions"] == 4
+    assert director._current_theme == "turmoil"
+
+
+def test_season_audit_does_not_consume_drama_budget():
+    # season 감사 재소비는 드라마 예산으로 세지 않는다 (분리, ADR-013)
+    director = make_director()
+    director._restore_budget(
+        {"event_id": "x", "tick": 5, "payload": {"tool": "set_season_theme"}}
+    )
+    assert director._budget.interventions_total == 0  # 무시됨
+    # 반면 드라마 도구 감사는 예산으로 센다
+    director._restore_budget(
+        {"event_id": "y", "tick": 5, "payload": {"tool": "inject_incident",
+                                                 "target_correlation_id": None}}
+    )
+    assert director._budget.interventions_total == 1

@@ -6,9 +6,12 @@ LLM은 행동 반경을 넓힐 수 없다: 화이트리스트 밖 도구·사건
 
 from lf_director.planner import (
     build_plan_user,
+    build_season_user,
     candidate_actor_ids,
     intervention_from_plan,
     plan_schema,
+    season_from_plan,
+    season_schema,
 )
 from lf_director.signals import Snapshot
 
@@ -27,16 +30,23 @@ THEMES = [
 ]
 
 
-def test_plan_schema_selects_tool_and_lists_kinds():
-    schema = plan_schema(["chance_encounter", "rumor_spread"], ["calm", "turmoil"])
+def test_plan_schema_lists_only_drama_tools():
+    # 드라마 게이트 도구는 셋 — set_season_theme은 저빈도 시즌 계획으로 분리됐다
+    schema = plan_schema(["chance_encounter", "rumor_spread"])
     assert schema["properties"]["tool"]["enum"] == [
-        "inject_incident", "nudge_perception", "promote_actor", "set_season_theme"
+        "inject_incident", "nudge_perception", "promote_actor"
     ]
     assert schema["properties"]["incident_kind"]["enum"] == ["chance_encounter", "rumor_spread"]
-    assert schema["properties"]["season_theme"]["enum"] == ["calm", "turmoil"]
+    assert "season_theme" not in schema["properties"]  # 드라마 스키마엔 없다
     assert schema["additionalProperties"] is False
-    # 도구별 인자는 선택적 — 필수는 tool·rationale뿐(유효성은 매핑이 재집행)
     assert set(schema["required"]) == {"tool", "rationale"}
+
+
+def test_season_schema_lists_themes():
+    schema = season_schema(["calm", "turmoil"])
+    assert schema["properties"]["season_theme"]["enum"] == ["calm", "turmoil"]
+    assert set(schema["required"]) == {"season_theme", "rationale"}
+    assert schema["additionalProperties"] is False
 
 
 def test_candidate_actor_ids_are_distinct_in_order():
@@ -264,14 +274,8 @@ def test_incident_and_nudge_stream_to_world():
 
 
 def test_valid_season_carries_resolved_params_on_system_stream():
-    plan = {
-        "tool": "set_season_theme",
-        "season_theme": "turmoil",
-        "rationale": "세계 전체가 격동으로 접어들 때다",
-    }
-    result = intervention_from_plan(
-        plan, SNAP, TENSION, INCIDENTS, NAMES, themes=THEMES, model="qwen3:8b"
-    )
+    plan = {"season_theme": "turmoil", "rationale": "세계 전체가 격동으로 접어들 때다"}
+    result = season_from_plan(plan, SNAP, THEMES, model="qwen3:8b")
     assert result is not None
     assert result.tool == "set_season_theme"
     assert result.stream == "system"  # 시즌 페이싱 제어 신호
@@ -281,21 +285,27 @@ def test_valid_season_carries_resolved_params_on_system_stream():
     assert result.payload == {
         "theme": "turmoil", "quiet_ticks_to_fire": 12, "max_interventions": 4,
     }
+    assert result.signals["selector"] == "llm"
 
 
 def test_season_outside_library_returns_none():
-    # 라이브러리 밖 테마는 존재하지 않는다 — 규칙 폴백
-    plan = {"tool": "set_season_theme", "season_theme": "apocalypse", "rationale": "x"}
-    assert intervention_from_plan(plan, SNAP, TENSION, INCIDENTS, NAMES, themes=THEMES) is None
+    # 라이브러리 밖 테마는 존재하지 않는다 — 폴백(테마 미변경)
+    assert season_from_plan({"season_theme": "apocalypse", "rationale": "x"}, SNAP, THEMES) is None
 
 
-def test_build_plan_user_grounds_names_kinds_and_all_tools():
-    user = build_plan_user(SNAP, TENSION, INCIDENTS, NAMES, THEMES)
+def test_build_season_user_shows_themes_and_current():
+    user = build_season_user(SNAP, THEMES, current_theme="calm")
+    assert "calm" in user and "turmoil" in user  # 고를 수 있는 테마
+    assert "calm" in user  # 현재 테마도 표시
+    assert str(SNAP.drama_ma) in user
+
+
+def test_build_plan_user_grounds_names_kinds_and_drama_tools_only():
+    user = build_plan_user(SNAP, TENSION, INCIDENTS, NAMES)
     assert "김민지" in user and "박성호" in user  # 이름으로 그라운딩
     assert "chance_encounter" in user and "rumor_spread" in user  # 라이브러리 종류 제시
     assert "a_minji" in user  # 후보 id 명시 (대상 화이트리스트)
-    # 네 도구 모두 제시
-    assert "inject_incident" in user and "nudge_perception" in user
-    assert "promote_actor" in user and "set_season_theme" in user
-    assert "calm" in user and "turmoil" in user  # 시즌 테마 라이브러리 제시
+    # 드라마 도구 셋 — set_season_theme은 없다(시즌 계획으로 분리)
+    assert "inject_incident" in user and "nudge_perception" in user and "promote_actor" in user
+    assert "set_season_theme" not in user
     assert str(SNAP.quiet_ticks) in user

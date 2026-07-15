@@ -49,20 +49,20 @@ def candidate_actor_ids(tension_pairs: list[list[Any]]) -> list[str]:
     return seen
 
 
-def plan_schema(incident_kinds: list[str], theme_names: list[str]) -> dict[str, Any]:
-    """director_plan 응답 스키마 — tool로 도구를 고르고 도구별 인자를 채운다.
+def plan_schema(incident_kinds: list[str]) -> dict[str, Any]:
+    """드라마 개입(순간적) 응답 스키마 — tool로 도구를 고르고 도구별 인자를 채운다.
 
     도구별 인자는 선택적(optional)이고, 필수는 tool·rationale뿐이다 — 어떤 인자가
-    유효/필수인지는 intervention_from_plan이 도구별로 재집행한다(하드룰). incident_kind·
-    season_theme enum만 스키마에서 직접 좁힌다(닫힌 라이브러리 = 도구 인자 화이트리스트).
+    유효/필수인지는 intervention_from_plan이 도구별로 재집행한다(하드룰). incident_kind
+    enum만 스키마에서 직접 좁힌다(닫힌 라이브러리 = 도구 인자 화이트리스트).
+
+    set_season_theme은 여기 없다 — 시즌 계획은 드라마 게이트가 아니라 저빈도
+    케이던스(plan_season)의 몫이다 (ADR-013 §실행 모델).
     """
     return {
         "type": "object",
         "properties": {
-            "tool": {
-                "type": "string",
-                "enum": [INCIDENT_TOOL, NUDGE_TOOL, PROMOTE_TOOL, SEASON_TOOL],
-            },
+            "tool": {"type": "string", "enum": [INCIDENT_TOOL, NUDGE_TOOL, PROMOTE_TOOL]},
             # inject_incident 인자
             "incident_kind": {"type": "string", "enum": incident_kinds},
             "affected_actor_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
@@ -72,8 +72,6 @@ def plan_schema(incident_kinds: list[str], theme_names: list[str]) -> dict[str, 
             "target_actor_id": {"type": "string"},
             "observation": {"type": "string", "maxLength": 300},
             "about_actor_id": {"type": ["string", "null"]},
-            # set_season_theme 인자
-            "season_theme": {"type": "string", "enum": theme_names},
             # 공통
             "rationale": {"type": "string", "minLength": 1, "maxLength": 300},
         },
@@ -82,16 +80,36 @@ def plan_schema(incident_kinds: list[str], theme_names: list[str]) -> dict[str, 
     }
 
 
+def season_schema(theme_names: list[str]) -> dict[str, Any]:
+    """시즌 계획(저빈도) 응답 스키마 — 닫힌 테마 라이브러리 안에서 하나를 고른다."""
+    return {
+        "type": "object",
+        "properties": {
+            "season_theme": {"type": "string", "enum": theme_names},
+            "rationale": {"type": "string", "minLength": 1, "maxLength": 300},
+        },
+        "required": ["season_theme", "rationale"],
+        "additionalProperties": False,
+    }
+
+
 DIRECTOR_SYSTEM = (
     "너는 살아있는 세계의 '연출가(Director)'다. 규칙: 너는 액터를 조종하지 않는다. "
     "침체된 서사에 밀도를 되돌리되 직접 결정을 쓰지 않고 간접적으로만 개입한다 — "
     "반응은 액터의 몫이다. "
-    "네 도구 중 하나를 고른다: 공개 환경 사건을 놓거나(inject_incident), "
+    "세 도구 중 하나를 고른다: 공개 환경 사건을 놓거나(inject_incident), "
     "후보 액터 한 명에게 사적 관측을 심거나(nudge_perception — 그 사람만 알아차린다), "
-    "잠재적 드라마의 인물을 무대 중앙으로 끌어올리거나(promote_actor — 더 자주 움직이게), "
-    "시즌 전체의 페이싱 톤을 바꾼다(set_season_theme — 드물게, 구조적 전환일 때). "
-    "제시된 후보 액터·사건 종류·시즌 테마 안에서만 고르고, 없는 인물·장소를 지어내지 마라. "
+    "잠재적 드라마의 인물을 무대 중앙으로 끌어올린다(promote_actor — 더 자주 움직이게). "
+    "제시된 후보 액터·사건 종류 안에서만 고르고, 없는 인물·장소를 지어내지 마라. "
     "서술은 특정 인물의 긴장에 뿌리내린 한 줄이어야 하며, 조종하는 명령이 아니다."
+)
+
+
+SEASON_SYSTEM = (
+    "너는 살아있는 세계의 '연출가(Director)'다. 지금은 개별 사건이 아니라 "
+    "이 시즌(챕터) 전체의 톤을 정한다 — 저빈도의 구조적 결정이다. "
+    "최근 세계의 긴장과 분위기를 보고, 앞으로 한동안 세계가 얼마나 격동할지 "
+    "제시된 시즌 테마 중 하나로 정한다. 개별 인물을 조종하지 않는다 — 페이싱만 정한다."
 )
 
 
@@ -99,12 +117,29 @@ def _name(actor_id: str, names: dict[str, str]) -> str:
     return names.get(actor_id, actor_id)
 
 
+def build_season_user(
+    snapshot: Snapshot,
+    themes: list[dict[str, Any]],
+    current_theme: str | None,
+) -> str:
+    """시즌 계획 프롬프트 — 최근 드라마 상태 + 현재 테마 + 고를 수 있는 테마."""
+    names = ", ".join(t["name"] for t in themes) or "(없음)"
+    return "\n".join([
+        "## 시즌 상황",
+        f"최근 drama 이동평균 {snapshot.drama_ma}, {snapshot.quiet_ticks} tick째 조용하다.",
+        f"현재 시즌 테마: {current_theme or '(아직 정해지지 않음)'}",
+        "",
+        f"## 고를 수 있는 시즌 테마: {names}",
+        "세계가 조용하면 톤을 끌어올리고, 이미 격동이면 유지하거나 가라앉힐 수 있다. "
+        "season_theme 하나를 고르고, rationale은 왜 지금 이 톤인지 한 줄.",
+    ])
+
+
 def build_plan_user(
     snapshot: Snapshot,
     tension_pairs: list[list[Any]],
     incidents: list[dict[str, Any]],
     names: dict[str, str],
-    themes: list[dict[str, Any]] | None = None,
 ) -> str:
     """개입 선택 프롬프트의 user 섹션 — 신호·긴장 후보·사건 라이브러리를 근거로 제시."""
     lines = [
@@ -140,9 +175,6 @@ def build_plan_user(
         "about_actor_id는 그 관측이 향한 상대(후보 중 하나, 없으면 null).",
         "· tool=promote_actor (잠자던 인물을 무대로 — 사건 없이 그를 더 자주 움직이게 한다): "
         "target_actor_id는 후보 한 명. 지금 조명이 필요한 인물이 있을 때.",
-        "· tool=set_season_theme (시즌 페이싱 톤 전환 — 드문 구조적 조정): "
-        f"season_theme는 다음 중 하나: {', '.join(t['name'] for t in (themes or [])) or '(없음)'}. "
-        "개별 사건이 아니라 세계 전체의 갈등 빈도를 바꾸고 싶을 때만.",
         "",
         "rationale은 왜 지금 이 개입인지 한 줄.",
     ]
@@ -176,12 +208,12 @@ def intervention_from_plan(
     incidents: list[dict[str, Any]],
     names: dict[str, str],
     *,
-    themes: list[dict[str, Any]] | None = None,
     model: str | None = None,
 ) -> Intervention | None:
-    """검증된 LLM 응답 → Intervention. 도구별로 hard rule을 방어적으로 재집행한다.
+    """검증된 드라마 개입 응답 → Intervention. 도구별로 hard rule을 방어적으로 재집행한다.
 
     무효(화이트리스트 밖 도구·kind, 없는 대상 등)면 None — 호출자가 규칙 폴백한다.
+    시즌 계획(set_season_theme)은 여기가 아니라 season_from_plan이 담당한다.
     """
     signals = _signals(snapshot, tension_pairs, model)
     rationale = (plan.get("rationale") or "").strip()[:300] or "LLM 개입 선택"
@@ -192,9 +224,28 @@ def intervention_from_plan(
         return _nudge_intervention(plan, tension_pairs, rationale, signals)
     if tool == PROMOTE_TOOL:
         return _promote_intervention(plan, tension_pairs, rationale, signals)
-    if tool == SEASON_TOOL:
-        return _season_intervention(plan, themes or [], rationale, signals)
     return None  # 화이트리스트 밖 도구 — 존재하지 않는다
+
+
+def season_from_plan(
+    plan: dict[str, Any],
+    snapshot: Snapshot,
+    themes: list[dict[str, Any]],
+    *,
+    model: str | None = None,
+) -> Intervention | None:
+    """검증된 시즌 계획 응답 → season Intervention (저빈도 케이던스, 드라마와 분리).
+
+    닫힌 테마 라이브러리 밖이면 None. tension은 시즌 계획과 무관하라 signals는 비운다.
+    """
+    signals = {
+        "drama_ma": snapshot.drama_ma,
+        "quiet_ticks": snapshot.quiet_ticks,
+        "selector": "llm",
+        "model": model,
+    }
+    rationale = (plan.get("rationale") or "").strip()[:300] or "시즌 계획"
+    return _season_intervention(plan, themes, rationale, signals)
 
 
 def _incident_intervention(

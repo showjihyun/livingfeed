@@ -26,11 +26,22 @@ from lf_director.client import DirectorAiClient
 from lf_director.config import Config
 from lf_director.planner import (
     DIRECTOR_SYSTEM,
+    SEASON_SYSTEM,
     build_plan_user,
+    build_season_user,
     intervention_from_plan,
     plan_schema,
+    season_from_plan,
+    season_schema,
 )
-from lf_director.rules import SEASON_TYPE, BudgetState, Intervention, decide, is_fireable
+from lf_director.rules import (
+    SEASON_TOOL,
+    SEASON_TYPE,
+    BudgetState,
+    Intervention,
+    decide,
+    is_fireable,
+)
 from lf_director.signals import DramaWindow, default_params
 
 logger = logging.getLogger("lf.director")
@@ -67,6 +78,9 @@ class Director:
         #: 개입 선택 LLM 경로 — None이면 규칙 decide만 (dev 기본·replay). run()이 배선한다
         self._ai = ai_client
         self._names = names or {}
+        #: 시즌 계획(저빈도)의 상태 — 현재 테마, 마지막으로 계획한 시즌-일 (ADR-013)
+        self._current_theme: str | None = None
+        self._last_season_day = -1
 
     async def _select(
         self, snapshot: Any, tension: list[list[Any]]
@@ -77,29 +91,74 @@ class Director:
         LLM이 화이트리스트 밖을 고르면 intervention_from_plan이 None → 규칙 폴백.
         """
         if self._ai is not None and is_fireable(snapshot, self._budget, self._params):
-            theme_names = [t["name"] for t in self._themes]
-            schema = plan_schema([inc["kind"] for inc in self._incidents], theme_names)
-            user = build_plan_user(
-                snapshot, tension, self._incidents, self._names, self._themes
-            )
+            schema = plan_schema([inc["kind"] for inc in self._incidents])
+            user = build_plan_user(snapshot, tension, self._incidents, self._names)
             output, model = await self._ai.plan_intervention(
                 DIRECTOR_SYSTEM, user, schema,
                 world_id=self._cfg.world_id, tick=snapshot.tick,
             )
             if output is not None:
                 chosen = intervention_from_plan(
-                    output, snapshot, tension, self._incidents, self._names,
-                    themes=self._themes, model=model,
+                    output, snapshot, tension, self._incidents, self._names, model=model
                 )
                 if chosen is not None:
                     return chosen
             # LLM 실패/무효 → 규칙 폴백 (세계는 계속 돈다, ADR-013 단계적 도입)
         return decide(snapshot, self._budget, tension, params=self._params)
 
+    async def _append_intervention(
+        self, conn: AsyncConnection, snapshot: Any,
+        intervention: Intervention, budget_remaining: int,
+    ) -> None:
+        """감사 선행 + 산출 이벤트 적재 — 도구·드라마/시즌 불문 공통 (ADR-013).
+
+        예산 소비·quiet 리셋은 호출자의 몫이다 (드라마 개입만 예산을 쓴다).
+        """
+        cfg = self._cfg
+        audit_id = new_ulid()
+        head = await current_head(conn, cfg.world_id, "system", AUDIT_STREAM_KEY)
+        await append(
+            conn, PRINCIPAL,
+            [
+                NewEvent(
+                    world_id=cfg.world_id, stream="system", stream_key=AUDIT_STREAM_KEY,
+                    type=AUDIT_TYPE, tick=snapshot.tick, event_id=audit_id,
+                    payload={
+                        "tool": intervention.tool,
+                        "reason": intervention.reason,
+                        "signals": intervention.signals,
+                        "target_correlation_id": None,
+                        "budget_remaining": max(0, budget_remaining),
+                    },
+                )
+            ],
+            expected_head=head,
+        )
+        # 산출 이벤트 — 도구별 스트림/타입/파티션/payload는 Intervention이 안다.
+        head = await current_head(conn, cfg.world_id, intervention.stream, intervention.stream_key)
+        await append(
+            conn, PRINCIPAL,
+            [
+                NewEvent(
+                    world_id=cfg.world_id, stream=intervention.stream,
+                    stream_key=intervention.stream_key, type=intervention.event_type,
+                    tick=snapshot.tick, causation_id=audit_id, correlation_id=audit_id,
+                    payload=intervention.payload,
+                )
+            ],
+            expected_head=head,
+        )
+        self._seen_audits.add(audit_id)
+        logger.info(
+            "개입[%s]: %s → %s tick=%d — %s",
+            intervention.signals.get("selector", "rule"),
+            intervention.tool, intervention.event_type, snapshot.tick, intervention.reason,
+        )
+
     async def evaluate(
         self, conn: AsyncConnection, snapshot: Any, graph: GraphQueryClient | None
     ) -> bool:
-        """tick 경계 평가 — 개입하면 True. 감사 기록이 산출물보다 먼저 적재된다."""
+        """드라마 게이트 평가 — 침체 시 순간적 개입 하나 (예산·quiet 소비). 개입하면 True."""
         cfg = self._cfg
         tension = (
             await graph.tension_pairs(cfg.world_id) if graph is not None else []
@@ -107,57 +166,35 @@ class Director:
         intervention = await self._select(snapshot, tension)
         if intervention is None:
             return False
-
-        audit_id = new_ulid()
         remaining_after = self._budget.remaining(snapshot.tick, self._params) - 1
-        head = await current_head(conn, cfg.world_id, "system", AUDIT_STREAM_KEY)
-        await append(
-            conn, PRINCIPAL,
-            [
-                NewEvent(
-                    world_id=cfg.world_id,
-                    stream="system",
-                    stream_key=AUDIT_STREAM_KEY,
-                    type=AUDIT_TYPE,
-                    tick=snapshot.tick,
-                    event_id=audit_id,
-                    payload={
-                        "tool": intervention.tool,
-                        "reason": intervention.reason,
-                        "signals": intervention.signals,
-                        "target_correlation_id": None,
-                        "budget_remaining": max(0, remaining_after),
-                    },
-                )
-            ],
-            expected_head=head,
-        )
-        # 산출 이벤트 — 도구별 스트림/타입/파티션/payload는 Intervention이 안다.
-        # director는 도구를 모른 채 적재한다 (도구가 늘어도 여기는 그대로).
-        head = await current_head(conn, cfg.world_id, intervention.stream, intervention.stream_key)
-        await append(
-            conn, PRINCIPAL,
-            [
-                NewEvent(
-                    world_id=cfg.world_id,
-                    stream=intervention.stream,
-                    stream_key=intervention.stream_key,
-                    type=intervention.event_type,
-                    tick=snapshot.tick,
-                    causation_id=audit_id,
-                    correlation_id=audit_id,  # 개입이 시작한 새 서사 사슬
-                    payload=intervention.payload,
-                )
-            ],
-            expected_head=head,
-        )
+        await self._append_intervention(conn, snapshot, intervention, remaining_after)
         self._budget.record(snapshot.tick, None)
-        self._seen_audits.add(audit_id)
         self._window.reset_quiet()
-        logger.info(
-            "개입[%s]: %s → %s tick=%d — %s",
-            intervention.signals.get("selector", "rule"),
-            intervention.tool, intervention.event_type, snapshot.tick, intervention.reason,
+        return True
+
+    async def plan_season(self, conn: AsyncConnection, snapshot: Any) -> bool:
+        """저빈도 시즌 계획 — 세계 하루 1회, 드라마 게이트·예산과 분리 (ADR-013).
+
+        LLM이 시즌 테마를 정하면 season_set을 적재한다(Director가 자기 이벤트를 소비해
+        페이싱 파라미터를 갱신). 규칙 프로바이더는 시즌 계획을 지원하지 않으므로 dev
+        기본에서는 시즌이 바뀌지 않는다 (테마 미변경). 예산을 쓰지 않는다.
+        """
+        if self._ai is None or not self._themes:
+            return False
+        theme_names = [t["name"] for t in self._themes]
+        schema = season_schema(theme_names)
+        user = build_season_user(snapshot, self._themes, self._current_theme)
+        output, model = await self._ai.plan_intervention(
+            SEASON_SYSTEM, user, schema, world_id=self._cfg.world_id, tick=snapshot.tick,
+        )
+        if output is None:
+            return False
+        intervention = season_from_plan(output, snapshot, self._themes, model=model)
+        if intervention is None:
+            return False
+        # 시즌은 드라마 예산과 무관 — 남은 예산을 그대로 감사에 싣는다(소비 없음)
+        await self._append_intervention(
+            conn, snapshot, intervention, self._budget.remaining(snapshot.tick, self._params)
         )
         return True
 
@@ -168,6 +205,9 @@ class Director:
         직후 한 창(세계 1시간)에서 예산이 초과될 수 있는 정도로, MVP 허용 오차다.
         """
         if envelope["event_id"] in self._seen_audits:
+            return
+        # 시즌 계획은 드라마 예산과 무관하다 — 예산으로 세지 않는다 (ADR-013)
+        if envelope["payload"].get("tool") == SEASON_TOOL:
             return
         self._budget.record(
             envelope["tick"], envelope["payload"].get("target_correlation_id")
@@ -181,6 +221,7 @@ class Director:
         갱신 노브는 개입 빈도(갈등 빈도)뿐이라 DramaWindow(quiet_threshold)는 무관하다.
         """
         p = envelope["payload"]
+        self._current_theme = p["theme"]
         self._params["observation"]["quiet_ticks_to_fire"] = int(p["quiet_ticks_to_fire"])
         self._params["budget"]["max_interventions"] = int(p["max_interventions"])
         logger.info(
@@ -229,6 +270,12 @@ class Director:
                                     self._window.observe(envelope)
                                 elif envelope["type"] == "system.tick.completed":
                                     snapshot = self._window.close_tick(envelope["tick"])
+                                    # 시즌 계획은 저빈도(세계 하루 1회) — 드라마 게이트와
+                                    # 분리된 케이던스로 (ADR-013). 예산도 따로다.
+                                    day = envelope["tick"] // cfg.season_interval_ticks
+                                    if day > self._last_season_day:
+                                        self._last_season_day = day
+                                        await self.plan_season(conn, snapshot)
                                     await self.evaluate(conn, snapshot, graph)
                                 elif envelope["type"] == AUDIT_TYPE:
                                     self._restore_budget(envelope)
