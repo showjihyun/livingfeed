@@ -191,14 +191,19 @@ class RelationshipAdapter:
         result = consolidate_emotion(state, emotion_type, intensity, params=self._params)
         return await self._apply(world_id, from_id, to_id, result, cause, created)
 
-    async def decay_all(self, world_id: str, from_id: str) -> list[PendingRelEvent]:
-        """시간 감쇠 (갱신 규칙 4) — 식은 관계도 임계를 넘으면 세계에 기록된다."""
+    async def decay_all(
+        self, world_id: str, from_id: str, *, ticks: int = 1
+    ) -> list[PendingRelEvent]:
+        """시간 감쇠 (갱신 규칙 4) — 식은 관계도 임계를 넘으면 세계에 기록된다.
+
+        ticks>1은 Cold 배치 경로 (ADR-012) — 선형 감쇠·pending 누적이라 등가 합성.
+        """
         events: list[PendingRelEvent] = []
         for to_id in await self.counterparts(world_id, from_id):
             state = await self.load(world_id, from_id, to_id)
             if state is None:
                 continue
-            decayed = decay(state, 1, params=self._params)
+            decayed = decay(state, ticks, params=self._params)
             if decayed.pending_l1() >= self._params["publish_threshold"]:
                 cleared, deltas = consume_pending(decayed)
                 events.append(

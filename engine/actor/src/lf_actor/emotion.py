@@ -148,9 +148,13 @@ class EmotionAdapter:
             logger.info("목표 감정: %s %d건 — %s", persona.id, len(shifts), describe(state))
         return shifts
 
-    async def decay_one_tick(self, world_id: str, persona: Persona) -> None:
-        """tick CONSOLIDATE의 감쇠 — 인스턴스 지수 감쇠 + mood baseline 회귀 (ADR-015)."""
+    async def decay_ticks(self, world_id: str, persona: Persona, ticks: int = 1) -> None:
+        """tick 감쇠 — 인스턴스 지수 감쇠 + mood baseline 회귀 (ADR-015).
+
+        ticks>1은 Cold 배치 경로 (ADR-012) — 인스턴스는 지수 합성이라 1-tick 반복과
+        등가, mood 회귀는 엔진의 n-tick 선형 근사를 따른다 (통계적 일괄 처리).
+        """
         state = await self.load(world_id, persona.id)
         if state == EmotionState():
             return  # 중립 상태는 저장할 것도 감쇠할 것도 없다
-        await self.save(world_id, persona.id, decay(state, persona.big_five, ticks=1))
+        await self.save(world_id, persona.id, decay(state, persona.big_five, ticks=ticks))

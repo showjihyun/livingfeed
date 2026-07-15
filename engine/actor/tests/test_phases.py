@@ -10,10 +10,17 @@ from datetime import UTC, datetime
 import nats
 import pytest
 from lf_actor.client import AiRuntimeClient
+from lf_actor.emotion import EmotionAdapter
+from lf_actor.mailbox import Mailbox
 from lf_actor.memory import WorkingMemory
 from lf_actor.persona import load_persona
 from lf_actor.phases import ActorPhases
-from lf_eventstore import read_stream
+from lf_actor.relationship import RelationshipAdapter
+from lf_emotion import EmotionState
+from lf_emotion import decay as emotion_decay
+from lf_emotion.model import EmotionInstance, Pad
+from lf_eventstore import new_ulid, read_stream
+from lf_relationship import RelationshipState
 from lf_tick.clock import TickClock
 from lf_tick.engine import run_tick
 from lf_tick.lod import COLD_INTERVAL, ActorLod, Tier, phase_offset
@@ -142,3 +149,123 @@ async def test_cold_actor_uses_rule_action_without_llm(conn, redis, nc, ai_servi
     assert payload["decision_trace"]["tier"] == "cold_rule"
     events = await read_stream(conn, WORLD, "system", "tick")
     assert events[-1].envelope["payload"]["actors_decided"]["cold"] == 1
+
+
+async def test_cold_actor_decay_batches_at_due_tick(conn, redis, nc, ai_service):
+    """Cold 액터는 매 tick 감쇠하지 않는다 — due tick에 경과분을 한 번에 (ADR-012
+    §Cold 티어 처리). 결과는 엔진의 n-tick 감쇠 의미론과 정확히 일치한다."""
+    aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
+    adapter = EmotionAdapter(redis)
+    seeded = EmotionState(
+        mood=Pad(pleasure=0.5, arousal=0.2, dominance=0.1),
+        emotions=(
+            EmotionInstance(type="joy", intensity=0.8, target_id=None, source_event="e1"),
+        ),
+    )
+    await adapter.save(WORLD, "a_aria_kim", seeded)
+
+    phases = ActorPhases(
+        [aria], ai=AiRuntimeClient(nc, ai_service, timeout_s=5),
+        memory=WorkingMemory(redis), emotion=adapter,
+    )
+    due = phase_offset("a_aria_kim", COLD_INTERVAL)
+    start = due + COLD_INTERVAL - 2  # due 2 tick 전부터 잠들어 있다
+    phases._lods["a_aria_kim"] = ActorLod(tier=Tier.COLD, last_interest_tick=start)
+
+    # 비-due tick 2번 — 상태에 손도 대지 않는다 (Redis 왕복 없음이 곧 비용 정책)
+    head = await run_tick(conn, phases, CLOCK, WORLD, tick=start, head=0)
+    head = await run_tick(conn, phases, CLOCK, WORLD, tick=start + 1, head=head)
+    assert await adapter.load(WORLD, "a_aria_kim") == seeded
+
+    # due tick — 밀린 3 tick(start..start+2)을 한 번에 배치 적용
+    await run_tick(conn, phases, CLOCK, WORLD, tick=start + 2, head=head)
+    expected = EmotionState.from_json(emotion_decay(seeded, aria.big_five, ticks=3).to_json())
+    assert await adapter.load(WORLD, "a_aria_kim") == expected
+
+
+async def test_cold_wakeup_catches_up_decay_before_appraise(conn, redis, nc, ai_service):
+    """잠들었던 액터가 DM으로 깨어나면 밀린 감쇠를 지각 전에 정산한다 (ADR-012).
+
+    정산이 없으면 오래된 감정이 갓 생긴 것처럼 강하게 남아 평가·결정을 오염시킨다.
+    """
+    aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
+    adapter = EmotionAdapter(redis)
+    seeded = EmotionState(
+        mood=Pad(pleasure=0.5, arousal=0.2, dominance=0.1),
+        emotions=(
+            EmotionInstance(type="joy", intensity=0.8, target_id=None, source_event="e1"),
+        ),
+    )
+    await adapter.save(WORLD, "a_aria_kim", seeded)
+
+    mailbox = Mailbox(redis)
+    phases = ActorPhases(
+        [aria], ai=AiRuntimeClient(nc, ai_service, timeout_s=5),
+        memory=WorkingMemory(redis), mailbox=mailbox, emotion=adapter,
+    )
+    phases._lods["a_aria_kim"] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
+    phases._last_decay["a_aria_kim"] = 0  # tick 0까지 정산된 채 잠들었다
+
+    event_id = new_ulid()
+    await mailbox.push(WORLD, "a_aria_kim", {
+        "event_id": event_id, "stream": "player", "type": "player.dm.sent",
+        "schema_version": 1, "world_id": WORLD, "actor_id": None, "tick": 10,
+        "occurred_at": "2026-03-01T00:40:00Z", "causation_id": None,
+        "correlation_id": event_id,
+        "payload": {"player_id": "p_observer_0417", "target_actor_id": "a_aria_kim",
+                    "text": "오랜만이에요"},
+    })
+    await run_tick(conn, phases, CLOCK, WORLD, tick=10, head=0)
+
+    # joy = 정산 9 tick(1..9) 후 CONSOLIDATE가 이번 tick 몫 1을 마저 — 총 10 tick 감쇠.
+    # 정산이 없었다면 1 tick 감쇠만 남아 눈에 띄게 강하다.
+    state = await adapter.load(WORLD, "a_aria_kim")
+    [joy] = [e for e in state.emotions if e.type == "joy"]
+    caught_up = emotion_decay(seeded, aria.big_five, ticks=9)
+    expected = emotion_decay(caught_up, aria.big_five, ticks=1)
+    [expected_joy] = [e for e in expected.emotions if e.type == "joy"]
+    assert joy.intensity == round(expected_joy.intensity, 4)
+    assert any(e.type == "gratitude" for e in state.emotions)  # 지각은 정산 위에서
+    assert phases._last_decay["a_aria_kim"] == 10  # 장부가 이 tick까지 정산됐다
+
+
+async def test_cold_wakeup_relationship_drift_joins_consolidate(conn, redis, nc, ai_service):
+    """재기상 정산의 관계 감쇠 발행분은 버려지지 않고 CONSOLIDATE 적재에 합류한다
+    (조용한 유실 금지). 오래 식은 관계가 깨어나는 tick에 세계에 기록된다."""
+    aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
+    rel = RelationshipAdapter(redis)
+    base = RelationshipState()
+    seeded = RelationshipState(
+        dimensions={**base.dimensions, "intimacy": 0.9},
+        stage="friend", salience=0.8, pending=base.pending,
+    )
+    await rel.save(WORLD, "a_aria_kim", "p_observer_0417", seeded)
+    await rel._register_edge(WORLD, "a_aria_kim", "p_observer_0417")
+
+    mailbox = Mailbox(redis)
+    phases = ActorPhases(
+        [aria], ai=AiRuntimeClient(nc, ai_service, timeout_s=5),
+        memory=WorkingMemory(redis), mailbox=mailbox, relationship=rel,
+    )
+    phases._lods["a_aria_kim"] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
+    phases._last_decay["a_aria_kim"] = 0
+
+    # 300 tick 잠들었다 깨어난다 — intimacy 드리프트 299×0.0003 ≈ 0.09 ≥ 발행 임계 0.08
+    event_id = new_ulid()
+    await mailbox.push(WORLD, "a_aria_kim", {
+        "event_id": event_id, "stream": "player", "type": "player.dm.sent",
+        "schema_version": 1, "world_id": WORLD, "actor_id": None, "tick": 300,
+        "occurred_at": "2026-03-02T00:00:00Z", "causation_id": None,
+        "correlation_id": event_id,
+        "payload": {"player_id": "p_observer_0417", "target_actor_id": "a_aria_kim",
+                    "text": "잘 지냈어요?"},
+    })
+    await run_tick(conn, phases, CLOCK, WORLD, tick=300, head=0)
+
+    events = [
+        s.envelope
+        for s in await read_stream(conn, WORLD, "relationship", "a_aria_kim|p_observer_0417")
+    ]
+    drifts = [e for e in events if "시간 감쇠" in e["payload"].get("reason", "")]
+    assert drifts  # 식은 관계가 세계에 기록됐다 — 정산분이 유실되지 않았다
+    assert drifts[0]["payload"]["deltas"]["intimacy"] < -0.08

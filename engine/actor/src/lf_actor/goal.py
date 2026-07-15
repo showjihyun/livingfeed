@@ -140,9 +140,12 @@ class GoalAdapter:
         state = await self.load(world_id, persona)
         return starvation(state, persona.needs_bias)
 
-    async def decay_one_tick(self, world_id: str, persona: Persona) -> None:
-        """tick 감쇠 — 욕구 만족도가 되돌아온다 (ADR-012). 목표 진행은 남는다."""
+    async def decay_ticks(self, world_id: str, persona: Persona, ticks: int = 1) -> None:
+        """tick 감쇠 — 욕구 만족도가 되돌아온다 (ADR-012). 목표 진행은 남는다.
+
+        ticks>1은 Cold 배치 경로 — 선형 감쇠라 n번의 1-tick과 등가다(클램프 동일).
+        """
         state = await self.load(world_id, persona)
-        decayed = decay(state, 1)
+        decayed = decay(state, ticks)
         if decayed != state:
             await self.save(world_id, persona.id, decayed)

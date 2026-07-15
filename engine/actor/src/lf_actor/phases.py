@@ -19,6 +19,7 @@ from lf_tick.lod import (
     ActorLod,
     Tier,
     due_by_tier,
+    is_due,
     maybe_demote,
     promote,
     scheduled_counts,
@@ -156,6 +157,11 @@ class ActorPhases:
         self._resolved_action_all: list[tuple[str, dict[str, Any]]] = []  # 전 행동 (목표용)
         self._resolved_shifts: list[PendingShift] = []
         self._resolved_replies: list[tuple[str, dict[str, Any], str]] = []
+        #: 액터별 감쇠가 적용된 마지막 tick — Cold 배치의 장부 (ADR-012 §Cold 티어 처리).
+        #: 재시작 시 비어 경과를 모른다 — 그 액터는 현재 tick부터 다시 센다 (MVP 허용 오차)
+        self._last_decay: dict[str, int] = {}
+        #: 재기상 정산(catch-up)의 관계 감쇠 발행분 — CONSOLIDATE 관계 적재에 합류
+        self._rel_catchup: list[PendingRelEvent] = []
 
     async def schedule(self, ctx: TickContext) -> dict[str, int]:
         return scheduled_counts(self._lods, ctx.tick)
@@ -235,6 +241,9 @@ class ActorPhases:
                 )
             else:
                 self._lods[actor_id] = maybe_demote(self._lods[actor_id], ctx.tick)
+            if promoted or items:
+                # 잠들었던 액터가 깨어난다 — 밀린 감쇠를 상태 사용 전에 정산 (ADR-012)
+                await self._catch_up(ctx, actor_id)
             if not items:
                 continue  # 승격 신호는 기억·감정·목표에 들어가지 않는다 (메타 제어)
             self._inbox[actor_id] = items
@@ -327,6 +336,44 @@ class ActorPhases:
         if self._arc is None:
             return None
         return await self._arc.get(world_id, actor_id)
+
+    async def _catch_up(self, ctx: TickContext, actor_id: str) -> None:
+        """잠들었던 액터의 밀린 감쇠 정산 — 직전 tick(T-1)까지 (ADR-012 §Cold 배치).
+
+        지각·결정이 stale 상태를 쓰지 않게 상태 사용 전에 부른다. 이번 tick 몫은
+        CONSOLIDATE가 마저 적용한다. 관계 감쇠의 발행 임계 초과분은 버퍼에 모아
+        CONSOLIDATE의 관계 적재에 합류시킨다 (조용한 유실 금지).
+        """
+        behind = (ctx.tick - 1) - self._last_decay.setdefault(actor_id, ctx.tick - 1)
+        if behind <= 0:
+            return
+        persona = self._personas[actor_id]
+        if self._emotion is not None:
+            await self._emotion.decay_ticks(ctx.world_id, persona, behind)
+        if self._goal is not None:
+            await self._goal.decay_ticks(ctx.world_id, persona, behind)
+        if self._relationship is not None:
+            self._rel_catchup += await self._relationship.decay_all(
+                ctx.world_id, actor_id, ticks=behind
+            )
+        self._last_decay[actor_id] = ctx.tick - 1
+        logger.info("감쇠 정산: %s 밀린 %d tick 적용 (재기상)", actor_id, behind)
+
+    def _decay_plan(self, ctx: TickContext) -> dict[str, int]:
+        """이번 tick에 감쇠할 액터 → 적용할 tick 수 (ADR-012 §Cold 티어 처리).
+
+        Hot/Warm은 매 tick 1씩. Cold는 잠들어 있다 — due tick(100 케이던스)에만
+        경과분을 한 번에 적용한다(세 감쇠 모두 tick 수에 대해 등가 합성). 상태를
+        건드리지 않는 tick엔 Redis 왕복도 없다 — 강등이 곧 비용 정책 (ADR-011)."""
+        plan: dict[str, int] = {}
+        for actor_id in self._personas:
+            # 장부 초기화는 스킵 여부와 무관 — 잠들기 시작한 시점을 세어야 경과가 맞는다
+            last = self._last_decay.setdefault(actor_id, ctx.tick - 1)
+            lod = self._lods[actor_id]
+            if lod.tier is Tier.COLD and not is_due(actor_id, lod, ctx.tick):
+                continue  # 잠든 액터 — due tick에 경과분을 한 번에
+            plan[actor_id] = ctx.tick - last
+        return plan
 
     def _reply_event(
         self, ctx: TickContext, actor_id: str, source: dict[str, Any], text: str
@@ -448,10 +495,12 @@ class ActorPhases:
         return emitted
 
     async def consolidate(self, ctx: TickContext) -> None:
+        # Cold 배치 계획 — 잠든 액터는 감쇠 스킵, due 액터는 경과분 일괄 (ADR-012)
+        decay_plan = self._decay_plan(ctx)
         # 관계 응고 (ADR-016 §갱신 규칙 — CONSOLIDATE 단계)
         rel_counts: dict[str, int] = {}
         if self._relationship is not None:
-            rel_counts = await self._consolidate_relationships(ctx)
+            rel_counts = await self._consolidate_relationships(ctx, decay_plan)
         # 목표 응고 — 행동이 욕구를 채우고 목표를 진행시킨다 (ADR-012 need/goal)
         goal_relevance, goal_actions = await self._consolidate_goals(ctx)
         # 기억 응고 — 이번 tick의 재료가 에피소드로 접힌다 (ADR-008)
@@ -459,14 +508,17 @@ class ActorPhases:
         # reflection — 주기적으로 상태의 패턴이 신념이 된다 (ADR-008)
         if ctx.tick > 0 and ctx.tick % self._reflection_interval == 0:
             await self._reflect(ctx)
-        # 감정 감쇠·baseline 회귀 (ADR-015 §감쇠)
+        # 감정 감쇠·baseline 회귀 (ADR-015 §감쇠) — Cold는 배치로 (ADR-012)
         if self._emotion is not None:
-            for persona in self._personas.values():
-                await self._emotion.decay_one_tick(ctx.world_id, persona)
+            for actor_id, ticks in sorted(decay_plan.items()):
+                await self._emotion.decay_ticks(ctx.world_id, self._personas[actor_id], ticks)
         # 욕구 감쇠 — 만족은 되돌아온다 (ADR-012)
         if self._goal is not None:
-            for persona in self._personas.values():
-                await self._goal.decay_one_tick(ctx.world_id, persona)
+            for actor_id, ticks in sorted(decay_plan.items()):
+                await self._goal.decay_ticks(ctx.world_id, self._personas[actor_id], ticks)
+        # 감쇠 장부 갱신 — 이 tick까지 정산됐다
+        for actor_id in decay_plan:
+            self._last_decay[actor_id] = ctx.tick
         self._resolved_actions = []
         self._resolved_action_all = []
         self._resolved_shifts = []
@@ -711,10 +763,14 @@ class ActorPhases:
             " (semantic)" if episode.importance >= self._weights.semantic_gate else "",
         )
 
-    async def _consolidate_relationships(self, ctx: TickContext) -> dict[str, int]:
+    async def _consolidate_relationships(
+        self, ctx: TickContext, decay_plan: dict[str, int]
+    ) -> dict[str, int]:
         assert self._relationship is not None
         rel = self._relationship
-        pending: list[PendingRelEvent] = []
+        # 재기상 정산(perceive catch-up)의 관계 감쇠 발행분 합류 (조용한 유실 금지)
+        pending: list[PendingRelEvent] = self._rel_catchup
+        self._rel_catchup = []
 
         # 규칙 1a: 플레이어 개입 → 액터→플레이어 엣지 (그가 내게 한 일).
         # 세계 사건 지각은 관계 갱신이 아니다 — 간접 효과(소문)는 후속 (ADR-016 규칙 3)
@@ -751,9 +807,9 @@ class ActorPhases:
                     },
                 )
 
-        # 규칙 4: 시간 감쇠 — 전 활성 엣지
-        for actor_id in sorted(self._personas):
-            pending += await rel.decay_all(ctx.world_id, actor_id)
+        # 규칙 4: 시간 감쇠 — Cold 배치 계획에 따라 (잠든 액터는 due tick에 몰아서)
+        for actor_id in sorted(decay_plan):
+            pending += await rel.decay_all(ctx.world_id, actor_id, ticks=decay_plan[actor_id])
 
         # 규칙 5: 임계 초과 변화만 적재 (pending은 이미 임계 통과분만 담고 있다)
         by_edge: dict[tuple[str, str], list[PendingRelEvent]] = {}
