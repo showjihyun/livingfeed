@@ -14,6 +14,7 @@ import asyncio
 import copy
 import json
 import logging
+from collections import deque
 from typing import Any
 
 import nats
@@ -86,6 +87,10 @@ class Director:
         #: 시즌 계획(저빈도)의 상태 — 현재 테마, 마지막으로 계획한 시즌-일 (ADR-013)
         self._current_theme: str | None = None
         self._last_season_day = -1
+        #: 최근 드라마 도구 이력 (오래된 → 최근) — 다양성 힌트: 프롬프트에 주입해
+        #: 같은 도구 연속 반복을 피하게 하고, 감사 signals에 남긴다. 자기 감사
+        #: 재소비(_restore_budget)로 재시작에도 흐름이 복원된다
+        self._recent_tools: deque[str] = deque(maxlen=5)
 
     async def _select(
         self, snapshot: Any, tension: list[list[Any]]
@@ -97,7 +102,10 @@ class Director:
         """
         if self._ai is not None and is_fireable(snapshot, self._budget, self._params):
             schema = plan_schema([inc["kind"] for inc in self._incidents])
-            user = build_plan_user(snapshot, tension, self._incidents, self._names)
+            user = build_plan_user(
+                snapshot, tension, self._incidents, self._names,
+                recent_tools=list(self._recent_tools),
+            )
             output, model = await self._ai.plan_intervention(
                 DIRECTOR_SYSTEM, user, schema,
                 world_id=self._cfg.world_id, tick=snapshot.tick,
@@ -171,10 +179,14 @@ class Director:
         intervention = await self._select(snapshot, tension)
         if intervention is None:
             return False
+        # 다양성 메트릭 — 최근 도구 흐름을 감사에 남긴다 (연속 사용이 관찰 가능해진다)
+        if self._recent_tools:
+            intervention.signals["recent_tools"] = list(self._recent_tools)
         remaining_after = self._budget.remaining(snapshot.tick, self._params) - 1
         await self._append_intervention(conn, snapshot, intervention, remaining_after)
         self._budget.record(snapshot.tick, None)
         self._window.reset_quiet()
+        self._recent_tools.append(intervention.tool)
         return True
 
     async def plan_season(self, conn: AsyncConnection, snapshot: Any) -> bool:
@@ -240,6 +252,8 @@ class Director:
         # 시즌·아크 계획은 저빈도 구조적 결정 — 드라마 예산과 무관하다 (ADR-013)
         if envelope["payload"].get("tool") in (SEASON_TOOL, ARC_TOOL):
             return
+        # 예산과 함께 최근 도구 흐름도 감사에서 되찾는다 (재시작 후 다양성 힌트 복원)
+        self._recent_tools.append(envelope["payload"]["tool"])
         self._budget.record(
             envelope["tick"], envelope["payload"].get("target_correlation_id")
         )

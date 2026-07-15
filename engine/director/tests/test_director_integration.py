@@ -237,6 +237,54 @@ async def test_plan_season_records_on_system_stream_without_budget(conn):
     assert await read_stream(conn, WORLD, "world", "incidents") == []
 
 
+async def test_consecutive_interventions_carry_recent_tools(conn):
+    """개입 다양성 — 두 번째 개입부터 LLM 프롬프트에 최근 도구 이력이 주입되고,
+    감사 signals에 recent_tools가 남는다 (연속 사용이 관찰 가능해진다)."""
+    tension = [["a_minji_kim", "a_seongho_park", 0.8, 0.2]]
+    plan = {
+        "tool": "inject_incident",
+        "incident_kind": "rumor_spread",
+        "affected_actor_ids": ["a_minji_kim"],
+        "description": "박성호를 둘러싼 말이 김민지에게까지 닿았다",
+        "intensity": 0.7,
+        "rationale": "둘의 원한이 가장 높다",
+    }
+    ai = _StubAiClient(plan)
+    director = make_llm_director(ai)
+    assert await director.evaluate(
+        conn, Snapshot(tick=120, drama_ma=0.05, quiet_ticks=30), _StubGraph(tension)
+    )
+    assert "최근 개입 이력" not in ai.calls[0]["user"]  # 첫 개입 — 이력 없음
+
+    assert await director.evaluate(
+        conn, Snapshot(tick=125, drama_ma=0.05, quiet_ticks=35), _StubGraph(tension)
+    )
+    assert "최근 개입 이력" in ai.calls[1]["user"]  # 두 번째 — 흐름이 보인다
+    assert "inject_incident" in ai.calls[1]["user"]
+
+    audits = [s.envelope for s in await read_stream(conn, WORLD, "system", "director")]
+    assert "recent_tools" not in audits[0]["payload"]["signals"]
+    assert audits[1]["payload"]["signals"]["recent_tools"] == ["inject_incident"]
+
+
+def test_restore_budget_rebuilds_recent_tools_from_audits():
+    # 재시작 후 남의(과거) 감사 재소비 → 예산과 함께 도구 흐름도 복원된다.
+    # 시즌·아크 감사는 드라마 흐름이 아니다 — 이력에 안 들어간다
+    director = make_director()
+    director._restore_budget(
+        {"event_id": "a", "tick": 5,
+         "payload": {"tool": "inject_incident", "target_correlation_id": None}}
+    )
+    director._restore_budget(
+        {"event_id": "b", "tick": 6, "payload": {"tool": "set_season_theme"}}
+    )
+    director._restore_budget(
+        {"event_id": "c", "tick": 7,
+         "payload": {"tool": "nudge_perception", "target_correlation_id": None}}
+    )
+    assert list(director._recent_tools) == ["inject_incident", "nudge_perception"]
+
+
 async def test_plan_arcs_records_on_system_stream_without_budget(conn):
     # 저빈도 인생 아크 계획 — 시즌과 같은 케이던스, 드라마 예산과 분리 (ADR-013, plan/08)
     plan = {

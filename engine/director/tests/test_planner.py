@@ -364,3 +364,15 @@ def test_build_plan_user_grounds_names_kinds_and_drama_tools_only():
     assert "inject_incident" in user and "nudge_perception" in user and "promote_actor" in user
     assert "set_season_theme" not in user
     assert str(SNAP.quiet_ticks) in user
+    assert "최근 개입 이력" not in user  # 이력 없으면 섹션 생략
+
+
+def test_build_plan_user_injects_recent_tools_for_diversity():
+    # 최근 개입 흐름을 보여 같은 도구 연속 반복을 감점한다 — 강제가 아니라 판단 재료
+    user = build_plan_user(
+        SNAP, TENSION, INCIDENTS, NAMES,
+        recent_tools=["inject_incident", "inject_incident"],
+    )
+    assert "## 최근 개입 이력" in user
+    assert "inject_incident → inject_incident" in user
+    assert "반복하지 마라" in user
