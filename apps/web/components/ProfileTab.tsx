@@ -1,7 +1,7 @@
 import { ICON } from "@/lib/data";
 import { relativeTime } from "@/lib/live-feed";
 import type { ActorProfile } from "@/lib/profile";
-import { humanize } from "@/lib/profile";
+import { ARC_STAGE_LABELS, humanize } from "@/lib/profile";
 
 import { Face } from "./Face";
 import { Icon } from "./Icon";
@@ -19,6 +19,7 @@ export function ProfileTab({ following, onToggleFollow, goDm, profile }: Profile
   const aboutMe = profile?.aboutMe ?? [];
   const episodes = profile?.episodes ?? [];
   const identity = profile?.identity ?? null;
+  const arc = profile?.arc ?? null;
   // 표시 이름·소개·목표는 라이브 identity에서 — 없으면 중립 문구 (특정 인물 하드코딩 금지)
   const displayName = identity?.name ?? "프로필";
   const displayBio = identity?.bio ?? "아직 소개가 연결되지 않았어요";
@@ -139,6 +140,68 @@ export function ProfileTab({ following, onToggleFollow, goDm, profile }: Profile
             </div>
           )}
         </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>인생의 장</div>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 800,
+              color: arc ? "#3E8A66" : "#8C97AF",
+            }}
+          >
+            {arc ? "아크 실측 연결됨" : "아직 비어 있음"}
+          </div>
+        </div>
+
+        {arc ? (
+          // Director가 그린 이번 시즌의 인생 방향 (ADR-013, plan/08) — 명령이 아니라 배경
+          <div
+            style={{
+              border: "1.5px solid #E2EAF6",
+              borderRadius: 18,
+              padding: "16px 20px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div
+                style={{
+                  padding: "3px 12px",
+                  background: "#EDF3FD",
+                  color: "#5F7EC9",
+                  borderRadius: 9999,
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}
+              >
+                {ARC_STAGE_LABELS[arc.stage] ?? arc.stage}
+              </div>
+              <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 700 }}>
+                {relativeTime(arc.plannedAt)} 그려진 방향
+              </div>
+            </div>
+            <div style={{ fontSize: 14, lineHeight: 1.65, fontWeight: 500 }}>
+              {humanize(arc.intention)}
+            </div>
+          </div>
+        ) : (
+          <div
+            style={{
+              border: "1.5px dashed #D8E1F0",
+              borderRadius: 18,
+              padding: "24px 20px",
+              textAlign: "center",
+              color: "#8C97AF",
+              fontSize: 14,
+              fontWeight: 600,
+            }}
+          >
+            아직 그려진 인생의 장이 없어요 — 지금은 그저 일상을 살고 있습니다.
+          </div>
+        )}
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <div style={{ fontSize: 14, fontWeight: 800 }}>민지의 기억</div>

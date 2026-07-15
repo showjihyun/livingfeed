@@ -29,10 +29,13 @@ from lf_projector.pg_read import ReadStore
 
 logger = logging.getLogger("lf.projector.pg")
 
-#: (스트림, subject 패턴 조각) — durable은 pg-projector-<이름> 으로 파생된다
+#: (스트림, subject 패턴 조각) — durable은 pg-projector-<이름> 으로 파생된다.
+#: LF_SYS는 아크(system.director.arc_planned) 프로젝션용 — 그 밖의 system.*은
+#: PROJECTIONS에 없어 무시된다 (전방 호환)
 SOURCES: tuple[tuple[str, str], ...] = (
     ("LF_ACTOR", "actor"),
     ("LF_PLAYER", "player"),
+    ("LF_SYS", "system"),
 )
 
 

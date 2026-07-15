@@ -32,6 +32,22 @@ export interface ActorEpisode {
   tags: string[];
 }
 
+/** Director가 그린 이번 시즌의 인생 방향 (ADR-013, plan/08 Life Journey) */
+export interface ActorArc {
+  stage: string;
+  intention: string;
+  plannedAt: string;
+}
+
+/** 인생 단계 코드 → 표시 라벨 (plan/08의 닫힌 어휘 — 미지 코드는 코드 그대로) */
+export const ARC_STAGE_LABELS: Record<string, string> = {
+  student: "학생기",
+  newcomer: "사회 초년기",
+  settling: "정착·방황기",
+  prime: "전성기·침체기",
+  elder: "원로기",
+};
+
 export interface ActorProfile {
   /** 이름·소개·목표 — read.actors (없으면 null, 화면은 식별자 폴백) */
   identity: ActorIdentity | null;
@@ -39,6 +55,8 @@ export interface ActorProfile {
   aboutMe: ActorBelief[];
   beliefs: ActorBelief[];
   episodes: ActorEpisode[];
+  /** 인생의 장 — read.actor_arcs (없으면 null, 그저 일상을 사는 중) */
+  arc: ActorArc | null;
 }
 
 /** feed-api GET /actors/{id}/profile 응답 (reads.py 계약) */
@@ -67,6 +85,7 @@ interface ProfileResponse {
       tags: string[];
     }[];
   };
+  arc: { stage: string; intention: string; planned_at: string } | null;
 }
 
 /** 신념·기억 문장의 플레이어 id를 2인칭으로 — 액터는 id로 기억하지만 화면은 사람에게 말한다 */
@@ -111,6 +130,9 @@ function fromResponse(body: ProfileResponse): ActorProfile {
       occurredAt: e.occurred_at,
       tags: e.tags,
     })),
+    arc: body.arc
+      ? { stage: body.arc.stage, intention: body.arc.intention, plannedAt: body.arc.planned_at }
+      : null,
   };
 }
 
@@ -140,11 +162,12 @@ export function useActorProfile(
     };
   }, [actorId, enabled]);
 
-  // 실측이 "있다"고 말하려면 내용이 있어야 한다 — 정체성·신념·기억 중 하나라도
+  // 실측이 "있다"고 말하려면 내용이 있어야 한다 — 정체성·신념·기억·아크 중 하나라도
   const available =
     profile !== null &&
     (profile.identity !== null ||
       profile.episodes.length > 0 ||
-      profile.beliefs.length > 0);
+      profile.beliefs.length > 0 ||
+      profile.arc !== null);
   return { profile: available ? profile : null, available };
 }

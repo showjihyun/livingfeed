@@ -27,7 +27,7 @@ class FakeReads:
     async def actor_profile(self, world_id, actor_id, *, episode_limit, episode_cursor):
         self.calls.append(("profile", world_id, actor_id, episode_limit, episode_cursor))
         return {"world_id": world_id, "actor_id": actor_id, "identity": None, "beliefs": [],
-                "episodes": {"items": [], "next_cursor": None}}
+                "episodes": {"items": [], "next_cursor": None}, "arc": None}
 
     async def conversation(self, world_id, player_id, actor_id, *, limit, cursor):
         self.calls.append(("conversation", world_id, player_id, actor_id, limit, cursor))

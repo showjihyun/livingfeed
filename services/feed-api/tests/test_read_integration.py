@@ -33,6 +33,7 @@ async def seed(pg) -> None:
         "actor.identity.declared",
         "actor.memory.consolidated", "actor.belief.formed",
         "player.dm.sent", "actor.message.sent",
+        "system.director.arc_planned",  # 대상은 a_minji_kim — 아리아에겐 아크가 없다
     ):
         await store.apply(sample(name))
 
@@ -53,6 +54,18 @@ async def test_actor_profile_roundtrip(pg):
     assert "지지해줬다" in episode["summary"]
     assert episode["factors"]["emotion"] == 0.83  # jsonb → dict
     assert profile["episodes"]["next_cursor"] == episode["event_id"]
+    assert profile["arc"] is None  # 아크 없는 액터 — 그저 일상 (FE 폴백 규약)
+
+
+async def test_actor_profile_includes_arc(pg):
+    """인생 아크(read.actor_arcs)가 프로필에 실린다 — "인생의 장" (ADR-013/plan-08)."""
+    await seed(pg)
+    profile = await ProfileReads(OneConnPool(pg)).actor_profile(
+        WORLD, "a_minji_kim", episode_limit=10, episode_cursor=None
+    )
+    assert profile["arc"]["stage"] == "settling"
+    assert "이직" in profile["arc"]["intention"]
+    assert profile["arc"]["planned_at"] is not None
 
 
 async def test_actors_list_reads_identity(pg):

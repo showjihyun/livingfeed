@@ -10,6 +10,8 @@
   같은 자리 재발행은 갱신이다 (reflection 계약과 동일)
 - messages:       player.dm.sent / player.comment.posted / actor.message.sent —
   플레이어↔액터 대화 히스토리 (WS 재접속 시 이어보기)
+- actor_arcs:     system.director.arc_planned — 액터별 현재 인생 아크
+  (ADR-013/plan-08, 프로필 "인생의 장"). 다음 계획이 자리를 덮어쓴다
 """
 
 from __future__ import annotations
@@ -79,9 +81,22 @@ CREATE TABLE IF NOT EXISTS read.actors (
     declared_at  TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (world_id, actor_id)
 );
+
+CREATE TABLE IF NOT EXISTS read.actor_arcs (
+    world_id    TEXT NOT NULL,
+    actor_id    TEXT NOT NULL,
+    stage       TEXT NOT NULL,
+    intention   TEXT NOT NULL,
+    event_id    TEXT NOT NULL,
+    planned_at  TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (world_id, actor_id)
+);
 """
 
-TABLES = ("read.actor_episodes", "read.actor_beliefs", "read.messages", "read.actors")
+TABLES = (
+    "read.actor_episodes", "read.actor_beliefs", "read.messages",
+    "read.actors", "read.actor_arcs",
+)
 
 #: about_id null(자기 자신/세계에 대한 신념)의 PK 표현 — reflection의 자리 키와 동일 규약
 NO_ABOUT = "-"
@@ -117,6 +132,19 @@ INSERT INTO read.messages
      text, post_id, tick, occurred_at)
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::timestamptz)
 ON CONFLICT (event_id) DO NOTHING
+"""
+
+#: 아크는 (world, actor) 자리 단위 upsert — 다음 계획이 덮어쓴다 (ArcStore와 동일 규약)
+_ARC_SQL = """
+INSERT INTO read.actor_arcs
+    (world_id, actor_id, stage, intention, event_id, planned_at)
+VALUES (%s, %s, %s, %s, %s, %s::timestamptz)
+ON CONFLICT (world_id, actor_id) DO UPDATE SET
+    stage      = excluded.stage,
+    intention  = excluded.intention,
+    event_id   = excluded.event_id,
+    planned_at = excluded.planned_at
+WHERE excluded.event_id > read.actor_arcs.event_id
 """
 
 #: 정체성은 (world, actor) 자리 단위 upsert — 재선언(재시작 등)은 최신 ULID가 이긴다
@@ -183,6 +211,15 @@ def actor_params(envelope: dict[str, Any]) -> tuple:
     )
 
 
+def arc_params(envelope: dict[str, Any]) -> tuple:
+    """아크는 Director 제어 신호 — 봉투 actor_id가 null이라 대상은 payload에 있다."""
+    p = envelope["payload"]
+    return (
+        envelope["world_id"], p["target_actor_id"], p["stage"], p["intention"],
+        envelope["event_id"], envelope["occurred_at"],
+    )
+
+
 #: type → (SQL, 파라미터 변환) — 목록에 없는 타입은 프로젝션 대상이 아니다 (전방 호환 무시)
 PROJECTIONS: dict[str, tuple[str, Any]] = {
     "actor.memory.consolidated": (_EPISODE_SQL, episode_params),
@@ -191,6 +228,7 @@ PROJECTIONS: dict[str, tuple[str, Any]] = {
     "actor.message.sent": (_MESSAGE_SQL, message_params),
     "player.dm.sent": (_MESSAGE_SQL, message_params),
     "player.comment.posted": (_MESSAGE_SQL, message_params),
+    "system.director.arc_planned": (_ARC_SQL, arc_params),
 }
 
 

@@ -39,6 +39,12 @@ ORDER BY event_id DESC
 LIMIT %s
 """
 
+_ARC_SQL = """
+SELECT stage, intention, planned_at
+FROM read.actor_arcs
+WHERE world_id = %s AND actor_id = %s
+"""
+
 _CONVERSATION_SQL = """
 SELECT event_id, sender, channel, text, post_id, tick, occurred_at
 FROM read.messages
@@ -68,7 +74,8 @@ class ProfileReads:
     async def actor_profile(
         self, world_id: str, actor_id: str, *, episode_limit: int, episode_cursor: str | None
     ) -> dict[str, Any]:
-        """정체성 + 신념 전체(확신순) + 최근 에피소드 페이지 — 액터의 겉과 속 (ADR-012/008)."""
+        """정체성 + 신념(확신순) + 에피소드 페이지 + 인생 아크 — 액터의 겉과 속과 방향
+        (ADR-012/008/013)."""
         async with self._pool.connection() as conn:
             identity_row = await (await conn.execute(
                 _IDENTITY_SQL, (world_id, actor_id)
@@ -80,6 +87,9 @@ class ProfileReads:
                 _EPISODES_SQL,
                 (world_id, actor_id, episode_cursor, episode_cursor, episode_limit),
             )).fetchall()
+            arc_row = await (await conn.execute(
+                _ARC_SQL, (world_id, actor_id)
+            )).fetchone()
         identity = (
             dict(zip(_IDENTITY_COLS, identity_row)) if identity_row is not None else None
         )
@@ -101,6 +111,11 @@ class ProfileReads:
                 "items": episode_items,
                 "next_cursor": episode_items[-1]["event_id"] if episode_items else None,
             },
+            # 인생 아크 — Director가 그린 이번 시즌의 방향 (없으면 null — 그저 일상)
+            "arc": (
+                dict(zip(("stage", "intention", "planned_at"), arc_row, strict=True))
+                if arc_row is not None else None
+            ),
         }
 
     async def conversation(

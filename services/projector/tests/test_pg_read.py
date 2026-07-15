@@ -5,10 +5,10 @@
 """
 
 import pytest
-
 from lf_projector.pg_read import (
     NO_ABOUT,
     ReadStore,
+    arc_params,
     belief_params,
     episode_params,
     message_params,
@@ -46,6 +46,16 @@ def test_message_params_normalizes_three_directions():
 def test_message_params_rejects_non_conversation():
     with pytest.raises(KeyError):
         message_params(sample("actor.action.performed"))
+
+
+def test_arc_params_keys_on_payload_target():
+    # 아크는 Director 제어 신호 — 봉투 actor_id가 null이라 대상은 payload에서 온다
+    envelope = sample("system.director.arc_planned")
+    assert envelope["actor_id"] is None
+    params = arc_params(envelope)
+    assert params[1] == "a_minji_kim"  # payload.target_actor_id가 행의 actor_id
+    assert params[2] == "settling"
+    assert "이직" in params[3]
 
 
 async def test_apply_is_idempotent(pg):
@@ -95,6 +105,34 @@ async def test_identity_projects_and_upserts_forward(pg):
     assert row[0] == "김아리(수정)"
     assert row[1] == "ambitious_journalist"
     assert any(g["priority"] == 0.9 for g in row[2])  # jsonb → list[dict]
+
+
+async def test_arc_projects_and_upserts_forward(pg):
+    """아크는 (world, actor) 자리 upsert — 다음 계획이 덮어쓴다 (ArcStore와 동일 규약)."""
+    store = ReadStore(pg)
+    await store.ensure()
+    first = sample("system.director.arc_planned")
+    assert await store.apply(first)
+    assert await store.apply(first)  # 재전달 — 무변화
+
+    # 다음 시즌 계획(더 큰 ULID)이 자리를 덮어쓴다
+    newer = sample("system.director.arc_planned")
+    newer["event_id"] = first["event_id"][:-1] + "Z"
+    newer["payload"]["stage"] = "prime"
+    newer["payload"]["intention"] = "결단 이후 — 새 자리에서 증명한다"
+    await store.apply(newer)
+    # 순서 뒤집힌 과거 계획은 무시된다 (ULID 가드)
+    stale = sample("system.director.arc_planned")
+    stale["event_id"] = "0" * 26
+    stale["payload"]["stage"] = "student"
+    await store.apply(stale)
+
+    [row] = await (await pg.execute(
+        "SELECT actor_id, stage, intention FROM read.actor_arcs WHERE world_id = 'w_main'"
+    )).fetchall()
+    assert row[0] == "a_minji_kim"  # 자리 하나 — 이력이 아니라 현재 아크
+    assert row[1] == "prime"
+    assert "증명한다" in row[2]
 
 
 async def test_unknown_type_is_not_projected(pg):
