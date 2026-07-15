@@ -107,6 +107,8 @@ function LivePostCard({
 }) {
   const [draft, setDraft] = useState("");
   const commentable = isCommentable(post);
+  // 인생의 장이 넘어간 순간 (ADR-014/plan-08) — 일반 포스트와 결이 다른 서사 마디
+  const isArcTransition = post.tags.includes("arc_transition");
 
   const submit = () => {
     const text = draft.trim();
@@ -121,7 +123,8 @@ function LivePostCard({
   return (
     <div
       style={{
-        border: "1.5px solid #E2EAF6",
+        border: isArcTransition ? "1.5px solid #D8CCF2" : "1.5px solid #E2EAF6",
+        background: isArcTransition ? "#FBFAFE" : undefined,
         borderRadius: 20,
         padding: "18px 24px",
         display: "flex",
@@ -133,7 +136,23 @@ function LivePostCard({
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <Avatar seed={post.authorId} label={authorLabel} size={40} />
         <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-          <div style={{ fontSize: 15, fontWeight: 800 }}>{post.title}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ fontSize: 15, fontWeight: 800 }}>{post.title}</div>
+            {isArcTransition && (
+              <div
+                style={{
+                  padding: "2px 10px",
+                  background: "#EFE9FB",
+                  color: "#7B62C9",
+                  borderRadius: 9999,
+                  fontSize: 11,
+                  fontWeight: 800,
+                }}
+              >
+                인생의 장
+              </div>
+            )}
+          </div>
           <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}>
             {relativeTime(post.occurredAt)} · 드라마 {Math.round(post.dramaScore * 100)}
             {post.tags.map((tag) => ` · #${tag}`).join("")}

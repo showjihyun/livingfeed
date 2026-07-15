@@ -1,7 +1,7 @@
 import { ICON } from "@/lib/data";
 import { relativeTime } from "@/lib/live-feed";
 import type { ActorProfile } from "@/lib/profile";
-import { ARC_STAGE_LABELS, humanize } from "@/lib/profile";
+import { ARC_STAGE_LABELS, FADED_BELIEF_MAX, humanize } from "@/lib/profile";
 
 import { Face } from "./Face";
 import { Icon } from "./Icon";
@@ -120,16 +120,25 @@ export function ProfileTab({ following, onToggleFollow, goDm, profile }: Profile
             // 실측 — 민지가 나에 대해 실제로 형성한 신념 (reflection, ADR-008)
             <div style={{ fontSize: 13, color: "#6B7691", fontWeight: 600 }}>
               <span style={{ fontWeight: 800, color: "#3A4256" }}>민지의 마음속</span>
-              {aboutMe.map((b) => (
-                <span key={b.kind}>
-                  {" · "}
-                  {humanize(b.statement)}{" "}
-                  <span style={{ color: "#A87F24", fontWeight: 700 }}>
-                    (확신 {Math.round(b.confidence * 100)}%
-                    {b.revisions > 1 ? ` · ${b.revisions}번 곱씹음` : ""})
+              {aboutMe.map((b) =>
+                b.confidence <= FADED_BELIEF_MAX ? (
+                  // 철회된 신념 — 잔불로 남은 흔적 (ADR-008 신념 폐기)
+                  <span key={b.kind} style={{ color: "#B7C2D8", fontStyle: "italic" }}>
+                    {" · "}
+                    {humanize(b.statement)}{" "}
+                    <span style={{ fontWeight: 700 }}>(흐려진 믿음)</span>
                   </span>
-                </span>
-              ))}
+                ) : (
+                  <span key={b.kind}>
+                    {" · "}
+                    {humanize(b.statement)}{" "}
+                    <span style={{ color: "#A87F24", fontWeight: 700 }}>
+                      (확신 {Math.round(b.confidence * 100)}%
+                      {b.revisions > 1 ? ` · ${b.revisions}번 곱씹음` : ""})
+                    </span>
+                  </span>
+                ),
+              )}
             </div>
           ) : (
             <div style={{ fontSize: 13, color: "#6B7691", fontWeight: 600 }}>

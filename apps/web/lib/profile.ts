@@ -24,6 +24,12 @@ export interface ActorBelief {
   revisions: number;
 }
 
+/**
+ * 철회된 신념의 잔불 상한 — 이 이하 확신은 근거가 무너져 철회문으로 갱신된 것이다
+ * (engine reflection의 RETRACTED_CONFIDENCE(0.05) 계약, ADR-008 신념 폐기)
+ */
+export const FADED_BELIEF_MAX = 0.1;
+
 export interface ActorEpisode {
   id: string;
   summary: string;
