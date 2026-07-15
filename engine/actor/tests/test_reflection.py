@@ -13,11 +13,13 @@ from lf_actor.persona import load_persona
 from lf_actor.phases import ActorPhases
 from lf_actor.reflection import (
     RESTATE_DELTA,
+    RETRACTED_CONFIDENCE,
     Belief,
     BeliefLedger,
     derive_beliefs,
     insight_schema,
     insight_to_belief,
+    retract_stale,
 )
 from lf_actor.relationship import RelationshipAdapter
 from lf_emotion import EmotionInstance, EmotionState
@@ -90,6 +92,24 @@ async def test_ledger_restates_only_on_meaningful_change(redis):
 
     shifted = Belief("문장", "supporter", 0.5 + RESTATE_DELTA, "p_x", [])
     assert await ledger.changed(WORLD, "a_aria_kim", shifted)  # 의미 있는 변화만 재발행
+
+
+def test_retract_stale_targets_only_undervivable_rule_slots():
+    # supporter는 아직 도출된다 — 유지. threat는 근거가 무너졌다 — 철회.
+    # LLM 통찰(self_image)은 상태 도출이 아니다 — 손대지 않는다.
+    published = {"supporter|p_x": 0.4, "threat|a_y": 0.5, "self_image|-": 0.7}
+    derived = [Belief("여전히 힘이 된다", "supporter", 0.42, "p_x", [])]
+    [retraction] = retract_stale(published, derived, name_map={"a_y": "최편집장"})
+    assert retraction.kind == "threat" and retraction.about_id == "a_y"
+    assert retraction.confidence == RETRACTED_CONFIDENCE
+    assert "최편집장" in retraction.statement and "풀리고" in retraction.statement
+
+
+def test_retracted_slot_stays_silent_until_reestablished():
+    # 이미 잔불(철회 확신)로 내려간 슬롯 — 후보로는 나오지만 대장 임계가 막는다
+    published = {"felt_support|p_x": RETRACTED_CONFIDENCE}
+    [candidate] = retract_stale(published, [])
+    assert candidate.confidence == RETRACTED_CONFIDENCE  # 재발행 델타 0 — 침묵
 
 
 def test_insight_schema_bounds_kind_and_about():
@@ -176,6 +196,45 @@ async def test_llm_insight_joins_rule_beliefs(conn, redis):
     # 곱씹음이 작업 기억으로 — 다음 결정의 컨텍스트 (규칙 경로와 같은 계약)
     recent = await WorkingMemory(redis).recent(WORLD, "a_aria_kim")
     assert any("곱씹은 생각" in m for m in recent)
+
+
+async def test_belief_retracts_when_grounding_state_fades(conn, redis):
+    """신념 폐기 — 근거 상태(관계)가 무너지면 같은 자리에 철회문이 재발행된다
+    (ADR-008). read 모델·Semantic이 같은 슬롯을 덮어써 세계관이 함께 갱신된다."""
+    aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
+    rel = RelationshipAdapter(redis)
+    warm = edge(trust=0.3, intimacy=0.2)
+    await rel.save(WORLD, "a_aria_kim", "p_observer_0417", warm)
+    await rel._register_edge(WORLD, "a_aria_kim", "p_observer_0417")
+
+    phases = ActorPhases(
+        [aria],
+        ai=_StubReflectAi(None),  # 통찰 없음 — 규칙 경로만
+        memory=WorkingMemory(redis),
+        emotion=EmotionAdapter(redis),
+        relationship=rel,
+        belief_ledger=BeliefLedger(redis),
+        reflection_interval=2,
+    )
+    head = await run_tick(conn, phases, CLOCK, WORLD, tick=1, head=0)
+    head = await run_tick(conn, phases, CLOCK, WORLD, tick=2, head=head)  # supporter 신념
+
+    # 근거가 무너진다 — 관계가 식었다 (직접 시드: 세계 시간의 압축)
+    await rel.save(WORLD, "a_aria_kim", "p_observer_0417", edge(trust=0.05, intimacy=0.02))
+    head = await run_tick(conn, phases, CLOCK, WORLD, tick=3, head=head)
+    await run_tick(conn, phases, CLOCK, WORLD, tick=4, head=head)  # 철회 reflection
+
+    events = [s.envelope for s in await read_stream(conn, WORLD, "actor", "a_aria_kim")]
+    beliefs = [e for e in events if e["type"] == "actor.belief.formed"]
+    assert len(beliefs) == 2  # 확립 → 철회, 같은 (kind, about) 자리
+    stood, retracted = beliefs
+    assert stood["payload"]["kind"] == retracted["payload"]["kind"] == "supporter"
+    assert stood["payload"]["about_id"] == retracted["payload"]["about_id"]
+    assert retracted["payload"]["confidence"] == RETRACTED_CONFIDENCE
+    assert "흐려졌다" in retracted["payload"]["statement"]
+    # 철회도 곱씹음이다 — 작업 기억에 남아 다음 결정을 물들인다
+    recent = await WorkingMemory(redis).recent(WORLD, "a_aria_kim")
+    assert any("흐려졌다" in m for m in recent)
 
 
 async def test_reflection_forms_belief_through_ticks(conn, redis, nc, ai_service):  # noqa: F811

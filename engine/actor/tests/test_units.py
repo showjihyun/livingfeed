@@ -87,6 +87,18 @@ def test_fallback_action_is_valid_and_personalized():
     assert action == fallback_action(aria, tick=42, trace_id="t-1")  # 결정적
 
 
+def test_routine_action_carries_arc_intention():
+    # 아크 있는 잠든 액터 — 일과 서술에 인생 방향이 스민다 (ADR-013/plan-08)
+    aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
+    arc = Arc(stage="prime", intention="정점에서 다음 이유를 찾는다")
+    action = routine_action(aria, tick=100, trace_id="t-1", arc=arc)
+    assert not list(Draft202012Validator(ACTION_SCHEMA).iter_errors(action))
+    assert "정점에서 다음 이유를 찾는다" in action["intent"]
+    # 아크 없으면 일과는 그대로다 (기존 서술 불변)
+    plain = routine_action(aria, tick=100, trace_id="t-1")
+    assert "정점에서" not in plain["intent"]
+
+
 def test_routine_action_narrates_period_by_needs():
     """Cold 일과 — 최강 욕구가 기조, 두 번째 욕구가 양념 (ADR-012 '일과 이벤트 생성')."""
     aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")

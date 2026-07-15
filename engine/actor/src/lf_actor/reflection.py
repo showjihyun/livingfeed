@@ -25,6 +25,16 @@ RESTATE_DELTA = 0.15
 #: LLM 통찰의 닫힌 분류 — 규칙 신념(supporter/threat/felt_support)과 자리가 겹치지 않는다
 INSIGHT_KINDS = ("self_image", "world_view", "person_insight")
 
+#: 철회된 신념에 남는 잔불 확신 — 재확립은 RESTATE_DELTA를 다시 넘어야 한다 (히스테리시스)
+RETRACTED_CONFIDENCE = 0.05
+
+#: 규칙 신념별 철회문 — 근거 상태가 무너졌을 때 같은 자리에 재발행된다 (신념 폐기)
+_RETRACTIONS = {
+    "supporter": "{name}이(가) 힘이 되는 사람이라 믿었지만 — 지금은 그 확신이 흐려졌다.",
+    "threat": "{name}을(를) 조심해야 한다고 여겼지만 — 그 경계가 조금씩 풀리고 있다.",
+    "felt_support": "{name}의 지지가 진심이라 여겼던 마음이, 시간과 함께 옅어졌다.",
+}
+
 
 @dataclass(frozen=True)
 class Belief:
@@ -104,6 +114,42 @@ def derive_beliefs(
     return beliefs
 
 
+def retract_stale(
+    published: dict[str, float],
+    derived: list[Belief],
+    *,
+    name_map: dict[str, str] | None = None,
+) -> list[Belief]:
+    """근거 상태가 무너진 규칙 신념의 철회 (ADR-008 신념 폐기).
+
+    대장(published: 'kind|about' → 확신)의 슬롯 중 이번 주기에 더 이상 도출되지
+    않는 규칙 신념을 저확신 철회문으로 재발행한다 — 같은 (kind, about) 자리
+    갱신이라 read 모델·Semantic이 그대로 덮어쓴다. 이미 잔불로 내려간 슬롯은
+    대장 임계(RESTATE_DELTA)가 재발행을 막는다. LLM 통찰은 상태 도출이 아니라
+    철회 대상이 아니다 — 반증은 새 통찰의 몫이다.
+    """
+    names = name_map or {}
+    alive = {f"{b.kind}|{b.about_id or '-'}" for b in derived}
+    retractions: list[Belief] = []
+    for slot in sorted(published):
+        kind, _, about = slot.partition("|")
+        if kind not in _RETRACTIONS or slot in alive:
+            continue
+        about_id = None if about == "-" else about
+        retractions.append(
+            Belief(
+                statement=_RETRACTIONS[kind].format(
+                    name=_display(names, about_id) if about_id else "그 사람"
+                )[:300],
+                kind=kind,
+                confidence=RETRACTED_CONFIDENCE,
+                about_id=about_id,
+                source_event_ids=[],
+            )
+        )
+    return retractions
+
+
 def insight_schema(known_ids: list[str]) -> dict[str, Any]:
     """LLM reflection 응답 스키마 — 통찰 하나. about은 아는 사람 안에서만 (닫힌 어휘)."""
     return {
@@ -173,6 +219,14 @@ class BeliefLedger:
             self._key(world_id, actor_id), field,
             json.dumps({"confidence": belief.confidence}, ensure_ascii=False),
         )
+
+    async def entries(self, world_id: str, actor_id: str) -> dict[str, float]:
+        """발행된 슬롯 전체 ('kind|about' → 확신) — 철회 후보 탐색용 (신념 폐기)."""
+        raw = await self._redis.hgetall(self._key(world_id, actor_id))
+        return {
+            (k.decode() if isinstance(k, bytes) else k): float(json.loads(v)["confidence"])
+            for k, v in raw.items()
+        }
 
 
 def belief_point_key(actor_id: str, belief: Belief) -> str:

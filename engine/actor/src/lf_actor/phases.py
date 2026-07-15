@@ -54,6 +54,7 @@ from lf_actor.reflection import (
     derive_beliefs,
     insight_schema,
     insight_to_belief,
+    retract_stale,
 )
 from lf_actor.relationship import PRINCIPAL as REL_PRINCIPAL
 from lf_actor.relationship import PendingRelEvent, RelationshipAdapter
@@ -349,7 +350,9 @@ class ActorPhases:
         # 케이던스). 잠든 기간의 생활 요약이라 스팸 없이 삶이 이어진다 — 비용 near-zero.
         for actor_id in due[Tier.COLD]:
             persona = self._personas[actor_id]
-            payload = routine_action(persona, ctx.tick, f"cold-{actor_id}-{ctx.tick}")
+            # 아크(있으면)가 일과의 결이 된다 — 잠든 삶도 방향이 있다 (ADR-013/plan-08)
+            arc = await self._arc_of(ctx.world_id, actor_id)
+            payload = routine_action(persona, ctx.tick, f"cold-{actor_id}-{ctx.tick}", arc=arc)
             payload = sanitize_target(payload, set(self._personas), actor_id)
             self._intents.append((actor_id, Tier.COLD.value, payload))
             decided["cold"] += 1
@@ -709,6 +712,9 @@ class ActorPhases:
                 if state is not None:
                     edges[other_id] = state
             beliefs = derive_beliefs(emotion_state, edges, name_map=names)
+            # 신념 폐기 — 근거 상태가 무너진 발행 슬롯은 철회문으로 갱신된다 (ADR-008)
+            published = await self._ledger.entries(ctx.world_id, actor_id)
+            beliefs += retract_stale(published, beliefs, name_map=names)
             insight = await self._llm_insight(ctx, actor_id, set(edges), names)
             if insight is not None:
                 beliefs = [*beliefs, insight]

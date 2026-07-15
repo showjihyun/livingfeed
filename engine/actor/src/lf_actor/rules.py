@@ -9,6 +9,7 @@ from __future__ import annotations
 import zlib
 from typing import Any
 
+from lf_actor.arc import Arc
 from lf_actor.persona import Persona
 
 #: 욕구 → 기본 행동 매핑 (docs/plan/06 욕구 모델의 최소 투영)
@@ -107,12 +108,15 @@ _ROUTINE_SEASONING = {
 }
 
 
-def routine_action(persona: Persona, tick: int, trace_id: str) -> dict[str, Any]:
+def routine_action(
+    persona: Persona, tick: int, trace_id: str, *, arc: Arc | None = None
+) -> dict[str, Any]:
     """Cold 일과 행동 — 잠든 기간의 생활 요약 (ADR-012 §Cold '일과 이벤트 생성').
 
     due tick(100 케이던스)마다 하나 — 기간을 서술하는 일과라 스팸이 아니다.
     최강 욕구가 일과의 기조를, 두 번째 욕구가 양념을, tick 회전이 표현을 고른다.
-    결정적 — 같은 (페르소나, tick)이면 같은 일과다. 목표 응고(record_action)를
+    아크(있으면)가 마지막 결을 준다 — 잠든 삶도 방향이 있다 (ADR-013/plan-08).
+    결정적 — 같은 (페르소나, tick, 아크)면 같은 일과다. 목표 응고(record_action)를
     타고 잠든 삶도 천천히 전진한다.
     """
     ranked = sorted(persona.needs_bias or {"security": 1.0}, key=lambda k: (
@@ -125,6 +129,8 @@ def routine_action(persona: Persona, tick: int, trace_id: str) -> dict[str, Any]
     secondary = next((n for n in ranked[1:] if n in _ROUTINE_SEASONING), None)
     if secondary is not None:
         intent += f". {_ROUTINE_SEASONING[secondary]}"
+    if arc is not None:
+        intent += f". 마음 한켠엔 늘 같은 방향이 있다 — {arc.intention}"
     return {
         "action_kind": kind,
         "intent": intent[:500],
