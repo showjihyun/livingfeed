@@ -18,6 +18,9 @@ from lf_relationship.engine import (
     consolidate_emotion as consolidate_emotion,
 )
 from lf_relationship.engine import (
+    consolidate_insight as consolidate_insight,
+)
+from lf_relationship.engine import (
     consume_pending as consume_pending,
 )
 from lf_relationship.engine import (

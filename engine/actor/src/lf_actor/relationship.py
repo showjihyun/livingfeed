@@ -17,6 +17,7 @@ from lf_relationship import (
     UpdateResult,
     apply_interaction,
     consolidate_emotion,
+    consolidate_insight,
     consume_pending,
     decay,
     default_params,
@@ -190,6 +191,20 @@ class RelationshipAdapter:
         state, created = await self._ensure_edge(world_id, from_id, to_id, cause)
         result = consolidate_emotion(state, emotion_type, intensity, params=self._params)
         return await self._apply(world_id, from_id, to_id, result, cause, created)
+
+    async def record_insight(
+        self, world_id: str, from_id: str, to_id: str, confidence: float
+    ) -> None:
+        """인물 통찰(person_insight)이 관계 비중에 스민다 (ADR-008 → ADR-016).
+
+        엣지가 없으면 만들지 않는다 — 생각만으로 관계가 시작되진 않는다.
+        발행 대상도 아니다 (조용한 내면 변화) — 상태 저장뿐이다.
+        """
+        state = await self.load(world_id, from_id, to_id)
+        if state is None:
+            return
+        result = consolidate_insight(state, confidence, params=self._params)
+        await self.save(world_id, from_id, to_id, result.state)
 
     async def decay_all(
         self, world_id: str, from_id: str, *, ticks: int = 1

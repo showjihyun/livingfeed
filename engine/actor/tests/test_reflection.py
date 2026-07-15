@@ -198,6 +198,34 @@ async def test_llm_insight_joins_rule_beliefs(conn, redis):
     assert any("곱씹은 생각" in m for m in recent)
 
 
+async def test_person_insight_raises_relationship_salience(conn, redis):
+    """인물 통찰이 관계 비중에 스민다 (ADR-008 → ADR-016) — 차원은 그대로,
+    그 사람이 마음에서 차지하는 자리(salience)만 자란다."""
+    aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
+    rel = RelationshipAdapter(redis)
+    seeded = edge(trust=0.1, intimacy=0.1)  # salience 0.2로 시작
+    await rel.save(WORLD, "a_aria_kim", "p_observer_0417", seeded)
+    await rel._register_edge(WORLD, "a_aria_kim", "p_observer_0417")
+
+    insight = {
+        "statement": "그는 내 기사를 정말로 읽는 사람이다",
+        "kind": "person_insight", "confidence": 0.8,
+        "about_actor_id": "p_observer_0417",
+    }
+    phases = ActorPhases(
+        [aria], ai=_StubReflectAi(insight),
+        memory=WorkingMemory(redis), emotion=EmotionAdapter(redis),
+        relationship=rel, belief_ledger=BeliefLedger(redis), reflection_interval=2,
+    )
+    await WorkingMemory(redis).add(WORLD, "a_aria_kim", "tick 1: 그와 오래 이야기했다")
+    head = await run_tick(conn, phases, CLOCK, WORLD, tick=1, head=0)
+    await run_tick(conn, phases, CLOCK, WORLD, tick=2, head=head)  # reflection tick
+
+    state = await rel.load(WORLD, "a_aria_kim", "p_observer_0417")
+    assert state.salience > 0.23  # 0.2 + 0.05×0.8 (감쇠분 미세 차감)
+    assert state.dimensions["trust"] == seeded.dimensions["trust"]  # 차원은 그대로
+
+
 async def test_belief_retracts_when_grounding_state_fades(conn, redis):
     """신념 폐기 — 근거 상태(관계)가 무너지면 같은 자리에 철회문이 재발행된다
     (ADR-008). read 모델·Semantic이 같은 슬롯을 덮어써 세계관이 함께 갱신된다."""

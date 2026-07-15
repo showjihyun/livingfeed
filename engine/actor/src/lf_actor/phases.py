@@ -722,6 +722,12 @@ class ActorPhases:
                 if not await self._ledger.changed(ctx.world_id, actor_id, belief):
                     continue
                 await self._store_belief(ctx, actor_id, belief)
+                # 인물 통찰은 관계 비중에 스민다 — 그 사람이 마음에서 자리를 차지한다
+                # (ADR-016, 엣지가 있을 때만 — 생각만으로 관계가 시작되진 않는다)
+                if belief.kind == "person_insight" and belief.about_id:
+                    await self._relationship.record_insight(
+                        ctx.world_id, actor_id, belief.about_id, belief.confidence
+                    )
 
     async def _llm_insight(
         self, ctx: TickContext, actor_id: str, counterparts: set[str], names: dict[str, str]

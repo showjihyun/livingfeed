@@ -4,6 +4,7 @@ from lf_relationship import (
     RelationshipState,
     apply_interaction,
     consolidate_emotion,
+    consolidate_insight,
     consume_pending,
     decay,
     default_params,
@@ -39,6 +40,27 @@ def test_repeated_anger_accumulates_resentment():
     recovered = consolidate_emotion(state, "gratitude", 0.9).state
     assert recovered.dimensions["trust"] > state.dimensions["trust"]
     assert recovered.dimensions["resentment"] == state.dimensions["resentment"]
+
+
+def test_insight_raises_salience_without_touching_dimensions():
+    """인물 통찰 응고 — 비중(salience)만 자란다, 차원은 그대로 (ADR-016/008).
+
+    생각만으로 마음(신뢰·원한)이 바뀌진 않지만, 그 사람이 삶에서 차지하는
+    자리는 는다. 발행 대상도 아니다 — 조용한 내면 변화다.
+    """
+    state = RelationshipState()
+    result = consolidate_insight(state, 0.9)
+    assert result.publish is False
+    assert result.state.salience == default_params()["insight_salience"] * 0.9
+    assert result.state.dimensions == state.dimensions  # 차원 불변
+    assert result.state.pending == state.pending  # 발행 누적에도 안 들어간다
+
+    # 상한 1.0 클램프 + 확신 0은 무변화
+    high = RelationshipState(
+        dimensions=state.dimensions, stage=state.stage, salience=0.99, pending=state.pending
+    )
+    assert consolidate_insight(high, 1.0).state.salience == 1.0
+    assert consolidate_insight(state, 0.0).state is state
 
 
 def test_publish_threshold_accumulates_until_crossed():

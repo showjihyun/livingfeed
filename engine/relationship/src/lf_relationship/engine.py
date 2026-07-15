@@ -99,6 +99,28 @@ def consolidate_emotion(
     )
 
 
+def consolidate_insight(
+    state: RelationshipState, confidence: float, *, params: dict[str, Any] | None = None
+) -> UpdateResult:
+    """인물 통찰 응고 — 누군가에 대해 굳어진 생각은 그 사람의 비중을 늘린다 (ADR-016).
+
+    감정 응고(규칙 2)의 자매: 통찰은 차원(신뢰·원한)을 직접 바꾸지 않는다 —
+    생각만으로 마음이 바뀌진 않는다. 대신 salience가 자란다: 그 사람이
+    내 삶에서 차지하는 자리. 발행 대상이 아니다 (조용한 내면 변화).
+    """
+    params = params or default_params()
+    delta = float(params.get("insight_salience", 0.0)) * confidence
+    if delta <= 0.0:
+        return UpdateResult(state=state, publish=False, reason="")
+    new_state = RelationshipState(
+        dimensions=state.dimensions,
+        stage=state.stage,
+        salience=min(1.0, state.salience + delta),
+        pending=state.pending,
+    )
+    return UpdateResult(state=new_state, publish=False, reason="인물 통찰 — 비중이 는다")
+
+
 def decay(
     state: RelationshipState, ticks: int, *, params: dict[str, Any] | None = None
 ) -> RelationshipState:

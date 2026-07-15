@@ -38,6 +38,10 @@ decay_per_tick:
   salience: 0.0006
   resentment: 0.000002  # 세계 1일(1440 tick)에 0.003 — 잊히지만 사라지지 않는다
 
+# 인물 통찰(person_insight, ADR-008 reflection) 응고: salience += 계수 × 확신.
+# 차원은 안 바뀐다 — 생각만으로 마음이 바뀌진 않지만, 그 사람의 비중은 는다
+insight_salience: 0.05
+
 # 발행 임계 (ADR-016 갱신 규칙 5): 직전 발행 이후 누적 |델타| L1 합이
 # 이 값을 넘을 때만 relationship.state.changed 발행
 publish_threshold: 0.08
