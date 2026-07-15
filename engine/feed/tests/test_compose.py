@@ -6,10 +6,12 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 from lf_feed.compose import (
+    build_arc_post_event,
     build_goal_post_event,
     build_post_event,
     derive_post_id,
     evaluate,
+    evaluate_arc_transition,
     evaluate_goal_achievement,
 )
 from lf_feed.scoring import RarityTracker, ScoringConfig
@@ -113,6 +115,45 @@ def test_goal_achievement_always_promotes_as_world_news():
     assert event.payload["source_event_type"] == "actor.goal.achieved"
     # 사슬 승계 — 목표를 이룬 행동의 correlation을 잇는다
     assert event.correlation_id == GOAL_ACHIEVED["correlation_id"]
+
+
+ARC_PLANNED = json.loads(
+    (
+        Path(__file__).resolve().parents[3]
+        / "packages" / "schemas" / "samples" / "system.director.arc_planned.001.json"
+    ).read_text(encoding="utf-8")
+)
+
+
+def test_arc_transition_promotes_as_world_news():
+    cfg = ScoringConfig()
+    drama, score = evaluate_arc_transition(cfg)
+    assert score >= cfg.threshold  # 장 전환은 언제나 피드감이다 (희소 + 부스트)
+    event = build_arc_post_event(
+        ARC_PLANNED, previous_stage="newcomer", drama=drama, score=score,
+        actor_names={"a_minji_kim": "김민지"},
+    )
+    schema = registry.payload_schema("feed.post.published")
+    assert list(Draft202012Validator(schema).iter_errors(event.payload)) == []
+    assert event.payload["visibility"] == "world"
+    assert event.payload["title"] == "김민지, 인생의 장이 넘어가다"
+    # 이전 장과 새 장이 한글 라벨로 — intention이 서사의 방향을 준다
+    assert "사회 초년기" in event.payload["body"] and "정착·방황기" in event.payload["body"]
+    assert ARC_PLANNED["payload"]["intention"] in event.payload["body"]
+    assert event.payload["tags"] == ["arc_transition", "settling"]
+    assert event.payload["source_event_type"] == "system.director.arc_planned"
+    assert event.actor_id == "a_minji_kim"  # 장이 넘어간 건 그 인물의 삶이다
+    assert event.correlation_id == ARC_PLANNED["correlation_id"]  # Director 사슬 승계
+
+
+def test_first_arc_opens_the_story():
+    drama, score = evaluate_arc_transition(ScoringConfig())
+    event = build_arc_post_event(
+        ARC_PLANNED, previous_stage=None, drama=drama, score=score,
+        actor_names={"a_minji_kim": "김민지"},
+    )
+    assert "이야기의 첫 장이 열리다" in event.payload["title"]
+    assert "정착·방황기" in event.payload["body"]
 
 
 def test_evaluate_passes_interpersonal_speak_but_filters_spam():

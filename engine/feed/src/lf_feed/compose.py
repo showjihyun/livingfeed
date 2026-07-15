@@ -138,6 +138,76 @@ def build_post_event(
 #: 목표 완주는 서사의 큰 마디 — 대인 갈등에 준하는 드라마 (docs/plan/04 사슬의 끝)
 GOAL_ACHIEVED_DRAMA = 0.8
 
+#: 인생의 장이 넘어가는 순간 — 목표 완주와 같은 급의 서사 마디 (plan/08 Life Journey)
+ARC_TRANSITION_DRAMA = 0.8
+
+#: 인생 단계 → 피드 표기 라벨 (plan/08 닫힌 어휘 — 미지 코드는 코드 그대로)
+_ARC_STAGE_LABELS: dict[str, str] = {
+    "student": "학생기",
+    "newcomer": "사회 초년기",
+    "settling": "정착·방황기",
+    "prime": "전성기·침체기",
+    "elder": "원로기",
+}
+
+
+def evaluate_arc_transition(cfg: ScoringConfig) -> tuple[float, float]:
+    """장 전환의 (drama, worthiness) — 희소한 마디 + 편집 부스트로 항상 승격."""
+    score = worthiness(ARC_TRANSITION_DRAMA, 0.0, 1.0, 1.0, cfg)
+    return ARC_TRANSITION_DRAMA, score
+
+
+def build_arc_post_event(
+    envelope: dict[str, Any],
+    *,
+    previous_stage: str | None,
+    drama: float,
+    score: float,
+    actor_names: dict[str, str],
+) -> NewEvent:
+    """system.director.arc_planned(장 전환분만) → feed.post.published (ADR-014).
+
+    아크 자체는 제어 신호라 피드가 아니다 — 승격되는 건 '장이 넘어가는 순간'뿐이다
+    (같은 stage 재계획은 호출자가 거른다). 첫 아크는 이야기의 첫 장이 열린 것이다.
+    """
+    payload = envelope["payload"]
+    target_id = payload["target_actor_id"]
+    author = actor_names.get(target_id, target_id)
+    stage = _ARC_STAGE_LABELS.get(payload["stage"], payload["stage"])
+    if previous_stage is None:
+        title = f"{author}, 이야기의 첫 장이 열리다"
+        body = f"{author}의 삶이 '{stage}'에 접어들었다. {payload['intention']}"
+    else:
+        prev = _ARC_STAGE_LABELS.get(previous_stage, previous_stage)
+        title = f"{author}, 인생의 장이 넘어가다"
+        body = f"'{prev}'의 장이 닫히고 '{stage}'의 장이 열렸다. {payload['intention']}"
+    post_id = derive_post_id(envelope["event_id"])
+    return NewEvent(
+        world_id=envelope["world_id"],
+        stream="feed",
+        stream_key=post_id,
+        type=FEED_POST_TYPE,
+        tick=envelope["tick"],
+        actor_id=target_id,  # 장이 넘어간 건 그 인물의 삶이다
+        causation_id=envelope["event_id"],
+        correlation_id=envelope["correlation_id"],  # Director 계획의 사슬을 잇는다
+        event_id=post_id,
+        payload={
+            "visibility": "world",
+            "title": title[:200],
+            "body": body[:2000],
+            "narration_kind": "template",
+            "participants": [target_id],
+            "community_id": None,
+            "location_id": None,
+            "drama_score": round(drama, 4),
+            "worthiness": round(score, 4),
+            "source_event_type": envelope["type"],
+            "tags": ["arc_transition", payload["stage"]],
+            "media": [],
+        },
+    )
+
 
 def evaluate_goal_achievement(
     envelope: dict[str, Any], cfg: ScoringConfig

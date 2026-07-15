@@ -16,15 +16,17 @@ from typing import Any
 import nats
 import nats.errors
 from lf_dispatcher.subjects import dlq_subject
-from lf_eventstore import ConcurrencyConflict, ValidationFailed, append
+from lf_eventstore import ConcurrencyConflict, ValidationFailed, append, read_stream
 from psycopg import AsyncConnection
 
 from lf_feed.compose import (
     PRINCIPAL,
+    build_arc_post_event,
     build_goal_post_event,
     build_incident_post_event,
     build_post_event,
     evaluate,
+    evaluate_arc_transition,
     evaluate_goal_achievement,
     evaluate_incident,
     load_actor_names,
@@ -37,6 +39,25 @@ logger = logging.getLogger("lf.feed.composer")
 SOURCE_EVENT_TYPE = "actor.action.performed"
 INCIDENT_EVENT_TYPE = "world.incident.occurred"
 GOAL_ACHIEVED_TYPE = "actor.goal.achieved"
+ARC_EVENT_TYPE = "system.director.arc_planned"
+
+
+async def previous_arc_stage(
+    conn: AsyncConnection, world_id: str, actor_id: str, before_event_id: str
+) -> str | None:
+    """이 계획 이전, 같은 인물의 마지막 아크 stage — 없으면 첫 아크다.
+
+    이벤트 스토어의 arc 스트림이 원천이라 재시작·재전달에도 결정적이다
+    (아크는 세계 하루 1건의 저빈도라 스트림 전체를 읽어도 가볍다).
+    """
+    stored = await read_stream(conn, world_id, "system", "arc")
+    stages = [
+        s.envelope["payload"]["stage"]
+        for s in stored
+        if s.envelope["payload"].get("target_actor_id") == actor_id
+        and s.envelope["event_id"] < before_event_id
+    ]
+    return stages[-1] if stages else None
 
 
 class FeedComposer:
@@ -55,6 +76,19 @@ class FeedComposer:
             # Director boost 항이 실값(1.0)인 유일한 소스 (ADR-013/014)
             drama, score = evaluate_incident(envelope, self._rarity, self._cfg.scoring)
             event = build_incident_post_event(envelope, drama=drama, score=score)
+        elif envelope["type"] == ARC_EVENT_TYPE:
+            # 장이 넘어가는 순간만 서사다 — 같은 stage 재계획은 방향 조정일 뿐 (plan/08)
+            payload = envelope["payload"]
+            previous = await previous_arc_stage(
+                conn, envelope["world_id"], payload["target_actor_id"], envelope["event_id"]
+            )
+            if previous == payload["stage"]:
+                return None
+            drama, score = evaluate_arc_transition(self._cfg.scoring)
+            event = build_arc_post_event(
+                envelope, previous_stage=previous, drama=drama, score=score,
+                actor_names=self._names,
+            )
         elif envelope["type"] == GOAL_ACHIEVED_TYPE:
             # 목표 완주 — 인물의 마디, 세계 뉴스로 승격 (ADR-012/014)
             drama, score = evaluate_goal_achievement(envelope, self._cfg.scoring)
@@ -120,7 +154,8 @@ class FeedComposer:
             nc = await nats.connect(cfg.nats_url)
             try:
                 js = nc.jetstream()
-                # 편집 소스 3종: 액터 행동·목표 완주(LF_ACTOR) + 세계 사건(LF_WORLD)
+                # 편집 소스 4종: 액터 행동·목표 완주(LF_ACTOR) + 세계 사건(LF_WORLD)
+                # + 인생 아크 계획(LF_SYS — 장 전환분만 승격)
                 subs = [
                     await js.pull_subscribe(
                         f"lf.{cfg.env}.*.{SOURCE_EVENT_TYPE}",
@@ -134,9 +169,14 @@ class FeedComposer:
                         f"lf.{cfg.env}.*.{GOAL_ACHIEVED_TYPE}",
                         durable=f"{cfg.durable}-goal", stream=cfg.source_stream,
                     ),
+                    await js.pull_subscribe(
+                        f"lf.{cfg.env}.*.{ARC_EVENT_TYPE}",
+                        durable=f"{cfg.durable}-arc", stream="LF_SYS",
+                    ),
                 ]
                 logger.info(
-                    "feed composer 대기 — durable=%s threshold=%.2f (소스: 행동+세계사건+목표완주)",
+                    "feed composer 대기 — durable=%s threshold=%.2f "
+                    "(소스: 행동+세계사건+목표완주+아크전환)",
                     cfg.durable, cfg.scoring.threshold,
                 )
                 while not stop.is_set():
