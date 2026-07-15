@@ -25,8 +25,12 @@ from psycopg import AsyncConnection
 from lf_director.client import DirectorAiClient
 from lf_director.config import Config
 from lf_director.planner import (
+    ARC_SYSTEM,
     DIRECTOR_SYSTEM,
     SEASON_SYSTEM,
+    arc_from_plan,
+    arc_schema,
+    build_arc_user,
     build_plan_user,
     build_season_user,
     intervention_from_plan,
@@ -35,6 +39,7 @@ from lf_director.planner import (
     season_schema,
 )
 from lf_director.rules import (
+    ARC_TOOL,
     SEASON_TOOL,
     SEASON_TYPE,
     BudgetState,
@@ -198,6 +203,32 @@ class Director:
         )
         return True
 
+    async def plan_arcs(self, conn: AsyncConnection, snapshot: Any) -> bool:
+        """저빈도 인생 아크 계획 — 정체된 인물 하나에게 인생 단계+방향을 준다 (ADR-013,
+        docs/plan/08). 시즌 계획과 같은 저빈도 케이던스, 드라마 예산과 분리.
+
+        로스터(read.actors 대신 personas 이름)가 있어야 한다. LLM이 대상·단계·방향을
+        고르면 arc_planned를 적재한다 — Actor Runtime이 소비해 아크를 저장·주입한다.
+        """
+        if self._ai is None or not self._names:
+            return False
+        roster = sorted(self._names.items())
+        schema = arc_schema([aid for aid, _ in roster])
+        user = build_arc_user(snapshot, roster)
+        output, model = await self._ai.plan_intervention(
+            ARC_SYSTEM, user, schema, world_id=self._cfg.world_id, tick=snapshot.tick,
+        )
+        if output is None:
+            return False
+        intervention = arc_from_plan(output, snapshot, set(self._names), model=model)
+        if intervention is None:
+            return False
+        # 아크 계획도 드라마 예산과 무관 — 소비 없이 감사·산출만 적재
+        await self._append_intervention(
+            conn, snapshot, intervention, self._budget.remaining(snapshot.tick, self._params)
+        )
+        return True
+
     def _restore_budget(self, envelope: dict[str, Any]) -> None:
         """자기 감사 이벤트 재소비 → 예산 복원 (자기가 방금 적재한 것은 중복 방지).
 
@@ -206,8 +237,8 @@ class Director:
         """
         if envelope["event_id"] in self._seen_audits:
             return
-        # 시즌 계획은 드라마 예산과 무관하다 — 예산으로 세지 않는다 (ADR-013)
-        if envelope["payload"].get("tool") == SEASON_TOOL:
+        # 시즌·아크 계획은 저빈도 구조적 결정 — 드라마 예산과 무관하다 (ADR-013)
+        if envelope["payload"].get("tool") in (SEASON_TOOL, ARC_TOOL):
             return
         self._budget.record(
             envelope["tick"], envelope["payload"].get("target_correlation_id")
@@ -270,12 +301,13 @@ class Director:
                                     self._window.observe(envelope)
                                 elif envelope["type"] == "system.tick.completed":
                                     snapshot = self._window.close_tick(envelope["tick"])
-                                    # 시즌 계획은 저빈도(세계 하루 1회) — 드라마 게이트와
-                                    # 분리된 케이던스로 (ADR-013). 예산도 따로다.
+                                    # 시즌·아크 계획은 저빈도(세계 하루 1회) — 드라마
+                                    # 게이트와 분리된 케이던스로 (ADR-013). 예산도 따로다.
                                     day = envelope["tick"] // cfg.season_interval_ticks
                                     if day > self._last_season_day:
                                         self._last_season_day = day
                                         await self.plan_season(conn, snapshot)
+                                        await self.plan_arcs(conn, snapshot)
                                     await self.evaluate(conn, snapshot, graph)
                                 elif envelope["type"] == AUDIT_TYPE:
                                     self._restore_budget(envelope)

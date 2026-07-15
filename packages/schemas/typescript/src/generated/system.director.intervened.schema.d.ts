@@ -12,7 +12,7 @@ export interface SystemDirectorIntervened {
   /**
    * 사용한 개입 도구 — 화이트리스트가 전부다 (ADR-013)
    */
-  tool: "inject_incident" | "nudge_perception" | "promote_actor" | "set_season_theme" | "boost_feed";
+  tool: "inject_incident" | "nudge_perception" | "promote_actor" | "set_season_theme" | "boost_feed" | "plan_arc";
   /**
    * 발화 근거 요약 — 어떤 신호가 임계를 넘었나
    */

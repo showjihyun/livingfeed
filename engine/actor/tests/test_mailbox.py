@@ -7,6 +7,7 @@ rule 프로바이더는 converse를 지원하지 않으므로 답장은 규칙 �
 
 from datetime import UTC, datetime
 
+from lf_actor.arc import Arc, ArcStore
 from lf_actor.client import AiRuntimeClient
 from lf_actor.mailbox import Mailbox
 from lf_actor.memory import WorkingMemory
@@ -42,13 +43,16 @@ def player_envelope(event_type: str, payload_extra: dict) -> dict:
     }
 
 
-def make_phases(nc, redis, env: str, mailbox: Mailbox) -> ActorPhases:  # noqa: F811
+def make_phases(
+    nc, redis, env: str, mailbox: Mailbox, *, arc: ArcStore | None = None  # noqa: F811
+) -> ActorPhases:
     aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
     return ActorPhases(
         [aria],
         ai=AiRuntimeClient(nc, env, timeout_s=5),
         memory=WorkingMemory(redis),
         mailbox=mailbox,
+        arc=arc,
     )
 
 
@@ -123,6 +127,31 @@ async def test_director_spotlight_promotes_lod_without_entering_memory(
     # 제어 신호 자체는 작업 기억에 남지 않는다 (지각한 것이 아니다)
     recent = await WorkingMemory(redis).recent(WORLD, "a_aria_kim")
     assert not any("spotlight" in m.lower() for m in recent)
+
+
+async def test_director_arc_planned_stores_arc_without_entering_memory(
+    conn, redis, nc, ai_service  # noqa: F811
+):
+    """Director의 인생 아크(plan_arc)는 ArcStore에만 남는다 — 지각이 아니라 제어라
+    기억에 안 남고 LOD도 건드리지 않는다. 다음 decide부터 배경으로 스민다 (ADR-013)."""
+    mailbox = Mailbox(redis)
+    phases = make_phases(nc, redis, ai_service, mailbox, arc=ArcStore(redis))
+    phases._lods["a_aria_kim"] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
+    plan = player_envelope(
+        "system.director.arc_planned",
+        {"stage": "newcomer", "intention": "이 도시에서 자기 자리를 만들기 시작한다"},
+    )
+    await mailbox.push(WORLD, "a_aria_kim", plan)
+
+    await run_tick(conn, phases, CLOCK, WORLD, tick=7, head=0)
+    # 아크는 저장됐다 — 다음 decide 컨텍스트의 최상위 프레임이 된다
+    assert await ArcStore(redis).get(WORLD, "a_aria_kim") == Arc(
+        stage="newcomer", intention="이 도시에서 자기 자리를 만들기 시작한다"
+    )
+    assert phases._lods["a_aria_kim"].tier is Tier.COLD  # 아크는 승격 신호가 아니다
+    # 제어 신호 자체는 작업 기억에 남지 않는다 (지각한 것이 아니다)
+    recent = await WorkingMemory(redis).recent(WORLD, "a_aria_kim")
+    assert not any("아크" in m or "newcomer" in m for m in recent)
 
 
 async def test_reaction_is_perceived_but_not_replied(conn, redis, nc, ai_service):  # noqa: F811

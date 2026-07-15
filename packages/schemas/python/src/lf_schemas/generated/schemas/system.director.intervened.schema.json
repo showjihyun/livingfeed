@@ -10,7 +10,7 @@
       "description": "사용한 개입 도구 — 화이트리스트가 전부다 (ADR-013)",
       "enum": [
         "inject_incident", "nudge_perception", "promote_actor",
-        "set_season_theme", "boost_feed"
+        "set_season_theme", "boost_feed", "plan_arc"
       ]
     },
     "reason": {

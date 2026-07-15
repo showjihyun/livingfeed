@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 from jsonschema import Draft202012Validator
+from lf_actor.arc import Arc
 from lf_actor.context import WorldContext, build
 from lf_actor.persona import load_persona, load_personas
 from lf_actor.phases import lod_after_perception, sanitize_target
@@ -42,6 +43,30 @@ def test_context_bundle_is_deterministic_and_ordered():
     assert "김아리" in a.system
     assert a.user.index("## 작업 기억") < a.user.index("## 세계 상황") < a.user.index("## 임무")
     assert "취재 노트" in a.user
+
+
+def test_context_arc_section_frames_decision_first():
+    # 인생 아크(있으면)가 최상위 프레임 — 다른 어떤 변동 섹션보다 앞에 온다 (ADR-013)
+    aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
+    arc = Arc(stage="newcomer", intention="이 도시에서 자기 자리를 만들기 시작한다")
+    bundle = build(aria, ["tick 6: 나는 work — 취재"], WORLD, trace_id="t", arc=arc)
+    assert bundle.user.index("## 인생 아크") < bundle.user.index("## 떠오르는 기억")
+    assert "사회 초년기" in bundle.user  # stage 코드가 아니라 한글 라벨로 말한다
+    assert "자기 자리를 만들기 시작한다" in bundle.user
+
+
+def test_context_without_arc_omits_section():
+    # 아직 아크를 받지 않은 액터는 그저 일상을 산다 — 섹션 자체가 없다
+    aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
+    bundle = build(aria, [], WORLD, trace_id="t")
+    assert "## 인생 아크" not in bundle.user
+
+
+def test_context_unknown_stage_falls_back_to_code():
+    # 닫힌 어휘 밖 단계(미래 확장)라도 컨텍스트 조립은 깨지지 않는다
+    aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
+    bundle = build(aria, [], WORLD, trace_id="t", arc=Arc(stage="wanderer", intention="떠돈다"))
+    assert "wanderer에 있다" in bundle.user
 
 
 def test_context_working_memory_budget_truncates_oldest():

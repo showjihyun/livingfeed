@@ -33,6 +33,12 @@ SPOTLIGHT_STREAM_KEY = "spotlight"
 SEASON_TOOL = "set_season_theme"
 SEASON_TYPE = "system.director.season_set"
 SEASON_STREAM_KEY = "season"
+ARC_TOOL = "plan_arc"
+ARC_TYPE = "system.director.arc_planned"
+ARC_STREAM_KEY = "arc"
+
+#: 인생 단계 (docs/plan/08 Life Journey) — 아크 계획의 닫힌 어휘
+LIFE_STAGES = ("student", "newcomer", "settling", "prime", "elder")
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/system.director.arc_planned.schema.json",
+  "title": "SystemDirectorArcPlanned",
+  "description": "Director의 인생 아크 계획 산출 (ADR-013, docs/plan/08 Life Journey). 저빈도 케이던스로 특정 액터에게 인생 단계와 이번 시즌의 방향을 준다 — 개별 사건이 아니라 장기 서사의 뼈대다. 세계 사건이 아니라 시뮬레이션 제어 신호라 액터는 이걸 '지각'하지 않는다: 다음 결정을 물들이는 배경 프레임으로 스민다. 선택은 언제나 액터의 몫이다. Actor Runtime이 소비해 아크를 저장하고 컨텍스트에 주입한다.",
+  "type": "object",
+  "properties": {
+    "target_actor_id": {
+      "type": "string",
+      "description": "이 아크를 받는 액터 (Actor Runtime의 ArcStore 대상)",
+      "pattern": "^[a-z0-9_]+$"
+    },
+    "stage": {
+      "type": "string",
+      "description": "인생 단계 (student, newcomer, settling, prime, elder — docs/plan/08)",
+      "pattern": "^[a-z_]+$"
+    },
+    "intention": {
+      "type": "string",
+      "description": "이번 시즌 이 인물의 인생 방향 한 줄 — 결정을 물들이는 배경 프레임",
+      "minLength": 1,
+      "maxLength": 300
+    }
+  },
+  "required": ["target_actor_id", "stage", "intention"],
+  "additionalProperties": false
+}

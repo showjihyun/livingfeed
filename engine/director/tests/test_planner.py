@@ -5,6 +5,9 @@ LLM은 행동 반경을 넓힐 수 없다: 화이트리스트 밖 도구·사건
 """
 
 from lf_director.planner import (
+    arc_from_plan,
+    arc_schema,
+    build_arc_user,
     build_plan_user,
     build_season_user,
     candidate_actor_ids,
@@ -13,6 +16,7 @@ from lf_director.planner import (
     season_from_plan,
     season_schema,
 )
+from lf_director.rules import LIFE_STAGES
 from lf_director.signals import Snapshot
 
 INCIDENTS = [
@@ -298,6 +302,57 @@ def test_build_season_user_shows_themes_and_current():
     assert "calm" in user and "turmoil" in user  # 고를 수 있는 테마
     assert "calm" in user  # 현재 테마도 표시
     assert str(SNAP.drama_ma) in user
+
+
+# --- plan_arc 도구 (저빈도 인생 아크) ------------------------------------------
+
+ROSTER = [("a_minji", "김민지"), ("a_seongho", "박성호")]
+ARC_PLAN = {
+    "target_actor_id": "a_minji",
+    "stage": "newcomer",
+    "intention": "이 도시에서 자기 자리를 만들기 시작한다",
+    "rationale": "인생이 가장 정체된 인물이다",
+}
+
+
+def test_arc_schema_bounds_actor_and_stage():
+    schema = arc_schema(["a_minji", "a_seongho"])
+    assert schema["properties"]["target_actor_id"]["enum"] == ["a_minji", "a_seongho"]
+    assert schema["properties"]["stage"]["enum"] == list(LIFE_STAGES)  # 닫힌 어휘
+    assert set(schema["required"]) == {"target_actor_id", "stage", "intention", "rationale"}
+    assert schema["additionalProperties"] is False
+
+
+def test_valid_arc_is_control_signal_on_system_stream():
+    result = arc_from_plan(ARC_PLAN, SNAP, {"a_minji", "a_seongho"}, model="qwen3:8b")
+    assert result is not None
+    assert result.tool == "plan_arc"
+    assert result.stream == "system"  # 세계 사건이 아니라 제어 신호
+    assert result.event_type == "system.director.arc_planned"
+    assert result.stream_key == "arc"
+    assert result.payload == {
+        "target_actor_id": "a_minji", "stage": "newcomer",
+        "intention": "이 도시에서 자기 자리를 만들기 시작한다",
+    }
+    assert result.reason == ARC_PLAN["rationale"]
+    assert result.signals["selector"] == "llm"
+    assert result.signals["model"] == "qwen3:8b"
+
+
+def test_arc_outside_roster_or_stages_returns_none():
+    # 없는 인물의 아크는 그릴 수 없다 — 환각 대상 차단 (ADR-014 §대상 폴리시)
+    assert arc_from_plan({**ARC_PLAN, "target_actor_id": "a_ghost"}, SNAP, {"a_minji"}) is None
+    # 닫힌 어휘 밖 단계도 거부
+    assert arc_from_plan({**ARC_PLAN, "stage": "immortal"}, SNAP, {"a_minji"}) is None
+    # 빈 intention은 방향이 아니다
+    assert arc_from_plan({**ARC_PLAN, "intention": "   "}, SNAP, {"a_minji"}) is None
+
+
+def test_build_arc_user_grounds_roster_and_stage_labels():
+    user = build_arc_user(SNAP, ROSTER)
+    assert "김민지(a_minji)" in user and "박성호(a_seongho)" in user  # 이름 그라운딩
+    assert "newcomer(사회 초년기)" in user  # 단계는 코드+한글 라벨로 제시
+    assert str(SNAP.quiet_ticks) in user
 
 
 def test_build_plan_user_grounds_names_kinds_and_drama_tools_only():

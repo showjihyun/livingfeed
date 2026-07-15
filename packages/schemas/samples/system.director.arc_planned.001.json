@@ -1,0 +1,17 @@
+{
+  "event_id": "01JZK7Q3W0000000000000000V",
+  "stream": "system",
+  "type": "system.director.arc_planned",
+  "schema_version": 1,
+  "world_id": "w_main",
+  "actor_id": null,
+  "tick": 360,
+  "occurred_at": "2026-07-12T00:00:00Z",
+  "causation_id": "01JZK7Q3W0000000000000000Q",
+  "correlation_id": "01JZK7Q3W0000000000000000V",
+  "payload": {
+    "target_actor_id": "a_minji_kim",
+    "stage": "settling",
+    "intention": "안정된 자리를 갈망하며, 오래 미뤄온 이직을 이 시즌 안에 결단하려 한다"
+  }
+}

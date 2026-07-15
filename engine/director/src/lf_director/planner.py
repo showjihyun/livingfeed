@@ -20,9 +20,13 @@ from __future__ import annotations
 from typing import Any
 
 from lf_director.rules import (
+    ARC_STREAM_KEY,
+    ARC_TOOL,
+    ARC_TYPE,
     INCIDENT_STREAM_KEY,
     INCIDENT_TOOL,
     INCIDENT_TYPE,
+    LIFE_STAGES,
     NUDGE_TOOL,
     OBSERVATION_STREAM_KEY,
     OBSERVATION_TYPE,
@@ -93,6 +97,21 @@ def season_schema(theme_names: list[str]) -> dict[str, Any]:
     }
 
 
+def arc_schema(actor_ids: list[str]) -> dict[str, Any]:
+    """인생 아크 계획(저빈도) 응답 스키마 — 로스터 안의 한 액터에게 단계+방향을 준다."""
+    return {
+        "type": "object",
+        "properties": {
+            "target_actor_id": {"type": "string", "enum": actor_ids},
+            "stage": {"type": "string", "enum": list(LIFE_STAGES)},
+            "intention": {"type": "string", "minLength": 1, "maxLength": 300},
+            "rationale": {"type": "string", "minLength": 1, "maxLength": 300},
+        },
+        "required": ["target_actor_id", "stage", "intention", "rationale"],
+        "additionalProperties": False,
+    }
+
+
 DIRECTOR_SYSTEM = (
     "너는 살아있는 세계의 '연출가(Director)'다. 규칙: 너는 액터를 조종하지 않는다. "
     "침체된 서사에 밀도를 되돌리되 직접 결정을 쓰지 않고 간접적으로만 개입한다 — "
@@ -111,6 +130,42 @@ SEASON_SYSTEM = (
     "최근 세계의 긴장과 분위기를 보고, 앞으로 한동안 세계가 얼마나 격동할지 "
     "제시된 시즌 테마 중 하나로 정한다. 개별 인물을 조종하지 않는다 — 페이싱만 정한다."
 )
+
+
+#: 인생 단계 → 프롬프트용 한글 라벨 (docs/plan/08 Life Journey)
+STAGE_LABELS = {
+    "student": "학생기",
+    "newcomer": "사회 초년기",
+    "settling": "정착·방황기",
+    "prime": "전성기·침체기",
+    "elder": "원로기",
+}
+
+ARC_SYSTEM = (
+    "너는 살아있는 세계의 '연출가(Director)'다. 지금은 개별 사건이 아니라 한 인물의 "
+    "'인생 아크'를 그린다 — 장기 서사의 뼈대다(저빈도 결정). 인생이 정체된 인물 하나를 "
+    "골라, 지금 그의 인생 단계와 이번 시즌 향할 방향을 정한다. 이것은 대본이 아니라 배경 "
+    "프레임일 뿐이다 — 무엇을 할지 명령하지 않는다. 선택은 언제나 그 인물의 몫이다."
+)
+
+
+def build_arc_user(
+    snapshot: Snapshot, roster: list[tuple[str, str]]
+) -> str:
+    """인생 아크 계획 프롬프트 — 액터 로스터 + 최근 세계 상태. 로스터는 (id, 이름)."""
+    stages = ", ".join(f"{code}({label})" for code, label in STAGE_LABELS.items())
+    people = ", ".join(f"{name}({aid})" for aid, name in roster) or "(없음)"
+    return "\n".join([
+        "## 세계 상황",
+        f"최근 drama 이동평균 {snapshot.drama_ma}, {snapshot.quiet_ticks} tick째 조용하다.",
+        "",
+        f"## 인물 로스터 (이 중 한 명을 고른다): {people}",
+        f"## 인생 단계: {stages}",
+        "",
+        "인생이 지금 가장 정체돼 보이는 인물 하나를 target_actor_id로 고르고, 그의 stage와 "
+        "intention(이번 시즌 그의 인생이 향할 방향 한 줄)을 정하라. rationale은 왜 이 인물·이 "
+        "방향인지 한 줄.",
+    ])
 
 
 def _name(actor_id: str, names: dict[str, str]) -> str:
@@ -246,6 +301,43 @@ def season_from_plan(
     }
     rationale = (plan.get("rationale") or "").strip()[:300] or "시즌 계획"
     return _season_intervention(plan, themes, rationale, signals)
+
+
+def arc_from_plan(
+    plan: dict[str, Any],
+    snapshot: Snapshot,
+    roster_ids: set[str],
+    *,
+    model: str | None = None,
+) -> Intervention | None:
+    """검증된 인생 아크 계획 응답 → arc Intervention (저빈도, 드라마와 분리).
+
+    대상은 로스터 안에서만, 단계는 닫힌 어휘 안에서만(schema enum). 무효면 None.
+    """
+    target = plan.get("target_actor_id")
+    if target not in roster_ids:
+        return None  # 없는 인물의 아크는 그릴 수 없다
+    stage = plan.get("stage")
+    if stage not in LIFE_STAGES:
+        return None
+    intention = (plan.get("intention") or "").strip()[:300]
+    if not intention:
+        return None
+    rationale = (plan.get("rationale") or "").strip()[:300] or "인생 아크 계획"
+    return Intervention(
+        tool=ARC_TOOL,
+        stream=SYSTEM_STREAM,  # 세계 사건이 아니라 시뮬레이션 제어 신호다
+        event_type=ARC_TYPE,
+        stream_key=ARC_STREAM_KEY,
+        payload={"target_actor_id": target, "stage": stage, "intention": intention},
+        reason=rationale,
+        signals={
+            "drama_ma": snapshot.drama_ma,
+            "quiet_ticks": snapshot.quiet_ticks,
+            "selector": "llm",
+            "model": model,
+        },
+    )
 
 
 def _incident_intervention(

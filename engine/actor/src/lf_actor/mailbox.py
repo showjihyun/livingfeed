@@ -77,10 +77,11 @@ async def run_mailbox_router(
     """
     stop = stop or asyncio.Event()
     js = nc.jetstream()
-    # 지각/제어 소스 4종: 플레이어 개입(대상 1명) + 세계 사건(영향권 전원) +
-    # Director의 사적 관측 nudge(대상 1명) + Director의 LOD 승격 spotlight(대상 1명,
-    # ADR-013). 관측·spotlight은 공개 사건이 아니라 target_actor_id 한 명에게만 간다.
-    # spotlight은 지각이 아니라 제어 신호다 — perceive가 LOD만 올리고 기억엔 안 남긴다.
+    # 지각/제어 소스 5종: 플레이어 개입(대상 1명) + 세계 사건(영향권 전원) +
+    # Director의 사적 관측 nudge(대상 1명) + Director의 LOD 승격 spotlight(대상 1명) +
+    # Director의 인생 아크 arc_planned(대상 1명, ADR-013). 관측·spotlight·아크는 공개
+    # 사건이 아니라 target_actor_id 한 명에게만 간다. spotlight·아크는 지각이 아니라
+    # 제어 신호다 — perceive가 LOD/ArcStore만 만지고 기억엔 안 남긴다.
     subs = [
         await js.pull_subscribe(
             f"lf.{env}.*.player.>", durable=DURABLE, stream=SOURCE_STREAM
@@ -97,13 +98,17 @@ async def run_mailbox_router(
             f"lf.{env}.*.system.director.spotlighted",
             durable=f"{DURABLE}-spotlight", stream="LF_SYS",
         ),
+        await js.pull_subscribe(
+            f"lf.{env}.*.system.director.arc_planned",
+            durable=f"{DURABLE}-arc", stream="LF_SYS",
+        ),
     ]
-    logger.info("메일박스 라우터 대기 — durable=%s (플레이어+세계사건+관측+승격)", DURABLE)
+    logger.info("메일박스 라우터 대기 — durable=%s (플레이어+세계사건+관측+승격+아크)", DURABLE)
 
     def targets_of(envelope: dict[str, Any]) -> list[str]:
         if envelope["type"] == "world.incident.occurred":
             return list(envelope["payload"]["affected_actor_ids"])
-        # player.*/world.observation.surfaced/system.director.spotlighted — 모두 대상 1명
+        # player.*/observation/spotlighted/arc_planned — 모두 대상 1명
         return [envelope["payload"]["target_actor_id"]]
 
     async def route(msg: Any) -> None:

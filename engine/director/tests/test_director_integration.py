@@ -237,6 +237,53 @@ async def test_plan_season_records_on_system_stream_without_budget(conn):
     assert await read_stream(conn, WORLD, "world", "incidents") == []
 
 
+async def test_plan_arcs_records_on_system_stream_without_budget(conn):
+    # 저빈도 인생 아크 계획 — 시즌과 같은 케이던스, 드라마 예산과 분리 (ADR-013, plan/08)
+    plan = {
+        "target_actor_id": "a_minji_kim",
+        "stage": "newcomer",
+        "intention": "무대 뒤에서 나와 자기 이야기를 시작한다",
+        "rationale": "인생이 가장 정체된 인물이다",
+    }
+    ai = _StubAiClient(plan)
+    director = make_llm_director(ai)
+    planned = await director.plan_arcs(
+        conn, Snapshot(tick=360, drama_ma=0.05, quiet_ticks=30)
+    )
+    assert planned
+    # 프롬프트가 로스터 이름으로 그라운딩됐다
+    assert ai.calls and "김민지" in ai.calls[0]["user"]
+
+    [audit] = [s.envelope for s in await read_stream(conn, WORLD, "system", "director")]
+    assert audit["payload"]["tool"] == "plan_arc"
+
+    [arc] = [s.envelope for s in await read_stream(conn, WORLD, "system", "arc")]
+    assert arc["type"] == "system.director.arc_planned"
+    assert arc["payload"] == {
+        "target_actor_id": "a_minji_kim", "stage": "newcomer",
+        "intention": "무대 뒤에서 나와 자기 이야기를 시작한다",
+    }
+    assert arc["causation_id"] == audit["event_id"]  # 산출물은 감사를 가리킨다
+    # 아크 계획은 드라마 예산을 쓰지 않는다 — 세계 사건도 아니다
+    assert director._budget.interventions_total == 0
+    assert await read_stream(conn, WORLD, "world", "incidents") == []
+
+
+async def test_plan_arcs_rejects_hallucinated_target(conn):
+    # 로스터 밖 인물은 arc_from_plan에서 끊긴다 — 아무것도 적재되지 않는다
+    plan = {
+        "target_actor_id": "a_ghost", "stage": "newcomer",
+        "intention": "존재하지 않는 인물의 이야기", "rationale": "x",
+    }
+    director = make_llm_director(_StubAiClient(plan))
+    planned = await director.plan_arcs(
+        conn, Snapshot(tick=360, drama_ma=0.05, quiet_ticks=30)
+    )
+    assert not planned
+    assert await read_stream(conn, WORLD, "system", "arc") == []
+    assert await read_stream(conn, WORLD, "system", "director") == []
+
+
 def test_apply_season_updates_pacing_params_and_current_theme():
     # 자기 season_set 이벤트 소비 → 개입 빈도 파라미터 + 현재 테마 갱신 (이벤트 소싱)
     director = make_director()
@@ -251,12 +298,15 @@ def test_apply_season_updates_pacing_params_and_current_theme():
 
 
 def test_season_audit_does_not_consume_drama_budget():
-    # season 감사 재소비는 드라마 예산으로 세지 않는다 (분리, ADR-013)
+    # season·arc 감사 재소비는 드라마 예산으로 세지 않는다 (분리, ADR-013)
     director = make_director()
     director._restore_budget(
         {"event_id": "x", "tick": 5, "payload": {"tool": "set_season_theme"}}
     )
-    assert director._budget.interventions_total == 0  # 무시됨
+    director._restore_budget(
+        {"event_id": "x2", "tick": 5, "payload": {"tool": "plan_arc"}}
+    )
+    assert director._budget.interventions_total == 0  # 둘 다 무시됨
     # 반면 드라마 도구 감사는 예산으로 센다
     director._restore_budget(
         {"event_id": "y", "tick": 5, "payload": {"tool": "inject_incident",

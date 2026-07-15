@@ -19,6 +19,7 @@ class Tool(StrEnum):
     promote_actor = "promote_actor"
     set_season_theme = "set_season_theme"
     boost_feed = "boost_feed"
+    plan_arc = "plan_arc"
 
 
 class Signals(BaseModel):

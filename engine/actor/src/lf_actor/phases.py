@@ -27,6 +27,7 @@ from lf_tick.lod import (
 from lf_tick.pipeline import TickContext
 from redis.asyncio import Redis
 
+from lf_actor.arc import Arc, ArcStore
 from lf_actor.client import AiRuntimeClient
 from lf_actor.consolidation import (
     Episode,
@@ -60,6 +61,8 @@ BELIEF_TYPE = "actor.belief.formed"
 IDENTITY_TYPE = "actor.identity.declared"
 #: Director의 LOD 승격 신호 — 지각이 아니라 제어다 (ADR-013). perceive가 LOD만 올린다
 SPOTLIGHT_TYPE = "system.director.spotlighted"
+#: Director의 인생 아크 계획 — 제어 신호. perceive가 ArcStore에 저장(기억엔 안 넣는다)
+ARC_TYPE = "system.director.arc_planned"
 
 #: 프로필 소개문 상한 — identity_core를 이 길이로 자른다 (스키마 bio maxLength와 맞춘다)
 _BIO_MAX = 500
@@ -117,12 +120,15 @@ class ActorPhases:
         belief_ledger: BeliefLedger | None = None,
         reflection_interval: int = 30,
         identity_redis: Redis | None = None,
+        arc: ArcStore | None = None,
     ) -> None:
         if not personas:
             raise ValueError("액터가 없다 — 최소 1명의 페르소나가 필요하다")
         self._personas = {p.id: p for p in personas}
         self._ai = ai
         self._memory = memory
+        #: Director의 인생 아크 저장 — 있으면 decide 컨텍스트에 방향을 주입한다 (ADR-013)
+        self._arc = arc
         self._mailbox = mailbox
         self._emotion = emotion
         self._relationship = relationship
@@ -209,9 +215,17 @@ class ActorPhases:
         self._shifts = []
         for actor_id in self._personas:
             items = await self._mailbox.drain(ctx.world_id, actor_id) if self._mailbox else []
-            # Director의 승격 신호는 지각이 아니라 제어 — 지각 항목과 분리한다
+            # Director의 제어 신호(승격·아크)는 지각이 아니다 — 지각 항목과 분리한다 (ADR-013)
             promoted = any(e["type"] == SPOTLIGHT_TYPE for e in items)
-            items = [e for e in items if e["type"] != SPOTLIGHT_TYPE]
+            arcs = [e for e in items if e["type"] == ARC_TYPE]
+            items = [e for e in items if e["type"] not in (SPOTLIGHT_TYPE, ARC_TYPE)]
+            if arcs and self._arc is not None:
+                # 아크는 지각·LOD와 무관한 배경 프레임 — 저장만 하고 다음 decide부터 스민다
+                last = arcs[-1]["payload"]  # 여러 개면 마지막 계획이 권위다
+                await self._arc.set(ctx.world_id, actor_id, last["stage"], last["intention"])
+                logger.info(
+                    "인생 아크 수신: %s stage=%s tick=%d", actor_id, last["stage"], ctx.tick
+                )
             # LOD 갱신: 승격이 최우선(Hot), 없으면 지각 규칙, 지각도 없으면 유휴 강등 (ADR-011)
             if promoted:
                 self._lods[actor_id] = promote(self._lods[actor_id], ctx.tick)
@@ -257,7 +271,8 @@ class ActorPhases:
                 if self._goal is not None:
                     working = [await self._goal.summary(ctx.world_id, persona), *working]
                 episodes = await self._recall(ctx.world_id, actor_id, working)
-                bundle = build(persona, working, world, episodes=episodes)
+                arc = await self._arc_of(ctx.world_id, actor_id)
+                bundle = build(persona, working, world, episodes=episodes, arc=arc)
                 payload = await self._ai.decide_action(
                     bundle, schema, tier=tier.value, actor_id=actor_id, tick=ctx.tick
                 )
@@ -278,9 +293,11 @@ class ActorPhases:
                 episodes = await self._recall(ctx.world_id, actor_id, working)
                 # 이 플레이어와의 대화를 시간순으로 — 답장이 흐름을 잇게 한다 (ADR-009)
                 conversation = conversation_turns(working, envelope["payload"]["player_id"])
+                # 답장도 결정이다 — 인생 방향이 대화의 결까지 물들인다 (ADR-013)
+                arc = await self._arc_of(ctx.world_id, actor_id)
                 bundle = build(
                     persona, working, world, purpose="reply_to_player",
-                    episodes=episodes, conversation=conversation,
+                    episodes=episodes, conversation=conversation, arc=arc,
                 )
                 text = await self._ai.converse(
                     bundle, tier="hot", actor_id=actor_id, tick=ctx.tick
@@ -304,6 +321,12 @@ class ActorPhases:
         if self._semantic is None or not working:
             return []
         return await self._semantic.recall(world_id, actor_id, working[0], k=3)
+
+    async def _arc_of(self, world_id: str, actor_id: str) -> Arc | None:
+        """Director가 준 인생 아크 — 없으면 None (아직 아크 없는 액터는 일상을 산다)."""
+        if self._arc is None:
+            return None
+        return await self._arc.get(world_id, actor_id)
 
     def _reply_event(
         self, ctx: TickContext, actor_id: str, source: dict[str, Any], text: str

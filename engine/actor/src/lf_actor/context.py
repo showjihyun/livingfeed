@@ -15,6 +15,7 @@ from datetime import datetime
 
 from lf_eventstore import new_ulid
 
+from lf_actor.arc import Arc
 from lf_actor.persona import Persona
 
 #: 문자 기반 토큰 근사 — 예산 집행용 보수적 환산 (한글 혼용 기준 1 token ≈ 2.5 chars)
@@ -26,6 +27,30 @@ BUDGET_EPISODES = 600
 BUDGET_WORKING = 1_200
 BUDGET_WORLD = 400
 BUDGET_TASK_FRAME = 600
+
+#: 인생 단계 → 한글 라벨 (docs/plan/08 Life Journey). 아크 섹션 표기용
+STAGE_LABELS = {
+    "student": "학생기",
+    "newcomer": "사회 초년기",
+    "settling": "정착·방황기",
+    "prime": "전성기·침체기",
+    "elder": "원로기",
+}
+
+
+def _arc_section(arc: Arc | None) -> str:
+    """인생 아크 — Director가 정한 이번 시즌 방향 (ADR-013/plan/08). 결정의 최상위 프레임.
+
+    아크가 없으면 섹션을 생략한다 — 아직 아크를 받지 않은 액터는 그저 일상을 산다.
+    """
+    if arc is None:
+        return ""
+    label = STAGE_LABELS.get(arc.stage, arc.stage)
+    return (
+        "## 인생 아크 (이번 시즌 당신 인생의 방향 — 명령이 아니라 배경이다)\n"
+        f"- 지금 당신은 {label}에 있다.\n"
+        f"- 이 시즌 당신의 인생은 이렇게 향한다: {arc.intention}"
+    )
 
 
 @dataclass(frozen=True)
@@ -161,16 +186,21 @@ def build(
     trace_id: str | None = None,
     episodes: list[str] | None = None,
     conversation: list[tuple[str, str]] | None = None,
+    arc: Arc | None = None,
 ) -> Bundle:
     """ContextBundle 조립 — 섹션 순서 고정 (ADR-009 규칙 1: Episodes(4) < Working(5)).
 
+    arc(있으면)가 최상위 프레임으로 앞에 온다 — 인생 방향이 이번 결정을 물들인다.
     conversation(reply_to_player 전용)이 있으면 Working 앞에 대화 흐름 섹션을
     끼운다 — 답장은 뒤섞인 버퍼가 아니라 시간순 대화를 보고 써야 한다.
     """
     frame = _TASK_FRAMES.get(purpose)
     if frame is None:
         raise ValueError(f"알 수 없는 purpose: {purpose}")
-    sections = [_episodes_section(episodes or [])]
+    sections: list[str] = []
+    if (arc_text := _arc_section(arc)):
+        sections.append(arc_text)
+    sections.append(_episodes_section(episodes or []))
     if conversation:
         sections.append(_conversation_section(conversation))
     sections += [
