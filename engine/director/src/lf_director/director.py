@@ -91,6 +91,9 @@ class Director:
         #: 같은 도구 연속 반복을 피하게 하고, 감사 signals에 남긴다. 자기 감사
         #: 재소비(_restore_budget)로 재시작에도 흐름이 복원된다
         self._recent_tools: deque[str] = deque(maxlen=5)
+        #: 최근 사건 종류 이력 — 도구 아래 층위의 다양성 (같은 소문·정전 반복 회피).
+        #: 규칙 폴백은 직전 종류를 비키고, LLM 프롬프트에도 이력이 실린다
+        self._recent_kinds: deque[str] = deque(maxlen=5)
 
     async def _select(
         self, snapshot: Any, tension: list[list[Any]]
@@ -105,6 +108,7 @@ class Director:
             user = build_plan_user(
                 snapshot, tension, self._incidents, self._names,
                 recent_tools=list(self._recent_tools),
+                recent_kinds=list(self._recent_kinds),
             )
             output, model = await self._ai.plan_intervention(
                 DIRECTOR_SYSTEM, user, schema,
@@ -117,7 +121,10 @@ class Director:
                 if chosen is not None:
                     return chosen
             # LLM 실패/무효 → 규칙 폴백 (세계는 계속 돈다, ADR-013 단계적 도입)
-        return decide(snapshot, self._budget, tension, params=self._params)
+        return decide(
+            snapshot, self._budget, tension, params=self._params,
+            avoid_kind=self._recent_kinds[-1] if self._recent_kinds else None,
+        )
 
     async def _append_intervention(
         self, conn: AsyncConnection, snapshot: Any,
@@ -179,14 +186,26 @@ class Director:
         intervention = await self._select(snapshot, tension)
         if intervention is None:
             return False
-        # 다양성 메트릭 — 최근 도구 흐름을 감사에 남긴다 (연속 사용이 관찰 가능해진다)
+        # 다양성 메트릭 — 최근 도구 흐름과 연속 사용 횟수(repeat_streak)를 감사에
+        # 남긴다. streak 1이 다양, 커질수록 기계적이다 (리플레이 튜닝의 정량 지표)
+        streak = 1
+        for prev in reversed(self._recent_tools):
+            if prev != intervention.tool:
+                break
+            streak += 1
+        intervention.signals["repeat_streak"] = streak
         if self._recent_tools:
             intervention.signals["recent_tools"] = list(self._recent_tools)
+        kind = intervention.payload.get("incident_kind")
+        if kind is not None:
+            intervention.signals["incident_kind"] = kind  # 재시작 복원용 (감사가 원천)
         remaining_after = self._budget.remaining(snapshot.tick, self._params) - 1
         await self._append_intervention(conn, snapshot, intervention, remaining_after)
         self._budget.record(snapshot.tick, None)
         self._window.reset_quiet()
         self._recent_tools.append(intervention.tool)
+        if kind is not None:
+            self._recent_kinds.append(kind)
         return True
 
     async def plan_season(self, conn: AsyncConnection, snapshot: Any) -> bool:
@@ -252,8 +271,11 @@ class Director:
         # 시즌·아크 계획은 저빈도 구조적 결정 — 드라마 예산과 무관하다 (ADR-013)
         if envelope["payload"].get("tool") in (SEASON_TOOL, ARC_TOOL):
             return
-        # 예산과 함께 최근 도구 흐름도 감사에서 되찾는다 (재시작 후 다양성 힌트 복원)
+        # 예산과 함께 최근 도구·사건 종류 흐름도 감사에서 되찾는다 (다양성 힌트 복원)
         self._recent_tools.append(envelope["payload"]["tool"])
+        kind = (envelope["payload"].get("signals") or {}).get("incident_kind")
+        if kind is not None:
+            self._recent_kinds.append(kind)
         self._budget.record(
             envelope["tick"], envelope["payload"].get("target_correlation_id")
         )

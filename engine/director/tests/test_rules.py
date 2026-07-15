@@ -52,3 +52,17 @@ def test_incident_kinds_rotate_deterministically():
         kinds.append(intervention.payload["incident_kind"])
         budget.record(i * 200, None)
     assert len(set(kinds)) > 1  # 같은 도구·같은 사건 반복의 기계감 방지
+
+
+def test_decide_avoids_last_incident_kind():
+    # 직전 사건 종류와 순환 선택이 겹치면 다음 종류로 비킨다 (다양성 감점 — 결정적)
+    budget = BudgetState()
+    first = decide(quiet_snapshot(), budget, [])
+    assert first is not None
+    same = first.payload["incident_kind"]
+    avoided = decide(quiet_snapshot(), budget, [], avoid_kind=same)
+    assert avoided is not None
+    assert avoided.payload["incident_kind"] != same
+    # 다른 종류를 피하라면 순환 선택 그대로 (겹치지 않으면 비킬 이유가 없다)
+    untouched = decide(quiet_snapshot(), budget, [], avoid_kind="__none__")
+    assert untouched is not None and untouched.payload["incident_kind"] == same

@@ -101,8 +101,13 @@ def decide(
     tension_pairs: list[list[Any]],
     *,
     params: dict[str, Any] | None = None,
+    avoid_kind: str | None = None,
 ) -> Intervention | None:
-    """신호가 임계를 넘고 예산이 남았을 때만 개입한다. 아니면 None — 세계는 자율이다."""
+    """신호가 임계를 넘고 예산이 남았을 때만 개입한다. 아니면 None — 세계는 자율이다.
+
+    avoid_kind(직전 사건 종류)가 순환 선택과 겹치면 다음 종류로 비킨다 —
+    규칙 경로의 다양성 감점 (ADR-013 개입 다양성). 종류가 하나뿐이면 그대로.
+    """
     params = params or default_params()
     obs = params["observation"]
     if not is_fireable(snapshot, budget, params):
@@ -110,9 +115,10 @@ def decide(
 
     # 같은 도구 반복의 기계감 방지 — 누적 개입 수 기준 결정적 순환 (ADR-013 완화책)
     incidents = params["incidents"]
-    incident = incidents[
-        zlib.crc32(f"incident:{budget.interventions_total}".encode()) % len(incidents)
-    ]
+    index = zlib.crc32(f"incident:{budget.interventions_total}".encode()) % len(incidents)
+    incident = incidents[index]
+    if avoid_kind is not None and incident["kind"] == avoid_kind and len(incidents) > 1:
+        incident = incidents[(index + 1) % len(incidents)]  # 직전 종류 회피 — 결정적
 
     # 갈등 후보(그래프 tension 질의)가 있으면 그 쌍을 사건의 영향권에 놓는다 —
     # 조종이 아니라 무대 배치다: 반응은 액터의 몫 (ADR-013 간접 개입)

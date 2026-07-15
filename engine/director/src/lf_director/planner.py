@@ -197,11 +197,13 @@ def build_plan_user(
     names: dict[str, str],
     *,
     recent_tools: list[str] | None = None,
+    recent_kinds: list[str] | None = None,
 ) -> str:
     """개입 선택 프롬프트의 user 섹션 — 신호·긴장 후보·사건 라이브러리를 근거로 제시.
 
-    recent_tools(있으면)로 최근 개입 흐름을 보여 같은 도구 연속 반복을 감점한다 —
-    다양성은 강제(hard rule)가 아니라 판단 재료다. 정말 필요하면 같은 도구도 쓴다.
+    recent_tools/recent_kinds(있으면)로 최근 개입 흐름을 보여 같은 도구·같은 사건
+    종류의 연속 반복을 감점한다 — 다양성은 강제(hard rule)가 아니라 판단 재료다.
+    정말 필요하면 같은 도구도 쓴다.
     """
     lines = [
         "## 상황",
@@ -225,10 +227,14 @@ def build_plan_user(
         lines += [
             "",
             "## 최근 개입 이력 (오래된 → 최근)",
-            "- " + " → ".join(recent_tools),
-            "같은 도구를 연속으로 반복하지 마라 — 세계가 뻔해진다. 이번엔 다른 결이 "
-            "필요한지 먼저 따져라 (정말 필요할 때만 같은 도구를 다시 쓴다).",
+            "- 도구: " + " → ".join(recent_tools),
         ]
+        if recent_kinds:
+            lines.append("- 사건 종류: " + " → ".join(recent_kinds))
+        lines.append(
+            "같은 도구·같은 사건 종류를 연속으로 반복하지 마라 — 세계가 뻔해진다. "
+            "이번엔 다른 결이 필요한지 먼저 따져라 (정말 필요할 때만 같은 것을 다시 쓴다)."
+        )
     candidates = candidate_actor_ids(tension_pairs)
     cand_text = ", ".join(f"{_name(a, names)}({a})" for a in candidates) or "(없음)"
     lines += [

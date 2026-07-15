@@ -261,19 +261,24 @@ async def test_consecutive_interventions_carry_recent_tools(conn):
     )
     assert "최근 개입 이력" in ai.calls[1]["user"]  # 두 번째 — 흐름이 보인다
     assert "inject_incident" in ai.calls[1]["user"]
+    assert "사건 종류: rumor_spread" in ai.calls[1]["user"]  # 종류 층위 이력도
 
     audits = [s.envelope for s in await read_stream(conn, WORLD, "system", "director")]
     assert "recent_tools" not in audits[0]["payload"]["signals"]
+    assert audits[0]["payload"]["signals"]["repeat_streak"] == 1  # 첫 개입 — 반복 아님
     assert audits[1]["payload"]["signals"]["recent_tools"] == ["inject_incident"]
+    assert audits[1]["payload"]["signals"]["repeat_streak"] == 2  # 같은 도구 2연속 (정량)
+    assert audits[1]["payload"]["signals"]["incident_kind"] == "rumor_spread"
 
 
 def test_restore_budget_rebuilds_recent_tools_from_audits():
-    # 재시작 후 남의(과거) 감사 재소비 → 예산과 함께 도구 흐름도 복원된다.
+    # 재시작 후 남의(과거) 감사 재소비 → 예산과 함께 도구·사건 종류 흐름도 복원된다.
     # 시즌·아크 감사는 드라마 흐름이 아니다 — 이력에 안 들어간다
     director = make_director()
     director._restore_budget(
         {"event_id": "a", "tick": 5,
-         "payload": {"tool": "inject_incident", "target_correlation_id": None}}
+         "payload": {"tool": "inject_incident", "target_correlation_id": None,
+                     "signals": {"incident_kind": "rumor_spread"}}}
     )
     director._restore_budget(
         {"event_id": "b", "tick": 6, "payload": {"tool": "set_season_theme"}}
@@ -283,6 +288,7 @@ def test_restore_budget_rebuilds_recent_tools_from_audits():
          "payload": {"tool": "nudge_perception", "target_correlation_id": None}}
     )
     assert list(director._recent_tools) == ["inject_incident", "nudge_perception"]
+    assert list(director._recent_kinds) == ["rumor_spread"]  # 종류는 사건 감사에서만
 
 
 async def test_plan_arcs_records_on_system_stream_without_budget(conn):

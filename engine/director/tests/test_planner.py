@@ -368,11 +368,14 @@ def test_build_plan_user_grounds_names_kinds_and_drama_tools_only():
 
 
 def test_build_plan_user_injects_recent_tools_for_diversity():
-    # 최근 개입 흐름을 보여 같은 도구 연속 반복을 감점한다 — 강제가 아니라 판단 재료
+    # 최근 개입 흐름을 보여 같은 도구·같은 사건 종류 연속 반복을 감점한다 —
+    # 강제가 아니라 판단 재료
     user = build_plan_user(
         SNAP, TENSION, INCIDENTS, NAMES,
         recent_tools=["inject_incident", "inject_incident"],
+        recent_kinds=["rumor_spread", "rumor_spread"],
     )
     assert "## 최근 개입 이력" in user
     assert "inject_incident → inject_incident" in user
+    assert "사건 종류: rumor_spread → rumor_spread" in user
     assert "반복하지 마라" in user
