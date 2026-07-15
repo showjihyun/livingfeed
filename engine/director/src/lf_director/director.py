@@ -43,6 +43,7 @@ from lf_director.rules import (
     ARC_TOOL,
     SEASON_TOOL,
     SEASON_TYPE,
+    TOOL_STREAK_LIMIT,
     BudgetState,
     Intervention,
     decide,
@@ -95,20 +96,36 @@ class Director:
         #: 규칙 폴백은 직전 종류를 비키고, LLM 프롬프트에도 이력이 실린다
         self._recent_kinds: deque[str] = deque(maxlen=5)
 
+    def _streak_capped_tool(self) -> str | None:
+        """연속 사용 상한(TOOL_STREAK_LIMIT)에 닿은 도구 — 이번 선택지에서 제외된다.
+
+        다양성 hard rule (ADR-013): 프롬프트 힌트(감점)를 넘어 스키마 enum에서
+        빠진다. 다른 도구가 한 번이라도 끼면 streak가 끊겨 다시 허용된다.
+        """
+        if len(self._recent_tools) < TOOL_STREAK_LIMIT:
+            return None
+        tail = list(self._recent_tools)[-TOOL_STREAK_LIMIT:]
+        return tail[-1] if len(set(tail)) == 1 else None
+
     async def _select(
         self, snapshot: Any, tension: list[list[Any]]
     ) -> Intervention | None:
         """개입을 고른다 — LLM 맥락 선택을 시도하고, 없거나 실패하면 규칙 폴백.
 
         LLM 호출은 반드시 발화 게이트를 통과한 뒤에만 일어난다(비용·hard rule 선행).
-        LLM이 화이트리스트 밖을 고르면 intervention_from_plan이 None → 규칙 폴백.
+        LLM이 화이트리스트 밖(연속 상한 제외 도구 포함)을 고르면 폴백이다 —
+        LLM은 행동 반경을 넓힐 수 없다.
         """
+        capped = self._streak_capped_tool()
         if self._ai is not None and is_fireable(snapshot, self._budget, self._params):
-            schema = plan_schema([inc["kind"] for inc in self._incidents])
+            schema = plan_schema(
+                [inc["kind"] for inc in self._incidents], exclude_tool=capped
+            )
             user = build_plan_user(
                 snapshot, tension, self._incidents, self._names,
                 recent_tools=list(self._recent_tools),
                 recent_kinds=list(self._recent_kinds),
+                excluded_tool=capped,
             )
             output, model = await self._ai.plan_intervention(
                 DIRECTOR_SYSTEM, user, schema,
@@ -118,7 +135,8 @@ class Director:
                 chosen = intervention_from_plan(
                     output, snapshot, tension, self._incidents, self._names, model=model
                 )
-                if chosen is not None:
+                # 제외 도구를 그래도 골랐다면 무효 — 방어적 재집행 (스키마가 1차 방어)
+                if chosen is not None and chosen.tool != capped:
                     return chosen
             # LLM 실패/무효 → 규칙 폴백 (세계는 계속 돈다, ADR-013 단계적 도입)
         return decide(

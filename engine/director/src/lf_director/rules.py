@@ -40,6 +40,9 @@ ARC_STREAM_KEY = "arc"
 #: 인생 단계 (docs/plan/08 Life Journey) — 아크 계획의 닫힌 어휘
 LIFE_STAGES = ("student", "newcomer", "settling", "prime", "elder")
 
+#: 도구 연속 사용 상한 (다양성 hard rule, ADR-013) — 이만큼 연속이면 다음 선택에서 제외
+TOOL_STREAK_LIMIT = 3
+
 
 @dataclass(frozen=True)
 class Intervention:

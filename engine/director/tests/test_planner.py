@@ -46,6 +46,21 @@ def test_plan_schema_lists_only_drama_tools():
     assert set(schema["required"]) == {"tool", "rationale"}
 
 
+def test_plan_schema_excludes_streak_capped_tool():
+    # 연속 사용 상한에 걸린 도구는 enum에서 빠진다 — 힌트가 아니라 스키마 강제 (hard rule)
+    schema = plan_schema(["chance_encounter"], exclude_tool="inject_incident")
+    assert schema["properties"]["tool"]["enum"] == ["nudge_perception", "promote_actor"]
+
+
+def test_build_plan_user_announces_excluded_tool():
+    user = build_plan_user(
+        SNAP, TENSION, INCIDENTS, NAMES,
+        recent_tools=["inject_incident"] * 3,
+        excluded_tool="inject_incident",
+    )
+    assert "연속 사용 상한" in user and "쓸 수 없다" in user
+
+
 def test_season_schema_lists_themes():
     schema = season_schema(["calm", "turmoil"])
     assert schema["properties"]["season_theme"]["enum"] == ["calm", "turmoil"]

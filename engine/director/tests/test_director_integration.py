@@ -271,6 +271,45 @@ async def test_consecutive_interventions_carry_recent_tools(conn):
     assert audits[1]["payload"]["signals"]["incident_kind"] == "rumor_spread"
 
 
+def test_streak_capped_tool_detection():
+    # 3연속이면 상한 — 다른 도구가 한 번이라도 끼면 streak가 끊긴다
+    director = make_director()
+    assert director._streak_capped_tool() is None  # 이력이 짧다
+    director._recent_tools.extend(["inject_incident"] * 3)
+    assert director._streak_capped_tool() == "inject_incident"
+    director._recent_tools.append("nudge_perception")
+    assert director._streak_capped_tool() is None  # 끊겼다 — 다시 허용
+
+
+async def test_streak_cap_excludes_tool_from_schema_and_reenforces(conn):
+    """다양성 hard rule — 상한에 걸린 도구는 LLM 스키마에서 빠지고, 그래도
+    골라오면 무효(규칙 폴백)다. LLM은 행동 반경을 넓힐 수 없다 (ADR-013)."""
+    tension = [["a_minji_kim", "a_seongho_park", 0.8, 0.2]]
+    plan = {
+        "tool": "inject_incident",  # 상한에 걸린 도구를 고집하는 LLM
+        "incident_kind": "rumor_spread",
+        "affected_actor_ids": ["a_minji_kim"],
+        "description": "또 소문이다",
+        "intensity": 0.5,
+        "rationale": "같은 걸 또",
+    }
+    ai = _StubAiClient(plan)
+    director = make_llm_director(ai)
+    director._recent_tools.extend(["inject_incident"] * 3)
+
+    fired = await director.evaluate(
+        conn, Snapshot(tick=120, drama_ma=0.05, quiet_ticks=30), _StubGraph(tension)
+    )
+    assert fired  # 세계는 계속 돈다 — 규칙 폴백으로
+    # 스키마에서 상한 도구가 빠졌고, 프롬프트에도 고지됐다
+    tools = ai.calls[0]["schema"]["properties"]["tool"]["enum"]
+    assert "inject_incident" not in tools
+    assert "연속 사용 상한" in ai.calls[0]["user"]
+    # 그래도 골라온 LLM 선택은 무효 — 규칙 경로가 개입했다 (감사에 주체 기록)
+    [audit] = [s.envelope for s in await read_stream(conn, WORLD, "system", "director")]
+    assert audit["payload"]["signals"]["selector"] == "rule"
+
+
 def test_restore_budget_rebuilds_recent_tools_from_audits():
     # 재시작 후 남의(과거) 감사 재소비 → 예산과 함께 도구·사건 종류 흐름도 복원된다.
     # 시즌·아크 감사는 드라마 흐름이 아니다 — 이력에 안 들어간다

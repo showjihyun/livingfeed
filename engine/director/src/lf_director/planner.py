@@ -53,20 +53,26 @@ def candidate_actor_ids(tension_pairs: list[list[Any]]) -> list[str]:
     return seen
 
 
-def plan_schema(incident_kinds: list[str]) -> dict[str, Any]:
+def plan_schema(
+    incident_kinds: list[str], *, exclude_tool: str | None = None
+) -> dict[str, Any]:
     """드라마 개입(순간적) 응답 스키마 — tool로 도구를 고르고 도구별 인자를 채운다.
 
     도구별 인자는 선택적(optional)이고, 필수는 tool·rationale뿐이다 — 어떤 인자가
     유효/필수인지는 intervention_from_plan이 도구별로 재집행한다(하드룰). incident_kind
     enum만 스키마에서 직접 좁힌다(닫힌 라이브러리 = 도구 인자 화이트리스트).
 
+    exclude_tool(있으면)은 enum에서 빠진다 — 연속 사용 상한에 걸린 도구는 이번엔
+    선택지가 아니다 (다양성 hard rule, ADR-013). 힌트가 아니라 스키마 강제다.
+
     set_season_theme은 여기 없다 — 시즌 계획은 드라마 게이트가 아니라 저빈도
     케이던스(plan_season)의 몫이다 (ADR-013 §실행 모델).
     """
+    tools = [t for t in (INCIDENT_TOOL, NUDGE_TOOL, PROMOTE_TOOL) if t != exclude_tool]
     return {
         "type": "object",
         "properties": {
-            "tool": {"type": "string", "enum": [INCIDENT_TOOL, NUDGE_TOOL, PROMOTE_TOOL]},
+            "tool": {"type": "string", "enum": tools},
             # inject_incident 인자
             "incident_kind": {"type": "string", "enum": incident_kinds},
             "affected_actor_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
@@ -198,12 +204,13 @@ def build_plan_user(
     *,
     recent_tools: list[str] | None = None,
     recent_kinds: list[str] | None = None,
+    excluded_tool: str | None = None,
 ) -> str:
     """개입 선택 프롬프트의 user 섹션 — 신호·긴장 후보·사건 라이브러리를 근거로 제시.
 
     recent_tools/recent_kinds(있으면)로 최근 개입 흐름을 보여 같은 도구·같은 사건
-    종류의 연속 반복을 감점한다 — 다양성은 강제(hard rule)가 아니라 판단 재료다.
-    정말 필요하면 같은 도구도 쓴다.
+    종류의 연속 반복을 감점한다 — 다양성은 판단 재료다. 단 excluded_tool은 연속
+    사용 상한에 걸려 이번엔 스키마에서 빠졌다 — 프롬프트에도 고지한다 (hard rule).
     """
     lines = [
         "## 상황",
@@ -235,6 +242,11 @@ def build_plan_user(
             "같은 도구·같은 사건 종류를 연속으로 반복하지 마라 — 세계가 뻔해진다. "
             "이번엔 다른 결이 필요한지 먼저 따져라 (정말 필요할 때만 같은 것을 다시 쓴다)."
         )
+        if excluded_tool:
+            lines.append(
+                f"{excluded_tool}은(는) 연속 사용 상한에 걸렸다 — 이번엔 쓸 수 없다 "
+                "(선택지에 없다)."
+            )
     candidates = candidate_actor_ids(tension_pairs)
     cand_text = ", ".join(f"{_name(a, names)}({a})" for a in candidates) or "(없음)"
     lines += [
