@@ -15,16 +15,61 @@ def test_no_intervention_below_threshold():
     assert decide(quiet_snapshot(quiet=FIRE - 1), BudgetState(), []) is None
 
 
-def test_fires_at_threshold_with_tension_targets():
+def test_fires_at_threshold_and_rotates_tools_with_tension():
+    """긴장 후보가 있으면 규칙 경로도 도구를 순환한다 — 규칙 폴백의 다양성 (ADR-013).
+
+    셋 다 화이트리스트 안이고, 도구별 payload가 제 모양이어야 한다.
+    """
     tension = [["a_junho_park", "a_aria_kim", 0.42, -0.1]]
-    intervention = decide(quiet_snapshot(), BudgetState(), tension)
-    assert intervention is not None
-    assert intervention.tool == "inject_incident"  # 화이트리스트 밖은 존재하지 않는다
-    assert intervention.event_type == "world.incident.occurred"
+    budget = BudgetState()
+    seen = {}
+    for i in range(6):
+        intervention = decide(quiet_snapshot(tick=100 + i * 200), budget, tension)
+        assert intervention is not None
+        assert "침체 감지" in intervention.reason
+        assert intervention.signals["tension_top"] == tension
+        seen[intervention.tool] = intervention
+        budget.record(100 + i * 200, None)
+    assert set(seen) == {"inject_incident", "nudge_perception", "promote_actor"}
+
+    incident = seen["inject_incident"]
+    assert incident.event_type == "world.incident.occurred"
     # 갈등 후보 쌍이 사건의 영향권에 놓인다 (그래프 질의 → 무대 배치, ADR-006/013)
-    assert intervention.payload["affected_actor_ids"] == ["a_junho_park", "a_aria_kim"]
-    assert "침체 감지" in intervention.reason
-    assert intervention.signals["tension_top"] == tension
+    assert incident.payload["affected_actor_ids"] == ["a_junho_park", "a_aria_kim"]
+    nudge = seen["nudge_perception"]
+    assert nudge.event_type == "world.observation.surfaced"
+    assert nudge.payload["target_actor_id"] == "a_junho_park"
+    assert nudge.payload["about_actor_id"] == "a_aria_kim"
+    assert nudge.payload["observation"]  # 관측 템플릿이 채워졌다
+    promote = seen["promote_actor"]
+    assert promote.stream == "system"  # 세계 사건이 아니라 제어 신호
+    assert promote.payload == {"target_actor_id": "a_junho_park"}
+
+
+def test_no_tension_means_incident_only():
+    # 긴장 후보가 없으면 대상 있는 도구(nudge/promote)를 만들 수 없다 — incident뿐
+    budget = BudgetState()
+    for i in range(4):
+        intervention = decide(quiet_snapshot(tick=100 + i * 200), budget, [])
+        assert intervention is not None and intervention.tool == "inject_incident"
+        budget.record(100 + i * 200, None)
+
+
+def test_rule_nudge_grounds_observation_with_name():
+    # 관측 템플릿이 상대 이름으로 그라운딩된다 — id가 노출되지 않는다
+    tension = [["a_junho_park", "a_aria_kim", 0.42, -0.1]]
+    budget = BudgetState()
+    for i in range(6):
+        intervention = decide(
+            quiet_snapshot(tick=100 + i * 200), budget, tension,
+            names={"a_aria_kim": "김아리"},
+        )
+        budget.record(100 + i * 200, None)
+        if intervention.tool == "nudge_perception":
+            assert "김아리" in intervention.payload["observation"]
+            assert "a_aria_kim" not in intervention.payload["observation"]
+            return
+    raise AssertionError("nudge가 도구 순환에 나타나지 않았다")
 
 
 def test_budget_caps_interventions_per_window():

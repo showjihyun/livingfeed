@@ -98,6 +98,13 @@ def is_fireable(
     return budget.remaining(snapshot.tick, params) > 0
 
 
+#: 규칙 nudge의 관측 템플릿 — {name}은 긴장 상대 (규칙 폴백도 결이 하나가 아니다)
+_NUDGE_OBSERVATIONS = (
+    "{name}과(와)의 사이가 요즘 어딘가 어긋나 있다는 걸 문득 깨달았다",
+    "{name}이(가) 요즘 자신을 피하고 있는 것 같다는 생각이 문득 스쳤다",
+)
+
+
 def decide(
     snapshot: Snapshot,
     budget: BudgetState,
@@ -105,18 +112,62 @@ def decide(
     *,
     params: dict[str, Any] | None = None,
     avoid_kind: str | None = None,
+    names: dict[str, str] | None = None,
 ) -> Intervention | None:
     """신호가 임계를 넘고 예산이 남았을 때만 개입한다. 아니면 None — 세계는 자율이다.
 
-    avoid_kind(직전 사건 종류)가 순환 선택과 겹치면 다음 종류로 비킨다 —
-    규칙 경로의 다양성 감점 (ADR-013 개입 다양성). 종류가 하나뿐이면 그대로.
+    도구도 순환한다 (다양성, ADR-013): 긴장 후보가 있으면 incident/nudge/promote를
+    결정적으로 번갈아 쓴다 — 후보가 없으면 대상 있는 도구를 만들 수 없어 incident뿐.
+    avoid_kind(직전 사건 종류)가 순환 선택과 겹치면 다음 종류로 비킨다.
     """
     params = params or default_params()
     obs = params["observation"]
     if not is_fireable(snapshot, budget, params):
         return None
 
-    # 같은 도구 반복의 기계감 방지 — 누적 개입 수 기준 결정적 순환 (ADR-013 완화책)
+    reason = (
+        f"침체 감지 — drama 이동평균 {snapshot.drama_ma}이 "
+        f"{snapshot.quiet_ticks} tick 지속 (임계 {obs['quiet_threshold']}/"
+        f"{obs['quiet_ticks_to_fire']})"
+    )[:300]
+    signals = {
+        "drama_ma": snapshot.drama_ma,
+        "quiet_ticks": snapshot.quiet_ticks,
+        "tension_top": tension_pairs[:3],
+        "selector": "rule",  # 개입 선택 주체 — 감사에서 규칙/LLM 구분 (ADR-013)
+    }
+
+    tools = [INCIDENT_TOOL, NUDGE_TOOL, PROMOTE_TOOL] if tension_pairs else [INCIDENT_TOOL]
+    tool = tools[zlib.crc32(f"tool:{budget.interventions_total}".encode()) % len(tools)]
+
+    if tool == PROMOTE_TOOL:
+        # 긴장 상위 인물을 무대로 — 사건 없이 더 자주 움직이게 (제어 신호)
+        return Intervention(
+            tool=PROMOTE_TOOL, stream=SYSTEM_STREAM,
+            event_type=SPOTLIGHT_TYPE, stream_key=SPOTLIGHT_STREAM_KEY,
+            payload={"target_actor_id": tension_pairs[0][0]},
+            reason=reason, signals=signals,
+        )
+    if tool == NUDGE_TOOL:
+        # 긴장 상위 쌍의 한쪽에게 상대에 대한 사적 관측을 심는다 (소동 없는 개입)
+        target, about = tension_pairs[0][0], tension_pairs[0][1]
+        template = _NUDGE_OBSERVATIONS[
+            zlib.crc32(f"nudge:{budget.interventions_total}".encode())
+            % len(_NUDGE_OBSERVATIONS)
+        ]
+        display = (names or {}).get(about, about)
+        return Intervention(
+            tool=NUDGE_TOOL, stream=WORLD_STREAM,
+            event_type=OBSERVATION_TYPE, stream_key=OBSERVATION_STREAM_KEY,
+            payload={
+                "target_actor_id": target,
+                "observation": template.format(name=display)[:300],
+                "about_actor_id": about,
+            },
+            reason=reason, signals=signals,
+        )
+
+    # inject_incident (기본) — 종류도 순환하고 직전 종류는 비킨다 (ADR-013 완화책)
     incidents = params["incidents"]
     index = zlib.crc32(f"incident:{budget.interventions_total}".encode()) % len(incidents)
     incident = incidents[index]
@@ -139,15 +190,6 @@ def decide(
             "affected_actor_ids": affected,
             "intensity": float(incident["intensity"]),
         },
-        reason=(
-            f"침체 감지 — drama 이동평균 {snapshot.drama_ma}이 "
-            f"{snapshot.quiet_ticks} tick 지속 (임계 {obs['quiet_threshold']}/"
-            f"{obs['quiet_ticks_to_fire']})"
-        )[:300],
-        signals={
-            "drama_ma": snapshot.drama_ma,
-            "quiet_ticks": snapshot.quiet_ticks,
-            "tension_top": tension_pairs[:3],
-            "selector": "rule",  # 개입 선택 주체 — 감사에서 규칙/LLM 구분 (ADR-013)
-        },
+        reason=reason,
+        signals=signals,
     )

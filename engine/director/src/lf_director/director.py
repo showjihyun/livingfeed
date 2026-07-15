@@ -142,6 +142,7 @@ class Director:
         return decide(
             snapshot, self._budget, tension, params=self._params,
             avoid_kind=self._recent_kinds[-1] if self._recent_kinds else None,
+            names=self._names,
         )
 
     async def _append_intervention(
