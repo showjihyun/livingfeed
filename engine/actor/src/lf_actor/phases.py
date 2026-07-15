@@ -43,6 +43,7 @@ from lf_actor.emotion import PRINCIPAL as EMOTION_PRINCIPAL
 from lf_actor.emotion import SHIFT_TYPE, EmotionAdapter, PendingShift
 from lf_actor.goal import PRINCIPAL as GOAL_PRINCIPAL
 from lf_actor.goal import GoalAdapter, PendingGoalEvent
+from lf_actor.ledger import DecayLedger
 from lf_actor.mailbox import Mailbox
 from lf_actor.memory import WorkingMemory
 from lf_actor.persona import Persona
@@ -71,6 +72,12 @@ _BIO_MAX = 500
 #: 응답 의무가 있는 상호작용 (반응(like)은 지각·감정 입력일 뿐 응답하지 않는다)
 _REPLYABLE = {"player.dm.sent": "dm", "player.comment.posted": "comment"}
 
+#: Director의 사적 지목 (nudge_perception) — 반응을 기대하는 관측이다 (ADR-013)
+OBSERVATION_TYPE = "world.observation.surfaced"
+INCIDENT_TYPE = "world.incident.occurred"
+#: 이 강도 이상의 세계 사건은 잠든 액터도 깨운다 — 고중요도 이벤트 승격 (ADR-011 §관심 신호)
+HIGH_INTENSITY = 0.7
+
 
 def sanitize_target(payload: dict[str, Any], valid_ids: set[str], actor_id: str) -> dict[str, Any]:
     """LLM이 지어낸 대상을 소스에서 끊는다 (ADR-014 §대상 폴리시).
@@ -87,15 +94,23 @@ def sanitize_target(payload: dict[str, Any], valid_ids: set[str], actor_id: str)
     return payload
 
 
-def lod_after_perception(lod: ActorLod, item_types: set[str], tick: int) -> ActorLod:
-    """지각한 항목 유형들 → LOD 갱신 (ADR-011 §관심 신호).
+def lod_after_perception(lod: ActorLod, items: list[dict[str, Any]], tick: int) -> ActorLod:
+    """지각한 항목들 → LOD 갱신 (ADR-011 §관심 신호).
 
-    응답 의무가 있는 상호작용(dm/comment)은 즉시 응답 대상이라 Hot 승격한다
-    (상호작용 우선, ADR-012 규칙 2). 그 밖의 지각(Director 지목·반응·세계 사건)은
-    관심 신호이므로 티어는 유지하고 강등 타이머만 리셋한다(touch).
+    Hot 승격 신호 셋: 응답 의무가 있는 상호작용(dm/comment — 상호작용 우선,
+    ADR-012 규칙 2), Director의 사적 지목(nudge 관측 — 반응을 기대하고 심은
+    지각이라 잠든 채 두면 다음 due까지 썩는다, ADR-013), 고강도 세계 사건
+    (내 삶을 흔든 사건은 곧바로 반응하게 한다). 그 밖의 지각(반응·저강도
+    사건)은 관심 신호 — 티어는 유지하고 강등 타이머만 리셋한다(touch).
     """
-    if item_types & set(_REPLYABLE):
-        return promote(lod, tick)
+    for envelope in items:
+        if envelope["type"] in _REPLYABLE or envelope["type"] == OBSERVATION_TYPE:
+            return promote(lod, tick)
+        if (
+            envelope["type"] == INCIDENT_TYPE
+            and float(envelope["payload"].get("intensity", 0.0)) >= HIGH_INTENSITY
+        ):
+            return promote(lod, tick)
     return touch(lod, tick)
 
 
@@ -122,6 +137,7 @@ class ActorPhases:
         reflection_interval: int = 30,
         identity_redis: Redis | None = None,
         arc: ArcStore | None = None,
+        decay_ledger: DecayLedger | None = None,
     ) -> None:
         if not personas:
             raise ValueError("액터가 없다 — 최소 1명의 페르소나가 필요하다")
@@ -158,8 +174,13 @@ class ActorPhases:
         self._resolved_shifts: list[PendingShift] = []
         self._resolved_replies: list[tuple[str, dict[str, Any], str]] = []
         #: 액터별 감쇠가 적용된 마지막 tick — Cold 배치의 장부 (ADR-012 §Cold 티어 처리).
-        #: 재시작 시 비어 경과를 모른다 — 그 액터는 현재 tick부터 다시 센다 (MVP 허용 오차)
+        #: decay_ledger(있으면)가 Redis에 영속해 워커 재시작에도 경과가 이어진다.
+        #: 없으면 in-memory만 — 재시작한 액터는 현재 tick부터 다시 센다 (dev/테스트 허용 오차)
         self._last_decay: dict[str, int] = {}
+        self._decay_ledger = decay_ledger
+        self._ledger_loaded = decay_ledger is None  # 장부 없으면 수화할 것도 없다
+        #: 이번 tick에 장부가 갱신된 액터들 — CONSOLIDATE 끝에 한 번에 영속한다
+        self._ledger_dirty: set[str] = set()
         #: 재기상 정산(catch-up)의 관계 감쇠 발행분 — CONSOLIDATE 관계 적재에 합류
         self._rel_catchup: list[PendingRelEvent] = []
 
@@ -219,6 +240,8 @@ class ActorPhases:
         """
         self._inbox = {}
         self._shifts = []
+        if not self._ledger_loaded:
+            await self._hydrate_ledger(ctx.world_id)
         for actor_id in self._personas:
             items = await self._mailbox.drain(ctx.world_id, actor_id) if self._mailbox else []
             # Director의 제어 신호(승격·아크)는 지각이 아니다 — 지각 항목과 분리한다 (ADR-013)
@@ -237,7 +260,7 @@ class ActorPhases:
                 self._lods[actor_id] = promote(self._lods[actor_id], ctx.tick)
             elif items:
                 self._lods[actor_id] = lod_after_perception(
-                    self._lods[actor_id], {e["type"] for e in items}, ctx.tick
+                    self._lods[actor_id], items, ctx.tick
                 )
             else:
                 self._lods[actor_id] = maybe_demote(self._lods[actor_id], ctx.tick)
@@ -337,6 +360,28 @@ class ActorPhases:
             return None
         return await self._arc.get(world_id, actor_id)
 
+    async def _hydrate_ledger(self, world_id: str) -> None:
+        """감쇠 장부 수화 — 재시작 후 첫 tick, 잠든 액터의 경과를 되찾는다 (ADR-012)."""
+        assert self._decay_ledger is not None
+        stored = await self._decay_ledger.load_all(world_id)
+        for actor_id, tick in stored.items():
+            if actor_id in self._personas:
+                self._last_decay.setdefault(actor_id, tick)
+        self._ledger_loaded = True
+        if stored:
+            logger.info("감쇠 장부 수화: %d 액터 (재시작에도 경과가 이어진다)", len(stored))
+
+    def _ledger_get(self, actor_id: str, default: int) -> int:
+        """장부 조회 — 처음 보는 액터는 default로 시작하고 영속 대상에 올린다."""
+        if actor_id not in self._last_decay:
+            self._last_decay[actor_id] = default
+            self._ledger_dirty.add(actor_id)
+        return self._last_decay[actor_id]
+
+    def _ledger_set(self, actor_id: str, tick: int) -> None:
+        self._last_decay[actor_id] = tick
+        self._ledger_dirty.add(actor_id)
+
     async def _catch_up(self, ctx: TickContext, actor_id: str) -> None:
         """잠들었던 액터의 밀린 감쇠 정산 — 직전 tick(T-1)까지 (ADR-012 §Cold 배치).
 
@@ -344,7 +389,7 @@ class ActorPhases:
         CONSOLIDATE가 마저 적용한다. 관계 감쇠의 발행 임계 초과분은 버퍼에 모아
         CONSOLIDATE의 관계 적재에 합류시킨다 (조용한 유실 금지).
         """
-        behind = (ctx.tick - 1) - self._last_decay.setdefault(actor_id, ctx.tick - 1)
+        behind = (ctx.tick - 1) - self._ledger_get(actor_id, ctx.tick - 1)
         if behind <= 0:
             return
         persona = self._personas[actor_id]
@@ -356,7 +401,7 @@ class ActorPhases:
             self._rel_catchup += await self._relationship.decay_all(
                 ctx.world_id, actor_id, ticks=behind
             )
-        self._last_decay[actor_id] = ctx.tick - 1
+        self._ledger_set(actor_id, ctx.tick - 1)
         logger.info("감쇠 정산: %s 밀린 %d tick 적용 (재기상)", actor_id, behind)
 
     def _decay_plan(self, ctx: TickContext) -> dict[str, int]:
@@ -368,11 +413,12 @@ class ActorPhases:
         plan: dict[str, int] = {}
         for actor_id in self._personas:
             # 장부 초기화는 스킵 여부와 무관 — 잠들기 시작한 시점을 세어야 경과가 맞는다
-            last = self._last_decay.setdefault(actor_id, ctx.tick - 1)
+            last = self._ledger_get(actor_id, ctx.tick - 1)
             lod = self._lods[actor_id]
             if lod.tier is Tier.COLD and not is_due(actor_id, lod, ctx.tick):
                 continue  # 잠든 액터 — due tick에 경과분을 한 번에
-            plan[actor_id] = ctx.tick - last
+            if (elapsed := ctx.tick - last) > 0:
+                plan[actor_id] = elapsed
         return plan
 
     def _reply_event(
@@ -516,9 +562,14 @@ class ActorPhases:
         if self._goal is not None:
             for actor_id, ticks in sorted(decay_plan.items()):
                 await self._goal.decay_ticks(ctx.world_id, self._personas[actor_id], ticks)
-        # 감쇠 장부 갱신 — 이 tick까지 정산됐다
+        # 감쇠 장부 갱신 — 이 tick까지 정산됐다. 갱신분만 일괄 영속 (재시작 연속성)
         for actor_id in decay_plan:
-            self._last_decay[actor_id] = ctx.tick
+            self._ledger_set(actor_id, ctx.tick)
+        if self._decay_ledger is not None and self._ledger_dirty:
+            await self._decay_ledger.mark(
+                ctx.world_id, {a: self._last_decay[a] for a in self._ledger_dirty}
+            )
+        self._ledger_dirty.clear()
         self._resolved_actions = []
         self._resolved_action_all = []
         self._resolved_shifts = []

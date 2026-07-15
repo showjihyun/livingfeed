@@ -11,6 +11,7 @@ import nats
 import pytest
 from lf_actor.client import AiRuntimeClient
 from lf_actor.emotion import EmotionAdapter
+from lf_actor.ledger import DecayLedger
 from lf_actor.mailbox import Mailbox
 from lf_actor.memory import WorkingMemory
 from lf_actor.persona import load_persona
@@ -227,6 +228,55 @@ async def test_cold_wakeup_catches_up_decay_before_appraise(conn, redis, nc, ai_
     assert joy.intensity == round(expected_joy.intensity, 4)
     assert any(e.type == "gratitude" for e in state.emotions)  # 지각은 정산 위에서
     assert phases._last_decay["a_aria_kim"] == 10  # 장부가 이 tick까지 정산됐다
+
+
+async def test_decay_ledger_roundtrip(redis):
+    ledger = DecayLedger(redis)
+    assert await ledger.load_all(WORLD) == {}
+    await ledger.mark(WORLD, {"a_aria_kim": 42, "a_minji_kim": 7})
+    assert await ledger.load_all(WORLD) == {"a_aria_kim": 42, "a_minji_kim": 7}
+    await ledger.mark(WORLD, {"a_aria_kim": 50})  # 부분 갱신 — 남은 항목은 유지
+    assert await ledger.load_all(WORLD) == {"a_aria_kim": 50, "a_minji_kim": 7}
+
+
+async def test_decay_ledger_survives_worker_restart(conn, redis, nc, ai_service):
+    """감쇠 장부가 Redis에 살아 워커 재시작에도 Cold 경과가 이어진다 (ADR-012).
+
+    영속 없이는 재시작한 워커가 경과를 몰라 밀린 감쇠가 조용히 사라진다
+    (due tick에 1 tick 몫만 적용) — 장부가 있으면 전체 경과가 정산된다.
+    """
+    aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
+    adapter = EmotionAdapter(redis)
+    seeded = EmotionState(
+        mood=Pad(pleasure=0.5, arousal=0.2, dominance=0.1),
+        emotions=(
+            EmotionInstance(type="joy", intensity=0.8, target_id=None, source_event="e1"),
+        ),
+    )
+    await adapter.save(WORLD, "a_aria_kim", seeded)
+    due = phase_offset("a_aria_kim", COLD_INTERVAL)
+    start = due + COLD_INTERVAL - 2
+
+    first = ActorPhases(
+        [aria], ai=AiRuntimeClient(nc, ai_service, timeout_s=5),
+        memory=WorkingMemory(redis), emotion=adapter, decay_ledger=DecayLedger(redis),
+    )
+    first._lods["a_aria_kim"] = ActorLod(tier=Tier.COLD, last_interest_tick=start)
+    head = await run_tick(conn, first, CLOCK, WORLD, tick=start, head=0)
+
+    # 워커 재시작 — 새 인스턴스의 in-memory 장부는 비어 있지만 Redis에서 수화한다
+    second = ActorPhases(
+        [aria], ai=AiRuntimeClient(nc, ai_service, timeout_s=5),
+        memory=WorkingMemory(redis), emotion=adapter, decay_ledger=DecayLedger(redis),
+    )
+    second._lods["a_aria_kim"] = ActorLod(tier=Tier.COLD, last_interest_tick=start)
+    head = await run_tick(conn, second, CLOCK, WORLD, tick=start + 1, head=head)
+    assert await adapter.load(WORLD, "a_aria_kim") == seeded  # 여전히 잠들어 있다
+
+    await run_tick(conn, second, CLOCK, WORLD, tick=start + 2, head=head)  # due
+    # 재시작을 가로질러 경과 3 tick이 온전히 정산됐다
+    expected = EmotionState.from_json(emotion_decay(seeded, aria.big_five, ticks=3).to_json())
+    assert await adapter.load(WORLD, "a_aria_kim") == expected
 
 
 async def test_cold_wakeup_relationship_drift_joins_consolidate(conn, redis, nc, ai_service):

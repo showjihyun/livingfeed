@@ -24,6 +24,7 @@ from lf_actor.arc import ArcStore
 from lf_actor.client import AiRuntimeClient
 from lf_actor.emotion import EmotionAdapter
 from lf_actor.goal import GoalAdapter
+from lf_actor.ledger import DecayLedger
 from lf_actor.mailbox import Mailbox, run_mailbox_router
 from lf_actor.memory import WorkingMemory
 from lf_actor.persona import load_personas
@@ -73,6 +74,7 @@ async def run() -> None:
             reflection_interval=int(os.environ.get("LF_REFLECT_INTERVAL", "30")),
             identity_redis=redis,
             arc=ArcStore(redis),
+            decay_ledger=DecayLedger(redis),
         )
         # tick 루프와 메일박스 라우터(LF_PLAYER → Redis)가 나란히 돈다 (ADR-012)
         await asyncio.gather(

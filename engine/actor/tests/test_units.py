@@ -117,24 +117,58 @@ def test_sanitize_target_passes_none_through_unchanged():
     assert out is payload  # 손댈 것 없으면 그대로 (불필요한 복사 없음)
 
 
+def _envelope(event_type: str, payload: dict | None = None) -> dict:
+    return {"type": event_type, "payload": payload or {}}
+
+
 def test_lod_reply_obligation_promotes_to_hot():
     # dm/comment는 즉시 응답 대상 → 어느 티어에서든 Hot 승격 (상호작용 우선)
     warm = ActorLod(tier=Tier.WARM, last_interest_tick=0)
-    out = lod_after_perception(warm, {"player.dm.sent"}, tick=42)
+    out = lod_after_perception(warm, [_envelope("player.dm.sent")], tick=42)
     assert out.tier is Tier.HOT
     assert out.last_interest_tick == 42
     # 다른 신호와 섞여도 응답 의무가 있으면 승격
-    mixed = lod_after_perception(warm, {"world.incident.occurred", "player.comment.posted"}, 42)
+    mixed = lod_after_perception(
+        warm,
+        [_envelope("world.incident.occurred", {"intensity": 0.3}),
+         _envelope("player.comment.posted")],
+        42,
+    )
     assert mixed.tier is Tier.HOT
 
 
+def test_lod_director_nudge_promotes_to_hot():
+    # Director의 사적 지목은 반응을 기대하고 심은 지각 — 잠든 채 두면 다음 due까지
+    # 썩는다. 즉시 Hot으로 깨운다 (ADR-013)
+    cold = ActorLod(tier=Tier.COLD, last_interest_tick=0)
+    out = lod_after_perception(cold, [_envelope("world.observation.surfaced")], tick=42)
+    assert out.tier is Tier.HOT
+    assert out.last_interest_tick == 42
+
+
+def test_lod_high_intensity_incident_promotes_low_touches():
+    # 고강도 사건은 잠든 액터도 깨운다 — 저강도는 관심 신호일 뿐 (ADR-011 §관심 신호)
+    cold = ActorLod(tier=Tier.COLD, last_interest_tick=0)
+    hot = lod_after_perception(
+        cold, [_envelope("world.incident.occurred", {"intensity": 0.8})], tick=42
+    )
+    assert hot.tier is Tier.HOT
+    mild = lod_after_perception(
+        cold, [_envelope("world.incident.occurred", {"intensity": 0.5})], tick=42
+    )
+    assert mild.tier is Tier.COLD and mild.last_interest_tick == 42
+
+
 def test_lod_soft_signal_touches_without_promoting():
-    # Director 지목·반응·세계 사건은 관심 신호 — 티어 유지, 강등 타이머만 리셋
+    # 반응·저강도 사건은 관심 신호 — 티어 유지, 강등 타이머만 리셋
     warm = ActorLod(tier=Tier.WARM, last_interest_tick=0)
-    out = lod_after_perception(warm, {"world.observation.surfaced"}, tick=42)
+    out = lod_after_perception(
+        warm, [_envelope("world.incident.occurred", {"intensity": 0.4})], tick=42
+    )
     assert out.tier is Tier.WARM  # 승격 안 함
     assert out.last_interest_tick == 42  # 하지만 관심은 갱신(강등 지연)
     cold = lod_after_perception(
-        ActorLod(tier=Tier.COLD, last_interest_tick=0), {"player.reaction.added"}, 42
+        ActorLod(tier=Tier.COLD, last_interest_tick=0),
+        [_envelope("player.reaction.added")], 42,
     )
     assert cold.tier is Tier.COLD and cold.last_interest_tick == 42
