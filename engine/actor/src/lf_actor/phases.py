@@ -47,10 +47,17 @@ from lf_actor.ledger import DecayLedger
 from lf_actor.mailbox import Mailbox
 from lf_actor.memory import WorkingMemory
 from lf_actor.persona import Persona
-from lf_actor.reflection import Belief, BeliefLedger, belief_point_key, derive_beliefs
+from lf_actor.reflection import (
+    Belief,
+    BeliefLedger,
+    belief_point_key,
+    derive_beliefs,
+    insight_schema,
+    insight_to_belief,
+)
 from lf_actor.relationship import PRINCIPAL as REL_PRINCIPAL
 from lf_actor.relationship import PendingRelEvent, RelationshipAdapter
-from lf_actor.rules import fallback_action, fallback_reply
+from lf_actor.rules import fallback_action, fallback_reply, routine_action
 from lf_actor.semantic import SemanticMemory
 
 logger = logging.getLogger("lf.actor.phases")
@@ -338,11 +345,11 @@ class ActorPhases:
                     text = fallback_reply(persona, envelope["payload"]["text"])
                 self._replies.append((actor_id, envelope, text))
 
-        # Cold 티어 — 통계 일괄 처리(ADR-012): LLM 없이 규칙 행동만, due일 때만(100 tick
-        # 케이던스). 강등된 액터가 얼지 않게 최소 생존시킨다 — 비용은 near-zero.
+        # Cold 티어 — 통계 일괄 처리(ADR-012): LLM 없이 일과 행동만, due일 때만(100 tick
+        # 케이던스). 잠든 기간의 생활 요약이라 스팸 없이 삶이 이어진다 — 비용 near-zero.
         for actor_id in due[Tier.COLD]:
             persona = self._personas[actor_id]
-            payload = fallback_action(persona, ctx.tick, f"cold-{actor_id}-{ctx.tick}")
+            payload = routine_action(persona, ctx.tick, f"cold-{actor_id}-{ctx.tick}")
             payload = sanitize_target(payload, set(self._personas), actor_id)
             self._intents.append((actor_id, Tier.COLD.value, payload))
             decided["cold"] += 1
@@ -685,7 +692,12 @@ class ActorPhases:
             )
 
     async def _reflect(self, ctx: TickContext) -> None:
-        """상태 패턴 → 신념 (규칙 기반 MVP — LLM reflection은 후속, ADR-008)."""
+        """경험 → 신념 (ADR-008 reflection). 두 경로가 한 저장 계약을 공유한다:
+
+        규칙(derive_beliefs)은 상태 패턴에서 — 결정적, 언제나 돈다.
+        LLM(_llm_insight)은 작업 기억을 곱씹은 통찰 하나를 더한다 — 미지원·실패면
+        조용히 생략 (규칙 신념이 바닥을 지킨다).
+        """
         if self._emotion is None or self._relationship is None or self._ledger is None:
             return
         names = {p.id: p.name for p in self._personas.values()}
@@ -696,10 +708,42 @@ class ActorPhases:
                 state = await self._relationship.load(ctx.world_id, actor_id, other_id)
                 if state is not None:
                     edges[other_id] = state
-            for belief in derive_beliefs(emotion_state, edges, name_map=names):
+            beliefs = derive_beliefs(emotion_state, edges, name_map=names)
+            insight = await self._llm_insight(ctx, actor_id, set(edges), names)
+            if insight is not None:
+                beliefs = [*beliefs, insight]
+            for belief in beliefs:
                 if not await self._ledger.changed(ctx.world_id, actor_id, belief):
                     continue
                 await self._store_belief(ctx, actor_id, belief)
+
+    async def _llm_insight(
+        self, ctx: TickContext, actor_id: str, counterparts: set[str], names: dict[str, str]
+    ) -> Belief | None:
+        """작업 기억을 곱씹은 LLM 통찰 하나 — "이 경험들이 의미하는 것" (ADR-008).
+
+        대상 후보는 아는 사람(관계 상대 + 동료 액터)뿐 — 환각 대상은 insight_to_belief가
+        끊는다. 곱씹을 경험이 없으면 묻지 않는다 (빈 기억에서 통찰은 안 나온다).
+        """
+        working = await self._memory.recent(ctx.world_id, actor_id)
+        if not working:
+            return None
+        known = sorted(counterparts | (set(self._personas) - {actor_id}))
+        roster = ", ".join(f"{names.get(a, a)}({a})" for a in known) or "(없음)"
+        world = WorldContext(world_id=ctx.world_id, tick=ctx.tick, world_time=ctx.world_time)
+        bundle = build(
+            self._personas[actor_id], [f"아는 사람들: {roster}", *working],
+            world, purpose="reflect",
+        )
+        output = await self._ai.reflect(
+            bundle, insight_schema(known), actor_id=actor_id, tick=ctx.tick
+        )
+        if output is None:
+            return None
+        belief = insight_to_belief(output, set(known))
+        if belief is not None:
+            logger.info("LLM 통찰: %s [%s] conf=%.2f", actor_id, belief.kind, belief.confidence)
+        return belief
 
     async def _store_belief(self, ctx: TickContext, actor_id: str, belief: Belief) -> None:
         head = await current_head(ctx.conn, ctx.world_id, "actor", actor_id)

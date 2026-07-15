@@ -174,6 +174,17 @@ _TASK_FRAMES = {
         "- 상대는 세계 밖의 관찰자지만, 당신에게는 그냥 아는 사람이다.\n"
         '- 출력은 {"text": "..."} JSON 하나뿐이다. JSON 외 텍스트 금지.'
     ),
+    "reflect": (
+        "## 임무\n"
+        "위 기억들을 곱씹어, 지금 당신 안에 굳어진 생각 하나를 명제로 만들어라 —\n"
+        "사건의 나열이 아니라 그 경험들이 '의미하는 것'이다 (ADR-008 reflection).\n"
+        "- statement: 신념 한 줄. 이 인물의 목소리로, 구체적으로.\n"
+        "- kind: self_image(나는 어떤 사람인가) / world_view(세상은 어떤 곳인가) /\n"
+        "  person_insight(특정 인물에 대한 깨달음).\n"
+        "- about_actor_id: person_insight면 반드시 '아는 사람들'의 id, 아니면 null.\n"
+        "- confidence: 확신 0~1 — 근거가 반복될수록 높다. 억지 통찰이면 낮게.\n"
+        "- 출력은 지정된 JSON 스키마를 정확히 따른다. JSON 외 텍스트 금지."
+    ),
 }
 
 

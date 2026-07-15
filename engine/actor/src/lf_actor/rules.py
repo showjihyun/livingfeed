@@ -77,3 +77,59 @@ def fallback_action(persona: Persona, tick: int, trace_id: str) -> dict[str, Any
         "params": {"fallback": True},
         "decision_trace": {"trace_id": trace_id, "tier": "cold_rule"},
     }
+
+
+#: Cold 일과 패턴 — 잠든 기간의 생활을 요약하는 서술 (ADR-012 §Cold 통계적 일괄 처리).
+#: 순간의 머뭇거림(fallback_action)과 달리 기간의 결이 담긴다. 최강 욕구가 기조,
+#: 두 번째 욕구가 틈틈이 스민다.
+_ROUTINE_PATTERNS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "achievement": ("work", (
+        "밀린 일을 차례로 쳐내며 조용히 보냈다",
+        "책상 앞을 지키며 제 몫의 일을 쌓았다",
+        "눈에 띄지 않게, 그러나 꾸준히 하던 일을 밀고 나갔다",
+    )),
+    "belonging": ("observe", (
+        "사람들의 근황을 살피며 조용히 지냈다",
+        "익숙한 얼굴들 곁을 맴돌며 시간을 보냈다",
+        "연락할까 말까 망설이며 한동안을 흘려보냈다",
+    )),
+    "security": ("rest", (
+        "생활의 리듬을 지키며 조용히 지냈다",
+        "무리하지 않는 선에서 하루하루를 정리했다",
+        "익숙한 일과를 반복하며 마음을 다독였다",
+    )),
+}
+
+_ROUTINE_SEASONING = {
+    "achievement": "틈틈이 밀린 일도 들여다봤다",
+    "belonging": "틈틈이 아는 사람들 소식도 살폈다",
+    "security": "틈틈이 생활을 정돈하기도 했다",
+}
+
+
+def routine_action(persona: Persona, tick: int, trace_id: str) -> dict[str, Any]:
+    """Cold 일과 행동 — 잠든 기간의 생활 요약 (ADR-012 §Cold '일과 이벤트 생성').
+
+    due tick(100 케이던스)마다 하나 — 기간을 서술하는 일과라 스팸이 아니다.
+    최강 욕구가 일과의 기조를, 두 번째 욕구가 양념을, tick 회전이 표현을 고른다.
+    결정적 — 같은 (페르소나, tick)이면 같은 일과다. 목표 응고(record_action)를
+    타고 잠든 삶도 천천히 전진한다.
+    """
+    ranked = sorted(persona.needs_bias or {"security": 1.0}, key=lambda k: (
+        -(persona.needs_bias or {"security": 1.0})[k], k,
+    ))
+    primary = ranked[0] if ranked[0] in _ROUTINE_PATTERNS else "security"
+    kind, phrases = _ROUTINE_PATTERNS[primary]
+    phrase = phrases[zlib.crc32(f"{persona.id}:routine:{tick}".encode()) % len(phrases)]
+    intent = f"{persona.name}, {phrase}"
+    secondary = next((n for n in ranked[1:] if n in _ROUTINE_SEASONING), None)
+    if secondary is not None:
+        intent += f". {_ROUTINE_SEASONING[secondary]}"
+    return {
+        "action_kind": kind,
+        "intent": intent[:500],
+        "target_actor_id": None,
+        "location_id": None,
+        "params": {"fallback": True, "routine": True},
+        "decision_trace": {"trace_id": trace_id, "tier": "cold_rule"},
+    }

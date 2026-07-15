@@ -89,6 +89,43 @@ class AiRuntimeClient:
         output = response.get("output")
         return output if isinstance(output, dict) else None
 
+    async def reflect(
+        self,
+        bundle: Bundle,
+        output_schema: dict[str, Any],
+        *,
+        actor_id: str,
+        tick: int,
+    ) -> dict[str, Any] | None:
+        """경험을 곱씹은 통찰 하나를 요청한다 (ADR-008 LLM reflection, tier=warm 고정).
+
+        실패는 None — 호출자가 통찰을 조용히 생략한다 (규칙 신념이 바닥을 지킨다).
+        rule 프로바이더는 reflect를 지원하지 않으므로 dev 기본에서는 언제나 생략된다.
+        """
+        request = {
+            "task": "reflect",
+            "bundle": {"system": bundle.system, "user": bundle.user, "trace_id": bundle.trace_id},
+            "output_schema": output_schema,
+            "actor_tier": "warm",  # 기억 품질 라우팅 (ADR-018 표: reflect×warm)
+            "trace": {"trace_id": bundle.trace_id, "actor_id": actor_id, "tick": tick},
+        }
+        try:
+            reply = await self._nc.request(
+                self._subject,
+                json.dumps(request, ensure_ascii=False).encode(),
+                timeout=self._timeout,
+            )
+        except (nats.errors.NoRespondersError, nats.errors.TimeoutError) as e:
+            logger.warning("AI Runtime 응답 없음 (reflect actor=%s): %s", actor_id, e)
+            return None
+
+        response = json.loads(reply.data)
+        if not response.get("ok"):
+            logger.info("reflect 생략 (actor=%s): %s", actor_id, response.get("error"))
+            return None
+        output = response.get("output")
+        return output if isinstance(output, dict) else None
+
     async def converse(
         self,
         bundle: Bundle,

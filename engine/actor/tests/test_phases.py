@@ -137,8 +137,12 @@ async def test_idle_actor_demotes_hot_to_warm(conn, redis, nc, ai_service):
     assert phases._lods["a_aria_kim"].tier is Tier.WARM  # 강등됨
 
 
-async def test_cold_actor_uses_rule_action_without_llm(conn, redis, nc, ai_service):
-    """Cold 티어는 통계 일괄 처리 — due일 때 LLM 없이 규칙 행동만 (ADR-012)."""
+async def test_cold_actor_uses_routine_action_without_llm(conn, redis, nc, ai_service):
+    """Cold 티어는 통계 일괄 처리 — due일 때 LLM 없이 일과 행동만 (ADR-012).
+
+    일과는 잠든 기간의 생활 요약이다 — 순간의 머뭇거림(fallback)이 아니라
+    기간의 결이 담긴 서술로 남는다 ('일과 이벤트 생성').
+    """
     phases = make_phases(nc, redis, ai_service)
     phases._lods["a_aria_kim"] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
     due_tick = phase_offset("a_aria_kim", COLD_INTERVAL)  # 이 tick에 cold가 due
@@ -146,8 +150,10 @@ async def test_cold_actor_uses_rule_action_without_llm(conn, redis, nc, ai_servi
 
     [action] = await read_stream(conn, WORLD, "actor", "a_aria_kim")
     payload = action.envelope["payload"]
-    assert payload["params"].get("fallback") is True       # 규칙 행동 (LLM 미호출)
+    assert payload["params"].get("fallback") is True       # 규칙 경로 (LLM 미호출)
+    assert payload["params"].get("routine") is True        # 일과 행동이다
     assert payload["decision_trace"]["tier"] == "cold_rule"
+    assert payload["action_kind"] == "work"  # achievement 기조의 일과
     events = await read_stream(conn, WORLD, "system", "tick")
     assert events[-1].envelope["payload"]["actors_decided"]["cold"] == 1
 

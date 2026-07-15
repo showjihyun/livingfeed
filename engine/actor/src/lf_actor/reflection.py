@@ -1,8 +1,9 @@
 """reflection — 경험이 신념이 되는 주기 단계 (ADR-008 §기억 수명주기).
 
-감정·관계 '상태'의 패턴을 읽어 신념 명제를 만든다. MVP는 규칙 기반
-(결정적 — 리플레이 재현). "이 경험들이 의미하는 것"을 묻는 LLM reflection은
-후속이며, 신념 이벤트·Semantic 저장 계약은 그대로 간다.
+두 경로가 한 계약을 공유한다 (신념 이벤트·Semantic 저장 동일):
+- 규칙(derive_beliefs): 감정·관계 '상태'의 패턴 — 결정적, 리플레이 재현, 언제나 돈다.
+- LLM(insight_*): "이 경험들이 의미하는 것" — 작업 기억을 곱씹은 통찰 하나를 더한다.
+  미지원(rule 프로바이더)·실패면 조용히 생략된다 — 규칙 신념이 바닥을 지킨다.
 
 신념은 (kind, about) 단위로 갱신된다: 확신이 임계 이상 변할 때만 재발행 —
 사람은 매시간 같은 결론을 새로 내리지 않는다.
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import Any
 
 from lf_emotion import EmotionState
 from lf_relationship import RelationshipState
@@ -19,6 +21,9 @@ from redis.asyncio import Redis
 
 #: 재발행 임계 — 직전 발행 대비 확신 변화가 이만큼 쌓여야 신념이 갱신된다
 RESTATE_DELTA = 0.15
+
+#: LLM 통찰의 닫힌 분류 — 규칙 신념(supporter/threat/felt_support)과 자리가 겹치지 않는다
+INSIGHT_KINDS = ("self_image", "world_view", "person_insight")
 
 
 @dataclass(frozen=True)
@@ -97,6 +102,51 @@ def derive_beliefs(
                 )
             )
     return beliefs
+
+
+def insight_schema(known_ids: list[str]) -> dict[str, Any]:
+    """LLM reflection 응답 스키마 — 통찰 하나. about은 아는 사람 안에서만 (닫힌 어휘)."""
+    return {
+        "type": "object",
+        "properties": {
+            "statement": {"type": "string", "minLength": 1, "maxLength": 300},
+            "kind": {"type": "string", "enum": list(INSIGHT_KINDS)},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "about_actor_id": {"enum": [*known_ids, None]},
+        },
+        "required": ["statement", "kind", "confidence", "about_actor_id"],
+        "additionalProperties": False,
+    }
+
+
+def insight_to_belief(output: dict[str, Any], known_ids: set[str]) -> Belief | None:
+    """검증된 LLM 통찰 → Belief. 하드룰 재집행 — 무효면 None (신념은 조용히 생략).
+
+    환각 대상은 끊는다(ADR-014 §대상 폴리시): 아는 사람 밖 about은 null로,
+    대상 없는 인물 통찰은 통찰이 아니다. 확신은 [0,1] 클램프.
+    """
+    statement = str(output.get("statement") or "").strip()[:300]
+    kind = output.get("kind")
+    if not statement or kind not in INSIGHT_KINDS:
+        return None
+    about = output.get("about_actor_id")
+    if about is not None and about not in known_ids:
+        about = None
+    if kind == "person_insight":
+        if about is None:
+            return None  # 인물 통찰은 대상이 있어야 한다
+    else:
+        about = None  # 자기/세계 통찰의 대상은 자기 자신이다 (스키마: null)
+    try:
+        confidence = max(0.0, min(1.0, round(float(output.get("confidence")), 4)))
+    except (TypeError, ValueError):
+        return None
+    if confidence <= 0.0:
+        return None  # 확신 없는 신념은 신념이 아니다
+    return Belief(
+        statement=statement, kind=kind, confidence=confidence,
+        about_id=about, source_event_ids=[],
+    )
 
 
 class BeliefLedger:

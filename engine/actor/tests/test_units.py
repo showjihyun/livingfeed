@@ -7,7 +7,7 @@ from lf_actor.arc import Arc
 from lf_actor.context import WorldContext, build
 from lf_actor.persona import load_persona, load_personas
 from lf_actor.phases import lod_after_perception, sanitize_target
-from lf_actor.rules import fallback_action
+from lf_actor.rules import fallback_action, routine_action
 from lf_schemas import registry
 from lf_tick.lod import ActorLod, Tier
 
@@ -85,6 +85,20 @@ def test_fallback_action_is_valid_and_personalized():
     assert action["action_kind"] == "work"  # achievement가 최강 욕구
     assert action["decision_trace"]["tier"] == "cold_rule"
     assert action == fallback_action(aria, tick=42, trace_id="t-1")  # 결정적
+
+
+def test_routine_action_narrates_period_by_needs():
+    """Cold 일과 — 최강 욕구가 기조, 두 번째 욕구가 양념 (ADR-012 '일과 이벤트 생성')."""
+    aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
+    action = routine_action(aria, tick=100, trace_id="t-1")
+    assert not list(Draft202012Validator(ACTION_SCHEMA).iter_errors(action))
+    assert action["action_kind"] == "work"  # achievement가 최강 욕구 — 일과의 기조
+    assert action["params"] == {"fallback": True, "routine": True}
+    assert action["decision_trace"]["tier"] == "cold_rule"
+    assert "틈틈이" in action["intent"]  # 두 번째 욕구가 스몄다
+    assert action == routine_action(aria, tick=100, trace_id="t-1")  # 결정적
+    # 순간 행동(fallback)과 다른 결 — 기간의 서술이다
+    assert action["intent"] != fallback_action(aria, 100, "t-1")["intent"]
 
 
 VALID_IDS = {"a_aria_kim", "a_junho_park"}
