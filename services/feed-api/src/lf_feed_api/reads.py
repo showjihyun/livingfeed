@@ -45,6 +45,13 @@ FROM read.actor_arcs
 WHERE world_id = %s AND actor_id = %s
 """
 
+_ARC_HISTORY_SQL = """
+SELECT stage, intention, planned_at
+FROM read.actor_arc_history
+WHERE world_id = %s AND actor_id = %s
+ORDER BY event_id
+"""
+
 _CONVERSATION_SQL = """
 SELECT event_id, sender, channel, text, post_id, tick, occurred_at
 FROM read.messages
@@ -56,7 +63,7 @@ LIMIT %s
 
 
 def _rows_to_dicts(columns: tuple[str, ...], rows: list[tuple]) -> list[dict[str, Any]]:
-    return [dict(zip(columns, row)) for row in rows]
+    return [dict(zip(columns, row, strict=True)) for row in rows]
 
 
 class ProfileReads:
@@ -90,8 +97,12 @@ class ProfileReads:
             arc_row = await (await conn.execute(
                 _ARC_SQL, (world_id, actor_id)
             )).fetchone()
+            arc_history = await (await conn.execute(
+                _ARC_HISTORY_SQL, (world_id, actor_id)
+            )).fetchall()
         identity = (
-            dict(zip(_IDENTITY_COLS, identity_row)) if identity_row is not None else None
+            dict(zip(_IDENTITY_COLS, identity_row, strict=True))
+            if identity_row is not None else None
         )
         episode_items = _rows_to_dicts(
             ("event_id", "tick", "occurred_at", "summary", "importance",
@@ -115,6 +126,10 @@ class ProfileReads:
             "arc": (
                 dict(zip(("stage", "intention", "planned_at"), arc_row, strict=True))
                 if arc_row is not None else None
+            ),
+            # 인생의 연대기 — 장의 흐름, 오래된 순 (append-only 이력)
+            "arc_history": _rows_to_dicts(
+                ("stage", "intention", "planned_at"), arc_history
             ),
         }
 

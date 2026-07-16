@@ -50,7 +50,7 @@ def create_app(
     graph: GraphQueryClient | None = None,
     reads: ProfileReads | None = None,
 ) -> FastAPI:
-    """앱 팩토리 — 테스트는 search/cache/graph/reads를 주입한다. 미주입분은 lifespan이 만들고 닫는다."""
+    """앱 팩토리 — 테스트는 search/cache/graph/reads 주입, 미주입분은 lifespan이 만든다."""
     cfg = cfg or Config.from_env()
 
     owned_search = search is None

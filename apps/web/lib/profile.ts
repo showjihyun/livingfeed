@@ -63,6 +63,8 @@ export interface ActorProfile {
   episodes: ActorEpisode[];
   /** 인생의 장 — read.actor_arcs (없으면 null, 그저 일상을 사는 중) */
   arc: ActorArc | null;
+  /** 인생의 연대기 — 장의 흐름, 오래된 순 (append-only 이력) */
+  arcHistory: ActorArc[];
 }
 
 /** feed-api GET /actors/{id}/profile 응답 (reads.py 계약) */
@@ -92,6 +94,7 @@ interface ProfileResponse {
     }[];
   };
   arc: { stage: string; intention: string; planned_at: string } | null;
+  arc_history: { stage: string; intention: string; planned_at: string }[];
 }
 
 /** 신념·기억 문장의 플레이어 id를 2인칭으로 — 액터는 id로 기억하지만 화면은 사람에게 말한다 */
@@ -139,6 +142,11 @@ function fromResponse(body: ProfileResponse): ActorProfile {
     arc: body.arc
       ? { stage: body.arc.stage, intention: body.arc.intention, plannedAt: body.arc.planned_at }
       : null,
+    arcHistory: (body.arc_history ?? []).map((c) => ({
+      stage: c.stage,
+      intention: c.intention,
+      plannedAt: c.planned_at,
+    })),
   };
 }
 

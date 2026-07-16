@@ -12,6 +12,8 @@
   플레이어↔액터 대화 히스토리 (WS 재접속 시 이어보기)
 - actor_arcs:     system.director.arc_planned — 액터별 현재 인생 아크
   (ADR-013/plan-08, 프로필 "인생의 장"). 다음 계획이 자리를 덮어쓴다
+- actor_arc_history: 같은 이벤트의 append-only 연대기 — 장의 흐름이 남는다
+  (프로필 "인생의 연대기"). 한 이벤트가 두 테이블에 프로젝션되는 첫 사례
 """
 
 from __future__ import annotations
@@ -91,11 +93,22 @@ CREATE TABLE IF NOT EXISTS read.actor_arcs (
     planned_at  TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (world_id, actor_id)
 );
+
+CREATE TABLE IF NOT EXISTS read.actor_arc_history (
+    event_id    TEXT PRIMARY KEY,
+    world_id    TEXT NOT NULL,
+    actor_id    TEXT NOT NULL,
+    stage       TEXT NOT NULL,
+    intention   TEXT NOT NULL,
+    planned_at  TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS actor_arc_history_chrono
+    ON read.actor_arc_history (world_id, actor_id, event_id);
 """
 
 TABLES = (
     "read.actor_episodes", "read.actor_beliefs", "read.messages",
-    "read.actors", "read.actor_arcs",
+    "read.actors", "read.actor_arcs", "read.actor_arc_history",
 )
 
 #: about_id null(자기 자신/세계에 대한 신념)의 PK 표현 — reflection의 자리 키와 동일 규약
@@ -145,6 +158,14 @@ ON CONFLICT (world_id, actor_id) DO UPDATE SET
     event_id   = excluded.event_id,
     planned_at = excluded.planned_at
 WHERE excluded.event_id > read.actor_arcs.event_id
+"""
+
+#: 연대기는 append-only — 같은 이벤트 재전달만 거른다 (장의 흐름이 이력으로 남는다)
+_ARC_HISTORY_SQL = """
+INSERT INTO read.actor_arc_history
+    (event_id, world_id, actor_id, stage, intention, planned_at)
+VALUES (%s, %s, %s, %s, %s, %s::timestamptz)
+ON CONFLICT (event_id) DO NOTHING
 """
 
 #: 정체성은 (world, actor) 자리 단위 upsert — 재선언(재시작 등)은 최신 ULID가 이긴다
@@ -220,15 +241,27 @@ def arc_params(envelope: dict[str, Any]) -> tuple:
     )
 
 
-#: type → (SQL, 파라미터 변환) — 목록에 없는 타입은 프로젝션 대상이 아니다 (전방 호환 무시)
-PROJECTIONS: dict[str, tuple[str, Any]] = {
-    "actor.memory.consolidated": (_EPISODE_SQL, episode_params),
-    "actor.belief.formed": (_BELIEF_SQL, belief_params),
-    "actor.identity.declared": (_ACTOR_SQL, actor_params),
-    "actor.message.sent": (_MESSAGE_SQL, message_params),
-    "player.dm.sent": (_MESSAGE_SQL, message_params),
-    "player.comment.posted": (_MESSAGE_SQL, message_params),
-    "system.director.arc_planned": (_ARC_SQL, arc_params),
+def arc_history_params(envelope: dict[str, Any]) -> tuple:
+    p = envelope["payload"]
+    return (
+        envelope["event_id"], envelope["world_id"], p["target_actor_id"],
+        p["stage"], p["intention"], envelope["occurred_at"],
+    )
+
+
+#: type → ((SQL, 파라미터 변환), ...) — 한 이벤트가 여러 테이블로 갈 수 있다
+#: (아크: 현재 자리 + 연대기). 목록에 없는 타입은 프로젝션 대상이 아니다 (전방 호환 무시)
+PROJECTIONS: dict[str, tuple[tuple[str, Any], ...]] = {
+    "actor.memory.consolidated": ((_EPISODE_SQL, episode_params),),
+    "actor.belief.formed": ((_BELIEF_SQL, belief_params),),
+    "actor.identity.declared": ((_ACTOR_SQL, actor_params),),
+    "actor.message.sent": ((_MESSAGE_SQL, message_params),),
+    "player.dm.sent": ((_MESSAGE_SQL, message_params),),
+    "player.comment.posted": ((_MESSAGE_SQL, message_params),),
+    "system.director.arc_planned": (
+        (_ARC_SQL, arc_params),
+        (_ARC_HISTORY_SQL, arc_history_params),
+    ),
 }
 
 
@@ -246,10 +279,10 @@ class ReadStore:
             await self._conn.execute(f"DROP TABLE IF EXISTS {table}")
 
     async def apply(self, envelope: dict[str, Any]) -> bool:
-        """봉투 하나를 반영한다. 반환: 프로젝션 대상 타입이었는가."""
-        projection = PROJECTIONS.get(envelope["type"])
-        if projection is None:
+        """봉투 하나를 반영한다 (타입에 걸린 전 테이블). 반환: 프로젝션 대상이었는가."""
+        projections = PROJECTIONS.get(envelope["type"])
+        if projections is None:
             return False
-        sql, params = projection
-        await self._conn.execute(sql, params(envelope))
+        for sql, params in projections:
+            await self._conn.execute(sql, params(envelope))
         return True

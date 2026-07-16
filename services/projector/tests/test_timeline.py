@@ -6,8 +6,6 @@
 
 import json
 
-import pytest
-
 from lf_projector.timeline import TimelineStore, follower_pair, reply_to_doc, ulid_ms
 
 from .conftest import sample

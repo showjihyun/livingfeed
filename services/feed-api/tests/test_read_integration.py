@@ -66,6 +66,9 @@ async def test_actor_profile_includes_arc(pg):
     assert profile["arc"]["stage"] == "settling"
     assert "이직" in profile["arc"]["intention"]
     assert profile["arc"]["planned_at"] is not None
+    # 연대기 — 장의 흐름 (지금은 첫 장 하나)
+    [chapter] = profile["arc_history"]
+    assert chapter["stage"] == "settling"
 
 
 async def test_actors_list_reads_identity(pg):

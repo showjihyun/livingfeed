@@ -134,6 +134,13 @@ async def test_arc_projects_and_upserts_forward(pg):
     assert row[1] == "prime"
     assert "증명한다" in row[2]
 
+    # 연대기는 append-only — 같은 이벤트 재전달만 걸러지고 장의 흐름이 전부 남는다
+    history = await (await pg.execute(
+        "SELECT stage FROM read.actor_arc_history"
+        " WHERE world_id = 'w_main' AND actor_id = 'a_minji_kim' ORDER BY event_id"
+    )).fetchall()
+    assert [h[0] for h in history] == ["student", "settling", "prime"]  # stale도 이력이다
+
 
 async def test_unknown_type_is_not_projected(pg):
     store = ReadStore(pg)

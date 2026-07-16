@@ -20,6 +20,8 @@ export function ProfileTab({ following, onToggleFollow, goDm, profile }: Profile
   const episodes = profile?.episodes ?? [];
   const identity = profile?.identity ?? null;
   const arc = profile?.arc ?? null;
+  // 지난 장들 (연대기, 오래된 순) — 마지막 항목은 현재 장이라 카드가 이미 보여준다
+  const pastChapters = (profile?.arcHistory ?? []).slice(0, -1);
   // 표시 이름·소개·목표는 라이브 identity에서 — 없으면 중립 문구 (특정 인물 하드코딩 금지)
   const displayName = identity?.name ?? "프로필";
   const displayBio = identity?.bio ?? "아직 소개가 연결되지 않았어요";
@@ -195,6 +197,31 @@ export function ProfileTab({ following, onToggleFollow, goDm, profile }: Profile
             <div style={{ fontSize: 14, lineHeight: 1.65, fontWeight: 500 }}>
               {humanize(arc.intention)}
             </div>
+            {pastChapters.length > 0 && (
+              // 인생의 연대기 — 여기까지 온 장들의 흔적 (오래된 순)
+              <div
+                style={{
+                  borderTop: "1px solid #EEF2FA",
+                  paddingTop: 10,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 5,
+                }}
+              >
+                {pastChapters.map((chapter, i) => (
+                  <div
+                    key={`${chapter.plannedAt}-${i}`}
+                    style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}
+                  >
+                    <span style={{ color: "#7B62C9", fontWeight: 800 }}>
+                      {ARC_STAGE_LABELS[chapter.stage] ?? chapter.stage}
+                    </span>
+                    {" — "}
+                    {humanize(chapter.intention)}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           <div
