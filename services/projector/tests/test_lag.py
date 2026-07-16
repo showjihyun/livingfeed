@@ -1,6 +1,7 @@
-"""프로젝션 lag 계측 검증 (ADR-020 §1) — 순수 로직 경계 + pg-projector 배선 스모크.
+"""프로젝션 lag 계측 검증 (ADR-020 §1) — 순수 로직 경계 + 전 프로젝터 배선 스모크.
 
 경계의 중심: TZ 정규화(Z/오프셋/결손), 빈 집계의 침묵, 발화 주기(건수·시간)의 리셋.
+배선 스모크는 프로젝터마다 하나: 성공 경로가 observe를 지나 ack에 닿는가.
 """
 
 import json
@@ -9,8 +10,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from lf_projector.config import Config
+from lf_projector.kuzu_projector import KuzuProjector
 from lf_projector.lag import LagAggregator, lag_seconds
+from lf_projector.os_projector import OsProjector
 from lf_projector.pg_projector import PgProjector
+from lf_projector.redis_projector import RedisProjector
 
 from .conftest import sample
 
@@ -127,3 +131,56 @@ async def test_handle_survives_missing_occurred_at(caplog):
         await projector()._handle(msg, StubStore(), js=None)
     assert msg.acked
     assert not [r for r in caplog.records if "projection_lag_seconds" in r.getMessage()]
+
+
+# ── redis/kuzu/os 배선 스모크 — 같은 observe가 각자의 logger로 발화한다 ──
+
+
+def _lag_line(caplog) -> str:
+    [line] = [r.getMessage() for r in caplog.records if "projection_lag_seconds" in r.getMessage()]
+    return line
+
+
+async def test_redis_handle_records_lag(caplog):
+    proj = RedisProjector(Config(nats_url="", opensearch_url="", env="test"))
+    proj._lag = LagAggregator(window=1)
+    msg = StubMsg(sample("feed.post.published"))
+
+    async def apply(envelope: dict) -> None:
+        pass
+
+    with caplog.at_level(logging.INFO, logger="lf.projector.redis"):
+        await proj._handle(msg, apply, js=None)
+    assert msg.acked
+    assert "count=1" in _lag_line(caplog)
+
+
+async def test_kuzu_handle_records_lag(tmp_path, caplog):
+    proj = KuzuProjector(
+        Config(nats_url="", opensearch_url="", env="test", kuzu_dir=str(tmp_path / "kuzu"))
+    )
+    proj._lag = LagAggregator(window=1)
+    msg = StubMsg(sample("relationship.state.changed"))
+    try:
+        with caplog.at_level(logging.INFO, logger="lf.projector.kuzu"):
+            await proj._handle(msg, js=None)
+    finally:
+        proj.graph.close()
+    assert msg.acked
+    assert "count=1" in _lag_line(caplog)
+
+
+class StubIndex:
+    async def bulk_upsert(self, docs: list[dict]) -> None:
+        pass
+
+
+async def test_os_batch_records_lag(caplog):
+    proj = OsProjector(Config(nats_url="", opensearch_url="", env="test"))
+    proj._lag = LagAggregator(window=1)
+    msg = StubMsg(sample("feed.post.published"))
+    with caplog.at_level(logging.INFO, logger="lf.projector.os"):
+        indexed = await proj.project_batch([msg], StubIndex(), js=None)
+    assert indexed == 1
+    assert msg.acked
+    assert "count=1" in _lag_line(caplog)

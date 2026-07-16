@@ -19,7 +19,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import UTC, datetime
 from typing import Any
 
 import nats
@@ -29,7 +28,7 @@ from nats.js.errors import NotFoundError
 from psycopg import AsyncConnection
 
 from lf_projector.config import Config
-from lf_projector.lag import LagAggregator, lag_seconds
+from lf_projector.lag import LagAggregator, observe
 from lf_projector.pg_read import ReadStore
 
 logger = logging.getLogger("lf.projector.pg")
@@ -90,23 +89,8 @@ class PgProjector:
         else:
             if applied:
                 logger.debug("반영 — %s", msg.subject)
-            self._observe_lag(envelope)
+            observe(self._lag, envelope, logger)
             await msg.ack()
-
-    def _observe_lag(self, envelope: dict[str, Any]) -> None:
-        """처리 성공 봉투의 발생→반영 지연 기록 (ADR-020 §1) — 실패는 ack를 막지 않는다."""
-        try:
-            now = datetime.now(UTC)
-            summary = self._lag.record(lag_seconds(envelope["occurred_at"], now), now)
-        except (KeyError, TypeError, ValueError):
-            # 계측은 부수 관찰이다 — occurred_at 결손·오형식이 프로젝션을 죽여선 안 된다
-            logger.debug("lag 계측 불가 — occurred_at=%r", envelope.get("occurred_at"))
-            return
-        if summary is not None:
-            logger.info(
-                "projection_lag_seconds max=%.3f avg=%.3f count=%d",
-                summary.max_s, summary.avg_s, summary.count,
-            )
 
     async def _to_dlq(self, msg: Any, js: Any, *, reason: str) -> None:
         subj = dlq_subject(self._cfg.env, msg.subject)

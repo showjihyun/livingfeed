@@ -27,6 +27,7 @@ from nats.js.errors import NotFoundError
 from lf_projector.config import Config
 from lf_projector.graph import RelGraph
 from lf_projector.graph_api import serve_graph_api
+from lf_projector.lag import LagAggregator, observe
 
 logger = logging.getLogger("lf.projector.kuzu")
 
@@ -40,6 +41,8 @@ class KuzuProjector:
     def __init__(self, cfg: Config) -> None:
         self._cfg = cfg
         self._graph = RelGraph(Path(cfg.kuzu_dir))
+        #: 프로젝션 lag 계측 — 예산 <2s의 관찰 수단 (ADR-020 §1)
+        self._lag = LagAggregator()
 
     @property
     def graph(self) -> RelGraph:
@@ -68,30 +71,36 @@ class KuzuProjector:
             except (TimeoutError, nats.errors.TimeoutError):
                 continue
             for msg in msgs:
-                try:
-                    self.project(json.loads(msg.data))
-                except (json.JSONDecodeError, KeyError, TypeError) as e:
-                    subj = dlq_subject(cfg.env, msg.subject)
-                    await js.publish(
-                        subj, msg.data,
-                        headers={"Nats-Msg-Id": f"dlq-kuzu-{msg.metadata.sequence.stream}"},
-                    )
-                    logger.warning("그래프 반영 불가 → DLQ %s: %s", subj, e)
-                    await msg.ack()
-                except Exception:
-                    if msg.metadata.num_delivered >= cfg.max_deliver:
-                        subj = dlq_subject(cfg.env, msg.subject)
-                        await js.publish(
-                            subj, msg.data,
-                            headers={"Nats-Msg-Id": f"dlq-kuzu-{msg.metadata.sequence.stream}"},
-                        )
-                        logger.exception("반영 반복 실패 → DLQ %s", subj)
-                        await msg.ack()
-                    else:
-                        logger.exception("반영 일시 오류 — 재전달 예약")
-                        await msg.nak(delay=cfg.nak_delay_s)
-                else:
-                    await msg.ack()
+                await self._handle(msg, js)
+
+    async def _handle(self, msg: Any, js: Any) -> None:
+        cfg = self._cfg
+        try:
+            envelope = json.loads(msg.data)
+            self.project(envelope)
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            subj = dlq_subject(cfg.env, msg.subject)
+            await js.publish(
+                subj, msg.data,
+                headers={"Nats-Msg-Id": f"dlq-kuzu-{msg.metadata.sequence.stream}"},
+            )
+            logger.warning("그래프 반영 불가 → DLQ %s: %s", subj, e)
+            await msg.ack()
+        except Exception:
+            if msg.metadata.num_delivered >= cfg.max_deliver:
+                subj = dlq_subject(cfg.env, msg.subject)
+                await js.publish(
+                    subj, msg.data,
+                    headers={"Nats-Msg-Id": f"dlq-kuzu-{msg.metadata.sequence.stream}"},
+                )
+                logger.exception("반영 반복 실패 → DLQ %s", subj)
+                await msg.ack()
+            else:
+                logger.exception("반영 일시 오류 — 재전달 예약")
+                await msg.nak(delay=cfg.nak_delay_s)
+        else:
+            observe(self._lag, envelope, logger)
+            await msg.ack()
 
     async def run(self, *, stop: asyncio.Event | None = None, rebuild: bool = False) -> None:
         stop = stop or asyncio.Event()

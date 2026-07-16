@@ -1,17 +1,19 @@
 """프로젝션 lag 계측 — 발생→read 반영 지연의 구조화 로그 MVP (ADR-020 §1).
 
 예산 "projection lag (전 프로젝터) < 2s"는 지금까지 관찰 수단이 없었다.
-Prometheus 이전 단계로 로그 한 줄부터 시작한다: 이 모듈은 계산과 발화 결정만
-담당하는 순수 로직이고, datetime.now 호출과 logger 배선은 어댑터
-(pg_projector — 공용이므로 다른 프로젝터도 같은 배선을 얹으면 된다)의 몫이다.
+Prometheus 이전 단계로 로그 한 줄부터 시작한다: lag_seconds/LagAggregator는
+계산과 발화 결정만 담당하는 순수 로직이고, datetime.now 호출과 logger 배선은
+observe() — 전 프로젝터(pg/os/kuzu/redis) 공용 어댑터 — 한 곳에 모은다.
 """
 
 from __future__ import annotations
 
+import logging
 from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from statistics import fmean
+from typing import Any
 
 
 def lag_seconds(occurred_at: str, now: datetime) -> float:
@@ -76,3 +78,23 @@ class LagAggregator:
         self._since_emit = 0
         self._last_emit = now
         return summary
+
+
+def observe(aggregator: LagAggregator, envelope: dict[str, Any], log: logging.Logger) -> None:
+    """처리 성공 봉투의 발생→반영 지연 기록 (ADR-020 §1) — 실패는 ack를 막지 않는다.
+
+    전 프로젝터 공용 배선: 각자의 logger를 넘기므로 로그 라인의 logger 이름이
+    어느 프로젝터의 lag인지 말해준다.
+    """
+    try:
+        now = datetime.now(UTC)
+        summary = aggregator.record(lag_seconds(envelope["occurred_at"], now), now)
+    except (KeyError, TypeError, ValueError):
+        # 계측은 부수 관찰이다 — occurred_at 결손·오형식이 프로젝션을 죽여선 안 된다
+        log.debug("lag 계측 불가 — occurred_at=%r", envelope.get("occurred_at"))
+        return
+    if summary is not None:
+        log.info(
+            "projection_lag_seconds max=%.3f avg=%.3f count=%d",
+            summary.max_s, summary.avg_s, summary.count,
+        )

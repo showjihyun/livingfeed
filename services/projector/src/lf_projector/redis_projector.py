@@ -29,6 +29,7 @@ from nats.js.errors import NotFoundError
 from redis.asyncio import Redis
 
 from lf_projector.config import Config
+from lf_projector.lag import LagAggregator, observe
 from lf_projector.timeline import TimelineStore, follower_pair
 
 logger = logging.getLogger("lf.projector.redis")
@@ -41,6 +42,8 @@ FOLLOW_TYPE = "player.follow.changed"
 class RedisProjector:
     def __init__(self, cfg: Config) -> None:
         self._cfg = cfg
+        #: 프로젝션 lag 계측 — 예산 <2s의 관찰 수단, 네 소스 공용 (ADR-020 §1)
+        self._lag = LagAggregator()
 
     def _sources(
         self, store: TimelineStore
@@ -118,7 +121,8 @@ class RedisProjector:
     ) -> None:
         cfg = self._cfg
         try:
-            await apply(json.loads(msg.data))
+            envelope = json.loads(msg.data)
+            await apply(envelope)
         except (json.JSONDecodeError, KeyError, TypeError) as e:
             await self._to_dlq(msg, js, reason=repr(e))
         except Exception:
@@ -128,6 +132,7 @@ class RedisProjector:
                 logger.exception("반영 일시 오류 — 재전달 예약")
                 await msg.nak(delay=cfg.nak_delay_s)
         else:
+            observe(self._lag, envelope, logger)
             await msg.ack()
 
     async def _to_dlq(self, msg: Any, js: Any, *, reason: str) -> None:

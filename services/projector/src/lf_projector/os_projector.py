@@ -21,6 +21,7 @@ from lf_dispatcher.subjects import dlq_subject
 from nats.js.errors import NotFoundError
 
 from lf_projector.config import Config
+from lf_projector.lag import LagAggregator, observe
 from lf_projector.os_index import OpenSearchIndex, envelope_to_doc
 
 logger = logging.getLogger("lf.projector.os")
@@ -31,6 +32,8 @@ FEED_POST_TYPE = "feed.post.published"
 class OsProjector:
     def __init__(self, cfg: Config) -> None:
         self._cfg = cfg
+        #: 프로젝션 lag 계측 — 예산 <2s의 관찰 수단 (ADR-020 §1)
+        self._lag = LagAggregator()
 
     async def project_batch(
         self, msgs: list[Any], index: OpenSearchIndex, js: Any
@@ -42,10 +45,13 @@ class OsProjector:
         """
         docs: list[dict[str, Any]] = []
         good: list[Any] = []
+        envelopes: list[dict[str, Any]] = []
         for msg in msgs:
             try:
-                docs.append(envelope_to_doc(json.loads(msg.data)))
+                envelope = json.loads(msg.data)
+                docs.append(envelope_to_doc(envelope))
                 good.append(msg)
+                envelopes.append(envelope)
             except (json.JSONDecodeError, KeyError, TypeError) as e:
                 if msg.metadata.num_delivered >= self._cfg.max_deliver:
                     await self._to_dlq(msg, js, reason=repr(e))
@@ -64,7 +70,8 @@ class OsProjector:
                 else:
                     await msg.nak(delay=self._cfg.nak_delay_s)
             return 0
-        for msg in good:
+        for msg, envelope in zip(good, envelopes, strict=True):
+            observe(self._lag, envelope, logger)
             await msg.ack()
         return len(docs)
 
