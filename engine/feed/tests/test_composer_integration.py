@@ -176,10 +176,16 @@ async def test_boost_lights_actor_actions_until_expiry(conn):
     [stored] = await read_stream(conn, SAMPLE["world_id"], "feed", post_id)
     assert stored.envelope["payload"]["worthiness"] >= 0.35
 
-    # 조명은 영원하지 않다 — until_tick부터 꺼진다
-    assert lit._active_boost({"actor_id": actor, "tick": 99}) == 0.6
-    assert lit._active_boost({"actor_id": actor, "tick": 100}) == 0.0
-    assert lit._active_boost({"actor_id": "a_junho_park", "tick": 50}) == 0.0  # 남의 조명 아님
+    # 조명은 영원하지 않다 — until_tick부터 꺼진다. 키는 (세계, 액터)다
+    world = SAMPLE["world_id"]
+    assert lit._active_boost({"world_id": world, "actor_id": actor, "tick": 99}) == 0.6
+    assert lit._active_boost({"world_id": world, "actor_id": actor, "tick": 100}) == 0.0
+    assert lit._active_boost(
+        {"world_id": world, "actor_id": "a_junho_park", "tick": 50}
+    ) == 0.0  # 남의 조명이 아니다
+    assert lit._active_boost(
+        {"world_id": "w_other", "actor_id": actor, "tick": 50}
+    ) == 0.0  # 같은 id라도 다른 세계의 조명이 아니다 (composer는 전 세계를 소비한다)
 
 
 def arc_envelope(event_id: str, stage: str) -> dict:

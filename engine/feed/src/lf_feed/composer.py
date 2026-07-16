@@ -77,9 +77,10 @@ class FeedComposer:
             actor_names if actor_names is not None else load_actor_names(cfg.personas_dir)
         )
         self._rarity = RarityTracker(cfg.scoring.rarity_window)
-        #: Director의 편집 조명 (boost_feed, ADR-013/014): actor → (boost, until_tick).
-        #: in-memory — 재시작 시 남은 조명이 꺼진다 (시즌 복원과 같은 MVP 허용 오차)
-        self._boosts: dict[str, tuple[float, int]] = {}
+        #: Director의 편집 조명 (boost_feed, ADR-013/014): (world, actor) → (boost, until).
+        #: composer는 전 세계를 소비하므로 세계가 키에 들어간다. in-memory — 재시작 시
+        #: 남은 조명이 꺼진다 (세계 열거 없이는 es 복원 불가, 조명은 60 tick짜리라 허용)
+        self._boosts: dict[tuple[str, str], tuple[float, int]] = {}
         #: 고드라마 포스트의 본문 서사화 (ADR-018 narrate) — None이면 언제나 템플릿.
         #: run()이 cfg.narrate에 따라 배선하고, 테스트는 스텁을 주입한다
         self._narrator = narrator
@@ -89,12 +90,13 @@ class FeedComposer:
         if envelope["type"] == BOOST_EVENT_TYPE:
             # 편집 조명 (boost_feed) — 포스트가 아니라 제어 신호다: 조명만 켠다
             payload = envelope["payload"]
-            self._boosts[payload["target_actor_id"]] = (
+            self._boosts[(envelope["world_id"], payload["target_actor_id"])] = (
                 float(payload["boost"]), int(payload["until_tick"])
             )
             logger.info(
-                "편집 조명: %s boost=%.2f until_tick=%d",
-                payload["target_actor_id"], payload["boost"], payload["until_tick"],
+                "편집 조명: %s/%s boost=%.2f until_tick=%d",
+                envelope["world_id"], payload["target_actor_id"],
+                payload["boost"], payload["until_tick"],
             )
             return None
         if envelope["type"] == INCIDENT_EVENT_TYPE:
@@ -161,12 +163,13 @@ class FeedComposer:
 
     def _active_boost(self, envelope: dict[str, Any]) -> float:
         """이 행동에 걸린 편집 조명 (boost_feed) — 기간이 지났으면 끈다."""
-        lit = self._boosts.get(envelope.get("actor_id") or "")
+        key = (envelope["world_id"], envelope.get("actor_id") or "")
+        lit = self._boosts.get(key)
         if lit is None:
             return 0.0
         boost, until_tick = lit
         if envelope["tick"] >= until_tick:
-            self._boosts.pop(envelope["actor_id"], None)  # 조명은 영원하지 않다
+            self._boosts.pop(key, None)  # 조명은 영원하지 않다
             return 0.0
         return boost
 
