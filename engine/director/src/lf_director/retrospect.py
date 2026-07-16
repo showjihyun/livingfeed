@@ -19,6 +19,7 @@ from lf_director.rules import ARC_TOOL, ARC_TYPE, SEASON_TOOL, SEASON_TYPE
 
 AUDIT_TYPE = "system.director.intervened"
 INCIDENT_TYPE = "world.incident.occurred"
+POST_TYPE = "feed.post.published"
 
 #: 회고가 읽는 스트림들 — Director 연출의 전 산출물 (감사·시즌·아크·사건)
 _SOURCES = (
@@ -26,6 +27,13 @@ _SOURCES = (
     ("system", "season"),
     ("system", "arc"),
     ("world", "incidents"),
+)
+
+#: 피드 포스트는 포스트별 스트림(stream_key=post_id)이라 read_stream 열거가 불가 —
+#: 서사 품질 지표(내레이션 비율 등)를 위해 read-only SELECT로 tick 창을 훑는다
+_FEED_SQL = (
+    "SELECT payload FROM es.events "
+    "WHERE world_id = %s AND type = 'feed.post.published' AND tick >= %s AND tick < %s"
 )
 
 
@@ -68,6 +76,21 @@ def fold_report(envelopes: list[dict[str, Any]]) -> dict[str, Any]:
             incident_kinds[kind] = incident_kinds.get(kind, 0) + 1
             intensities.append(float(payload.get("intensity", 0.0)))
 
+    posts = 0
+    llm_narrated = 0
+    transition_posts = 0
+    post_drama: list[float] = []
+    for envelope in envelopes:
+        if envelope["type"] != POST_TYPE:
+            continue
+        payload = envelope["payload"]
+        posts += 1
+        if payload.get("narration_kind") == "llm":
+            llm_narrated += 1
+        if "arc_transition" in payload.get("tags", []):
+            transition_posts += 1
+        post_drama.append(float(payload.get("drama_score", 0.0)))
+
     drama_total = sum(
         n for tool, n in by_tool.items() if tool not in (SEASON_TOOL, ARC_TOOL)
     )
@@ -97,6 +120,17 @@ def fold_report(envelopes: list[dict[str, Any]]) -> dict[str, Any]:
         },
         "season": {"themes_set": themes, "final_theme": themes[-1] if themes else None},
         "arcs": {"planned": arc_plans, "transitions": arc_transitions},
+        # 서사 품질 — 그 날 피드에 오른 이야기의 결 (편집 산출물 관점)
+        "narrative": {
+            "posts": posts,
+            "llm_narration_ratio": (
+                round(llm_narrated / posts, 4) if posts else None
+            ),
+            "arc_transition_posts": transition_posts,
+            "avg_post_drama": (
+                round(sum(post_drama) / len(post_drama), 4) if post_drama else None
+            ),
+        },
     }
 
 
@@ -140,6 +174,12 @@ async def season_retrospective(
             envelope = stored.envelope
             if lo <= envelope["tick"] < hi:
                 envelopes.append(envelope)
+    # 피드 포스트(서사 품질 재료) — 포스트별 스트림이라 SQL로 tick 창을 훑는다
+    rows = await (await conn.execute(_FEED_SQL, (world_id, lo, hi))).fetchall()
+    envelopes += [
+        {"type": POST_TYPE, "event_id": "", "tick": lo, "payload": payload}
+        for (payload,) in rows
+    ]
     report = fold_report(envelopes)
     report["world_id"] = world_id
     report["day"] = day

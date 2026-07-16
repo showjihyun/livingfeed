@@ -62,6 +62,25 @@ def test_fold_report_counts_arc_transitions_per_actor():
     assert report["arcs"] == {"planned": 4, "transitions": 3}
 
 
+def test_fold_report_measures_narrative_quality():
+    """서사 품질 — 그 날 피드의 결: 내레이션 비율·전환 포스트·드라마 평균."""
+    def post(event_id: str, narration: str, tags: list, drama: float) -> dict:
+        return {"type": "feed.post.published", "event_id": event_id, "tick": 10,
+                "payload": {"narration_kind": narration, "tags": tags,
+                            "drama_score": drama}}
+
+    report = fold_report([
+        post("01A", "llm", ["speak"], 0.5),
+        post("01B", "template", ["arc_transition", "prime"], 0.8),
+    ])
+    assert report["narrative"] == {
+        "posts": 2, "llm_narration_ratio": 0.5,
+        "arc_transition_posts": 1, "avg_post_drama": 0.65,
+    }
+    empty = fold_report([])["narrative"]
+    assert empty["posts"] == 0 and empty["llm_narration_ratio"] is None
+
+
 def test_fold_report_is_order_insensitive_and_empty_safe():
     # 봉투가 뒤섞여 들어와도 event_id 정렬로 같은 리포트 (리플레이 재현)
     a = audit("01A", 10, "inject_incident")
