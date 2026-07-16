@@ -1,0 +1,119 @@
+"""redis 팔로워 인덱스 무결성 검사 — 원천(es) 대비 (ADR-014 후속).
+
+기대 집합은 두 원천의 fold다 (timeline.py의 쓰기 규칙과 동형):
+관계 유래(액터↔플레이어 관계 스트림 키) ∪ 명시 팔로우 − 명시 철회(이긴다).
+타임라인(lf:tl) 자체는 상한·최종 일관성 때문에 개수 비교가 무의미해 검사하지
+않는다 — 인덱스가 맞으면 다음 포스트부터의 팬아웃이 맞는다.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from psycopg import AsyncConnection
+from redis.asyncio import Redis
+
+from lf_projector.timeline import TimelineStore
+
+logger = logging.getLogger("lf.projector.timeline_verify")
+
+_REL_KEYS_SQL = (
+    "SELECT DISTINCT stream_key FROM es.events"
+    " WHERE world_id = %s AND stream = 'relationship'"
+)
+_FOLLOW_SQL = (
+    "SELECT payload FROM es.events"
+    " WHERE world_id = %s AND type = 'player.follow.changed' ORDER BY event_id"
+)
+_WORLDS_SQL = (
+    "SELECT DISTINCT world_id FROM es.events"
+    " WHERE stream = 'relationship' OR type = 'player.follow.changed'"
+)
+
+
+def fold_followers(
+    rel_keys: list[str], follow_payloads: list[dict[str, Any]]
+) -> dict[str, set[str]]:
+    """원천 → 기대 팔로워 (순수 fold — timeline.py 쓰기 규칙과 동형).
+
+    관계 키("from|to")의 액터↔플레이어 쌍이 stand-in으로 들어가고, 명시
+    선언은 (player, actor)당 마지막이 이긴다 — 철회면 stand-in도 밀어낸다.
+    """
+    followers: dict[str, set[str]] = {}
+    for key in rel_keys:
+        from_id, _, to_id = key.partition("|")
+        if not to_id:
+            continue
+        from_player, to_player = from_id.startswith("p_"), to_id.startswith("p_")
+        if from_player == to_player:  # 액터↔액터는 팔로우가 아니다 (follower_pair와 동형)
+            continue
+        actor, player = (to_id, from_id) if from_player else (from_id, to_id)
+        followers.setdefault(actor, set()).add(player)
+
+    last: dict[tuple[str, str], bool] = {}
+    for payload in follow_payloads:  # event_id 순 — 마지막 선언이 이긴다
+        last[(payload["player_id"], payload["target_actor_id"])] = bool(payload["following"])
+    for (player, actor), following in last.items():
+        bucket = followers.setdefault(actor, set())
+        if following:
+            bucket.add(player)
+        else:
+            bucket.discard(player)
+    return {actor: players for actor, players in followers.items() if players}
+
+
+async def verify_timeline_world(
+    conn: AsyncConnection, redis: Redis, world_id: str
+) -> dict[str, Any]:
+    """세계 하나의 팔로워 인덱스 무결성 — 액터별 기대/실측 집합 비교."""
+    rel_keys = [
+        r[0] for r in await (await conn.execute(_REL_KEYS_SQL, (world_id,))).fetchall()
+    ]
+    follows = [
+        r[0] for r in await (await conn.execute(_FOLLOW_SQL, (world_id,))).fetchall()
+    ]
+    expected = fold_followers(rel_keys, follows)
+
+    store = TimelineStore(redis)
+    actual: dict[str, set[str]] = {}
+    prefix = f"lf:tlflw:{world_id}:"
+    async for key in redis.scan_iter(match=f"{prefix}*"):
+        name = key.decode() if isinstance(key, bytes) else key
+        actor = name.removeprefix(prefix)
+        members = await store.followers(world_id, actor)
+        if members:
+            actual[actor] = members
+
+    mismatched = {
+        actor: {
+            "expected": sorted(expected.get(actor, set())),
+            "actual": sorted(actual.get(actor, set())),
+        }
+        for actor in set(expected) | set(actual)
+        if expected.get(actor, set()) != actual.get(actor, set())
+    }
+    report = {
+        "ok": not mismatched,
+        "actors": len(set(expected) | set(actual)),
+        "mismatched": mismatched,
+    }
+    logger.info(
+        "팔로워 인덱스 무결성 %s — world=%s actors=%d mismatched=%d",
+        "OK" if report["ok"] else "MISMATCH", world_id,
+        report["actors"], len(mismatched),
+    )
+    return report
+
+
+async def verify_timeline(
+    conn: AsyncConnection, redis: Redis, *, world_id: str | None = None
+) -> dict[str, Any]:
+    """세계별 팔로워 인덱스 무결성 — world_id를 주면 그 세계만."""
+    if world_id is not None:
+        worlds = [world_id]
+    else:
+        rows = await (await conn.execute(_WORLDS_SQL)).fetchall()
+        worlds = sorted(w for (w,) in rows)
+    reports = {world: await verify_timeline_world(conn, redis, world) for world in worlds}
+    return {"ok": all(r["ok"] for r in reports.values()), "worlds": reports}
