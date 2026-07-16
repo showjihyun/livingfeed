@@ -451,6 +451,31 @@ def test_apply_season_updates_pacing_params_and_current_theme():
     assert director._current_theme == "turmoil"
 
 
+async def test_restore_from_history_rebuilds_control_state(conn):
+    """재시작 복원 (이벤트 소싱) — 시즌 테마·드라마 예산·도구 이력·시즌-일이
+    자기 산출 스트림 재소비로 되돌아온다. in-memory 유실 허용 오차의 해소."""
+    # 이전 생애: 시즌 계획 1건 + 드라마 개입 2건을 실제로 적재
+    season_ai = _StubAiClient({"season_theme": "turmoil", "rationale": "격동으로"})
+    past = make_llm_director(season_ai)
+    assert await past.plan_season(conn, Snapshot(tick=360, drama_ma=0.05, quiet_ticks=30))
+    ruler = make_director()
+    assert await ruler.evaluate(
+        conn, Snapshot(tick=400, drama_ma=0.05, quiet_ticks=30), graph=None
+    )
+    assert await ruler.evaluate(
+        conn, Snapshot(tick=470, drama_ma=0.05, quiet_ticks=30), graph=None
+    )
+
+    # 재시작 — 새 인스턴스가 스트림을 되읽어 제어 상태를 복원한다
+    fresh = make_director()
+    await fresh._restore_from_history(conn)
+    assert fresh._current_theme == "turmoil"
+    assert fresh._params["observation"]["quiet_ticks_to_fire"] == 12  # 시즌 페이싱 복원
+    assert fresh._budget.interventions_total == 2  # 드라마 2건 — 시즌 감사는 예산 제외
+    assert list(fresh._recent_tools) == ["inject_incident", "inject_incident"]
+    assert fresh._last_season_day == 1  # 재시작 직후 같은 날을 두 번 계획하지 않는다
+
+
 def test_season_audit_does_not_consume_drama_budget():
     # season·arc 감사 재소비는 드라마 예산으로 세지 않는다 (분리, ADR-013)
     director = make_director()

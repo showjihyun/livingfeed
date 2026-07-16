@@ -19,7 +19,7 @@ from typing import Any
 
 import nats
 import nats.errors
-from lf_eventstore import NewEvent, append, current_head, new_ulid
+from lf_eventstore import NewEvent, append, current_head, new_ulid, read_stream
 from lf_projector.graph_api import GraphQueryClient
 from psycopg import AsyncConnection
 
@@ -60,6 +60,9 @@ AUDIT_TYPE = "system.director.intervened"
 #: 감사 스트림 파티션 — Director는 세계당 1 인스턴스라 CAS 경합이 없다.
 #: 산출 world.* 이벤트의 타입/파티션은 Intervention이 도구별로 안다 (rules/planner).
 AUDIT_STREAM_KEY = "director"
+
+#: 재시작 복원 시 되읽는 감사 꼬리 — 예산 창·이력 deque가 어차피 최근만 본다
+RESTORE_TAIL = 50
 
 
 class Director:
@@ -331,11 +334,38 @@ class Director:
             envelope["tick"], envelope["payload"].get("target_correlation_id")
         )
 
+    async def _restore_from_history(self, conn: AsyncConnection) -> None:
+        """재시작 복원 — 자기 산출 스트림을 되읽어 제어 상태를 되찾는다 (이벤트 소싱).
+
+        durable은 ack된 과거를 다시 주지 않으므로 시즌 테마·드라마 예산·최근 도구
+        흐름이 in-memory에서 유실되던 허용 오차를 해소한다. 감사는 꼬리(RESTORE_TAIL)만
+        되읽는다 — 예산 창과 이력 deque가 어차피 최근만 본다. 시즌-일 경계도 복원해
+        재시작 직후 같은 날을 두 번 계획하지 않는다.
+        """
+        cfg = self._cfg
+        seasons = await read_stream(conn, cfg.world_id, "system", "season")
+        if seasons:
+            self._apply_season(seasons[-1].envelope)
+        audits = await read_stream(conn, cfg.world_id, "system", AUDIT_STREAM_KEY)
+        for stored in audits[-RESTORE_TAIL:]:
+            envelope = stored.envelope
+            if envelope["payload"].get("tool") in (SEASON_TOOL, ARC_TOOL):
+                # 저빈도 계획의 흔적이 곧 시즌-일 장부다
+                day = envelope["tick"] // cfg.season_interval_ticks
+                self._last_season_day = max(self._last_season_day, day)
+            self._restore_budget(envelope)
+        if seasons or audits:
+            logger.info(
+                "재시작 복원: 감사 %d건 꼬리 재소비 — 테마=%s 예산창=%d건 시즌일=%d",
+                min(len(audits), RESTORE_TAIL), self._current_theme,
+                len(self._budget.recent_ticks), self._last_season_day,
+            )
+
     def _apply_season(self, envelope: dict[str, Any]) -> None:
         """자기 season_set 이벤트를 소비해 시즌 페이싱 파라미터를 갱신한다 (ADR-013).
 
-        시즌 상태는 이벤트에서 복원된다. 재시작 시 durable이 지난 이벤트를 다시 읽지
-        않으므로 마지막 테마가 유실될 수 있다 — budget 복원과 같은 MVP 허용 오차다.
+        라이브에서는 durable 소비로, 재시작 시에는 _restore_from_history가 스트림을
+        되읽어 부른다 — 마지막 테마는 유실되지 않는다 (이벤트 소싱).
         갱신 노브는 개입 빈도(갈등 빈도)뿐이라 DramaWindow(quiet_threshold)는 무관하다.
         """
         p = envelope["payload"]
@@ -353,6 +383,8 @@ class Director:
         nc = await nats.connect(cfg.nats_url)
         async with await AsyncConnection.connect(cfg.pg_dsn, autocommit=True) as conn:
             try:
+                # 제어 상태 복원 — 시즌 테마·예산·도구 이력이 재시작을 가로지른다
+                await self._restore_from_history(conn)
                 js = nc.jetstream()
                 graph = GraphQueryClient(nc, cfg.env)
                 # LLM 개입 선택 배선 — 명시 주입(테스트)이 없고 켜져 있을 때만.
