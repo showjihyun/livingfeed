@@ -11,7 +11,11 @@ drama_contribution:
     default: 0.05
     target_multiplier: 1.3   # 대인 사건이 더 극적이다
   actor.emotion.shifted:
-    intensity_weight: 0.5    # 최고 감정 강도 × 계수
+    # 세계 상주 실행(2026-07-17)의 튜닝: 0.5는 만성 목표결핍 distress(0.7~0.9,
+    # 행동 tick마다 재적재)만으로 임계(0.2)를 넘겨 침체 감지가 영원히 포화했다 —
+    # 내면 상태의 재진술은 서사가 아니다. 0.15면 만성 재진술(≈0.13)은 임계 아래,
+    # 사건성 복합 신호(갈등+감정+편집 통과)는 여전히 임계를 넘는다.
+    intensity_weight: 0.15   # 최고 감정 강도 × 계수
   feed.post.published:
     drama_weight: 0.3        # 편집 통과 자체가 서사 신호다
 

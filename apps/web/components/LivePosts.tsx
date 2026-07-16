@@ -7,7 +7,7 @@
  * 백엔드 미가용이면 "오프라인" 칩만 남는다 (하드코딩 데모 카드 없음).
  */
 
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 
 import { ICON } from "@/lib/data";
 import type { LivePost, LiveStatus } from "@/lib/live-feed";
@@ -57,7 +57,17 @@ function Avatar({ seed, label, size }: { seed: string; label: string; size: numb
   );
 }
 
+/** '쓰고 있어요'를 분 단위로 주장하지 않기 위한 전환 시점 — 세계는 tick 페이스로 답한다 */
+const TYPING_PATIENT_AFTER_MS = 45_000;
+
 function TypingDots() {
+  // 답장은 그 사람의 tick 차례에 온다 (LOD·세계 시간) — 잠시 후엔 타이핑이 아니라
+  // 기다림의 문장으로 바꾼다. 답이 오면 이 표시 자체가 댓글로 교체된다.
+  const [patient, setPatient] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setPatient(true), TYPING_PATIENT_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, []);
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center", paddingLeft: 4 }}>
       <div
@@ -78,12 +88,16 @@ function TypingDots() {
               height: 6,
               borderRadius: "50%",
               background: ["#6B7691", "#9AA6BF", "#CBD5E8"][i],
-              animation: `lf-blink 1s ${delay}s infinite`,
+              animation: patient ? undefined : `lf-blink 1s ${delay}s infinite`,
             }}
           />
         ))}
       </div>
-      <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}>답을 쓰고 있어요...</div>
+      <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}>
+        {patient
+          ? "전해졌어요 — 답장은 그 사람의 시간에 맞춰 와요"
+          : "답을 쓰고 있어요..."}
+      </div>
     </div>
   );
 }

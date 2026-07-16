@@ -62,6 +62,40 @@ def test_contribution_reads_emotion_and_feed():
     assert drama_contribution(unknown) == 0.0
 
 
+def emotion_restate(intensity: float = 0.85) -> dict:
+    return {
+        "type": "actor.emotion.shifted",
+        "payload": {
+            "emotions": [{"type": "distress", "intensity": intensity, "target_id": None}]
+        },
+    }
+
+
+def test_chronic_mood_restatement_does_not_mask_stagnation():
+    """만성 내면 상태의 재진술은 서사가 아니다 — 침체 감지를 포화시키면 안 된다.
+
+    세계 상주 실행(로드맵 55)의 발견: 목표 결핍 distress(0.7~0.9)가 행동 tick마다
+    재적재되며 drama_ma가 임계 아래로 못 내려가 director가 영원히 침묵했다 —
+    피드는 비어 있는데 세계가 '충분히 극적'으로 보였다.
+    """
+    window = DramaWindow()
+    threshold = default_params()["observation"]["quiet_threshold"]
+    quiet_to_fire = default_params()["observation"]["quiet_ticks_to_fire"]
+    snapshot = None
+    for tick in range(40):  # 일상 행동 + 만성 distress 재진술만 있는 세계
+        window.observe(action("rest"))
+        window.observe(emotion_restate())
+        snapshot = window.close_tick(tick)
+    assert snapshot is not None
+    assert snapshot.drama_ma < threshold  # 이것은 침체다
+    assert snapshot.quiet_ticks >= quiet_to_fire  # 드라마 게이트가 열릴 수 있어야 한다
+
+    # 반대로 진짜 사건(대인 갈등 + 편집 통과)은 여전히 침체를 푼다
+    window.observe(action("confront", "a_b"))
+    window.observe({"type": "feed.post.published", "payload": {"drama_score": 0.9}})
+    assert window.close_tick(40).quiet_ticks == 0
+
+
 def test_quiet_ticks_accumulate_and_reset_on_drama():
     window = DramaWindow()
     threshold = default_params()["observation"]["quiet_threshold"]
