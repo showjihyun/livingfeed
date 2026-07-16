@@ -20,6 +20,9 @@ from lf_goal.engine import (
     appraise_action as appraise_action,
 )
 from lf_goal.engine import (
+    arc_focus_need as arc_focus_need,
+)
+from lf_goal.engine import (
     decay as decay,
 )
 from lf_goal.engine import (

@@ -18,6 +18,7 @@ from lf_goal import (
     GoalAdvance,
     GoalState,
     appraise_action,
+    arc_focus_need,
     decay,
     describe,
     initial_state,
@@ -69,10 +70,19 @@ class GoalAdapter:
             json.dumps(state.to_json(), ensure_ascii=False),
         )
 
-    async def summary(self, world_id: str, persona: Persona) -> str:
-        """욕구·목표 요약 한 줄 — decide 전 Working Memory 주입용 (액터가 목표를 좇게)."""
+    async def summary(
+        self, world_id: str, persona: Persona, *, arc_stage: str | None = None
+    ) -> str:
+        """욕구·목표 요약 한 줄 — decide 전 Working Memory 주입용 (액터가 목표를 좇게).
+
+        arc_stage(있으면)가 미는 욕구의 목표가 앞자리를 차지한다 — 인생의 장이
+        목표 순서로 스민다 (plan/08 전환점 사슬). 강제가 아니라 강조다.
+        """
         state = await self.load(world_id, persona)
-        return describe(state, list(persona.goals), persona.needs_bias)
+        return describe(
+            state, list(persona.goals), persona.needs_bias,
+            focus_need=arc_focus_need(arc_stage),
+        )
 
     async def record_interaction(
         self, world_id: str, persona: Persona, interaction_type: str

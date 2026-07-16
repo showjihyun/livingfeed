@@ -6,6 +6,7 @@
 from lf_goal import (
     GoalState,
     appraise_action,
+    arc_focus_need,
     decay,
     describe,
     initial_state,
@@ -116,6 +117,23 @@ def test_describe_names_pressing_need_and_top_goal():
     text = describe(state, MINJI_GOALS, MINJI_BIAS)
     assert "목마른" in text
     assert "사이드 프로젝트" in text
+
+
+def test_arc_focus_reorders_and_marks_aligned_goal():
+    """아크가 미는 욕구의 목표가 앞자리 + 표식 — 인생의 장이 목표 순서로 스민다
+    (plan/08 전환점 사슬). 목록은 그대로, 순서와 강조만 바뀐다."""
+    state = initial_state(MINJI_GOALS, MINJI_BIAS)
+    # work로 사이드 프로젝트(achievement)가 진행됨 — 진행도 기준이면 이게 앞이다
+    state = appraise_action(state, "work", MINJI_GOALS, MINJI_BIAS).state
+    plain = describe(state, MINJI_GOALS, MINJI_BIAS)
+    assert plain.index("사이드 프로젝트") < plain.index("퇴사 결정")
+
+    # settling(정착기) 아크 → security를 민다 → 퇴사 결정이 앞자리로 온다
+    focused = describe(state, MINJI_GOALS, MINJI_BIAS, focus_need=arc_focus_need("settling"))
+    assert focused.index("퇴사 결정") < focused.index("사이드 프로젝트")
+    assert "퇴사 결정" in focused.split("마음이 기우는 곳")[0]  # 표식이 정렬 목표에 붙는다
+    # 미지 단계·아크 없음 — 재배열 없음
+    assert arc_focus_need("wanderer") is None and arc_focus_need(None) is None
 
 
 def test_starvation_fires_for_deprived_cared_need():

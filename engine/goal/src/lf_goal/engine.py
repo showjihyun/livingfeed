@@ -209,17 +209,46 @@ def starvation(
 _NEED_KO = {"achievement": "인정·성취", "belonging": "소속·연결", "security": "안정"}
 
 
+#: 인생 단계 → 그 시기가 미는 욕구 (plan/08 Life Journey — 아크가 목표를 재배열한다)
+STAGE_NEEDS = {
+    "student": "achievement",   # 배우고 증명하는 시기
+    "newcomer": "belonging",    # 새 자리에 스며드는 시기
+    "settling": "security",     # 뿌리를 내리는 시기
+    "prime": "achievement",     # 정점을 지키고 증명하는 시기
+    "elder": "belonging",       # 잇고 남기는 시기
+}
+
+
+def arc_focus_need(stage: str | None) -> str | None:
+    """아크의 인생 단계 → 이번 시즌이 미는 욕구 — 닫힌 어휘 밖이면 None (재배열 없음)."""
+    return STAGE_NEEDS.get(stage) if stage else None
+
+
 def describe(
-    state: GoalState, persona_goals: list[dict[str, Any]], needs_bias: dict[str, float]
+    state: GoalState,
+    persona_goals: list[dict[str, Any]],
+    needs_bias: dict[str, float],
+    *,
+    focus_need: str | None = None,
 ) -> str:
-    """욕구·목표 요약 한 줄 (Context Fabric Working 섹션 주입 — 액터가 목표를 좇게)."""
+    """욕구·목표 요약 한 줄 (Context Fabric Working 섹션 주입 — 액터가 목표를 좇게).
+
+    focus_need(아크가 미는 욕구, plan/08)가 있으면 그 욕구를 섬기는 목표가 앞자리를
+    차지하고 표식이 붙는다 — 인생의 장이 오늘의 결정에서 목표 순서로 나타난다.
+    강제가 아니다: 목표 목록은 그대로고 순서와 강조만 바뀐다. 선택은 액터의 몫.
+    """
     need = pressing_need(state, needs_bias)
     parts = [f"지금 가장 목마른 것: {_NEED_KO.get(need, need)}"]
-    ranked = sorted(
-        persona_goals, key=lambda g: state.goals.get(str(g.get("id")), 0.0), reverse=True
-    )
-    for goal in ranked[:2]:
+
+    def rank(goal: dict[str, Any]) -> tuple[int, float]:
+        aligned = focus_need is not None and goal.get("need") == focus_need
+        return (0 if aligned else 1, -state.goals.get(str(goal.get("id")), 0.0))
+
+    for goal in sorted(persona_goals, key=rank)[:2]:
         gid = str(goal.get("id"))
         progress = state.goals.get(gid, 0.0)
-        parts.append(f"{goal.get('description', gid)} ({round(progress * 100)}%)")
+        line = f"{goal.get('description', gid)} ({round(progress * 100)}%)"
+        if focus_need is not None and goal.get("need") == focus_need:
+            line += " ← 이번 시즌 마음이 기우는 곳"
+        parts.append(line)
     return " · ".join(parts)

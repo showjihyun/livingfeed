@@ -307,11 +307,16 @@ class ActorPhases:
             for actor_id in due[tier]:
                 persona = self._personas[actor_id]
                 working = await self._memory.recent(ctx.world_id, actor_id)
-                # 현재 욕구·목표를 결정 앞에 세운다 — 액터가 자기 목표를 좇게 (ADR-012)
-                if self._goal is not None:
-                    working = [await self._goal.summary(ctx.world_id, persona), *working]
-                episodes = await self._recall(ctx.world_id, actor_id, working)
                 arc = await self._arc_of(ctx.world_id, actor_id)
+                # 현재 욕구·목표를 결정 앞에 세운다 — 액터가 자기 목표를 좇게 (ADR-012).
+                # 아크(있으면)가 미는 욕구의 목표가 앞자리다 (plan/08 전환점 사슬)
+                if self._goal is not None:
+                    summary = await self._goal.summary(
+                        ctx.world_id, persona,
+                        arc_stage=arc.stage if arc is not None else None,
+                    )
+                    working = [summary, *working]
+                episodes = await self._recall(ctx.world_id, actor_id, working)
                 bundle = build(persona, working, world, episodes=episodes, arc=arc)
                 payload = await self._ai.decide_action(
                     bundle, schema, tier=tier.value, actor_id=actor_id, tick=ctx.tick
