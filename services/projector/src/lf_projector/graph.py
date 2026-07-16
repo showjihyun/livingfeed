@@ -76,6 +76,8 @@ _TENSION = (
     "ORDER BY r.resentment DESC LIMIT $limit"
 )
 
+_ALL_EDGES = "MATCH (a:Actor)-[r:RELATES]->(b:Actor) RETURN a.id, b.id"
+
 
 class RelGraph:
     """세계별 Kuzu DB 핸들 캐시 + 정형 연산."""
@@ -146,6 +148,15 @@ class RelGraph:
                     "stage": p["stage"], "tick": int(envelope["tick"]),
                 },
             )
+
+    def all_edges(self, world_id: str) -> set[tuple[str, str]]:
+        """세계의 전체 방향 엣지 (from, to) — 무결성 검사(kuzu_verify)의 실측값."""
+        result = self._conn(world_id).execute(_ALL_EDGES)
+        edges: set[tuple[str, str]] = set()
+        while result.has_next():
+            from_id, to_id = result.get_next()
+            edges.add((from_id, to_id))
+        return edges
 
     def player_graph(self, world_id: str, player_id: str) -> dict[str, Any]:
         """플레이어와 닿아 있는 엣지 전부 — FE 관계 그래프의 실측값 (방향별 max)."""

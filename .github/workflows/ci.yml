@@ -195,6 +195,11 @@ jobs:
           - service: feed-api
             package: lf-feed-api
             app_module: lf_feed_api.main:app
+          # 프로젝션 워커 공용 이미지 — compose가 command로 --kind(kuzu/pg/os/redis)를
+          # 정한다 (uvicorn 대상이 아니라 APP_MODULE은 자리표시자)
+          - service: projector
+            package: lf-projector
+            app_module: unused
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
