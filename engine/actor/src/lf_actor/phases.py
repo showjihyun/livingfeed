@@ -35,6 +35,7 @@ from lf_actor.consolidation import (
     Episode,
     ImportanceWeights,
     TickMaterials,
+    action_label,
     build_episode,
     describe_interaction,
 )
@@ -522,7 +523,8 @@ class ActorPhases:
                 )
             )
             memos.setdefault(actor_id, []).append(
-                f"tick {ctx.tick}: 나는 {payload['action_kind']} — {payload['intent']}"
+                f"tick {ctx.tick}: 나는 {action_label(payload['action_kind'])}"
+                f" — {payload['intent']}"
             )
 
         # 감정 변화 먼저 — 응답·행동의 원인 상태가 앞서 기록된다 (ADR-015)

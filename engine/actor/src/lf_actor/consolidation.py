@@ -10,6 +10,26 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+#: action_kind → 기억 문장의 한글 라벨 — 원시 kind는 태그(검색·집계)에만 남는다.
+#: action_kind는 열린 어휘(스키마 pattern)라 모르는 kind는 원문 폴백(전방 호환).
+_ACTION_LABELS = {
+    "work": "일",
+    "rest": "쉼",
+    "observe": "관찰",
+    "move": "이동",
+    "reflect_quietly": "혼자 생각",
+    "speak": "대화",
+    "confront": "대면",
+    "help": "도움",
+    "confess": "고백",
+    "sever": "절연",
+}
+
+
+def action_label(kind: str) -> str:
+    """기억·메모 문장에 넣는 행동의 한글 라벨 — 기계 어휘를 일기에 남기지 않는다."""
+    return _ACTION_LABELS.get(kind, kind)
+
 
 def describe_interaction(envelope: dict[str, Any]) -> str:
     """상호작용/사건 봉투 → 지각 문장 (Working Memory와 에피소드가 공유)."""
@@ -88,7 +108,7 @@ def build_episode(
         lines.append(f'나는 답했다 — "{text}"')
     if materials.action_envelope is not None:
         payload = materials.action_envelope["payload"]
-        lines.append(f"나는 {payload['action_kind']} — {payload['intent']}")
+        lines.append(f"나는 {action_label(payload['action_kind'])} — {payload['intent']}")
         source_ids.append(materials.action_envelope["event_id"])
         tags.add(payload["action_kind"])
 

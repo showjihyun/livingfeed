@@ -34,8 +34,37 @@ class Provider(Protocol):
         ...
 
 
-#: 규칙 프로바이더의 일과 행동 풀 — actor.action.performed의 action_kind 어휘와 정합
-_ROUTINE_ACTIONS = ("work", "rest", "observe", "move", "reflect_quietly")
+#: 규칙 프로바이더의 일과 행동 풀 — kind는 action_kind 어휘와 정합, intent는
+#: 사람 문장이다: 피드 본문(compose 본문 = intent 원문)과 기억 요약에 그대로
+#: 노출되므로 엔진 내부 표기(kind·tick·'규칙')를 담지 않는다.
+_ROUTINE_INTENTS: dict[str, tuple[str, ...]] = {
+    "work": (
+        "밀린 일을 하나씩 붙잡는다",
+        "손에 익은 일부터 차근히 밀고 나간다",
+        "끝내지 못한 일이 마음에 걸려 다시 책상 앞에 앉는다",
+    ),
+    "rest": (
+        "잠시 숨을 고르며 하루를 정리한다",
+        "무리하지 않기로 하고 몸을 쉰다",
+        "조용한 시간을 골라 마음을 내려놓는다",
+    ),
+    "observe": (
+        "주변 사람들의 근황을 가만히 살핀다",
+        "오가는 이야기들을 한 발짝 떨어져 지켜본다",
+        "누가 어떻게 지내는지 눈여겨본다",
+    ),
+    "move": (
+        "바람도 쐴 겸 자리를 옮긴다",
+        "익숙한 길을 따라 걸음을 옮긴다",
+        "머리를 비우러 잠시 밖으로 나선다",
+    ),
+    "reflect_quietly": (
+        "요즘의 일들을 혼자 곱씹는다",
+        "마음에 남은 장면들을 조용히 되짚는다",
+        "생각을 정리할 겸 혼자만의 시간을 가진다",
+    ),
+}
+_ROUTINE_ACTIONS = tuple(_ROUTINE_INTENTS)
 
 
 class RuleBasedProvider:
@@ -60,9 +89,12 @@ class RuleBasedProvider:
         actor_id = str(request.trace.get("actor_id", "unknown"))
         tick = int(request.trace.get("tick", 0))
         kind = _ROUTINE_ACTIONS[zlib.crc32(f"{actor_id}:{tick}".encode()) % len(_ROUTINE_ACTIONS)]
+        phrases = _ROUTINE_INTENTS[kind]
+        # 표현 회전은 별도 소금으로 — kind 선택과 상관되면 같은 문장만 돈다
+        intent = phrases[zlib.crc32(f"{actor_id}:{tick}:intent".encode()) % len(phrases)]
         return {
             "action_kind": kind,
-            "intent": f"{kind} — 일과를 이어간다 (규칙 행동, tick {tick})",
+            "intent": intent,
             "target_actor_id": None,
             "location_id": None,
             "params": {},

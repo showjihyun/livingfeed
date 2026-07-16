@@ -40,6 +40,27 @@ async def test_rule_provider_output_is_deterministic_and_valid():
     assert first.model == "claude-opus-4-8"  # hot 라우팅 (ADR-018 표)
 
 
+async def test_rule_provider_intent_is_human_sentence():
+    """규칙 intent는 사람 문장이다 — 내부 표기가 새어나가면 안 된다.
+
+    intent는 피드 본문(compose 본문 = intent 원문)과 기억 요약에 그대로
+    노출된다 — 'observe', 'tick 3', '(규칙 행동)' 같은 엔진 내부 어휘는
+    관찰자가 읽는 세계의 문장이 아니다.
+    """
+    runtime = AiRuntime(RuleBasedProvider())
+    intents = set()
+    for tick in range(10):
+        response = await runtime.infer(
+            request(trace={"actor_id": "a_aria_kim", "tick": tick})
+        )
+        assert response.ok
+        intent = response.output["intent"]
+        assert "규칙" not in intent and "tick" not in intent
+        assert response.output["action_kind"] not in intent  # 원시 kind 비노출
+        intents.add(intent)
+    assert len(intents) >= 4  # 같은 문장 도배가 아니다 — kind·표본 회전
+
+
 async def test_unknown_route_is_explicit_error():
     runtime = AiRuntime(RuleBasedProvider(), routes={})
     response = await runtime.infer(request())

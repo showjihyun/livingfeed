@@ -34,6 +34,21 @@ def test_dm_and_reply_fold_into_episode():
     assert episode.importance >= WEIGHTS.semantic_gate  # Semantic 임베딩 대상
 
 
+def test_action_folds_with_korean_label():
+    """행동 요약은 액터가 읽는 일기다 — 원시 action_kind는 태그에만 남는다."""
+    action = player_envelope(
+        "actor.action.performed",
+        {"action_kind": "observe", "intent": "주변 사람들의 근황을 가만히 살핀다",
+         "target_actor_id": None, "location_id": None, "params": {},
+         "decision_trace": {"trace_id": "t-obs", "tier": "cold_rule"}},
+    )
+    episode = build_episode(TickMaterials(action_envelope=action))
+    assert episode is not None
+    assert "observe" not in episode.summary  # 기계 어휘 비노출
+    assert "관찰" in episode.summary and "근황" in episode.summary
+    assert "observe" in episode.tags  # 검색·집계는 기계 어휘 유지
+
+
 def test_incident_perception_is_rare_and_memorable():
     incident = player_envelope(
         "world.incident.occurred",

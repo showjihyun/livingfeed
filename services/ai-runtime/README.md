@@ -48,9 +48,10 @@ LF_LOCAL_MODEL=qwen2.5:14b         # (선택) 전 티어 모델 일괄 교체
   통제한다 — decide류는 깊은 추론이 불필요하고, tick 예산 안에 응답해야 한다.
   actor 쪽 대기 예산은 `LF_AI_TIMEOUT_S`(기본 10초).
 
-**주의**: 아리아의 행동 intent에 "(규칙 행동)"이 보이면 그것은 오류가 아니라
-rule 프로바이더로 돌고 있거나(키 미설정), LLM 응답이 `LF_AI_TIMEOUT_S`를
-초과해 규칙 폴백이 발동한 것이다 (`params.fallback: true`로 구분).
+**주의**: 규칙 경로의 intent도 사람 문장이라 겉보기로는 LLM과 구분되지 않는다 —
+rule 프로바이더인지(키 미설정), LLM 응답이 `LF_AI_TIMEOUT_S`를 초과해 규칙
+폴백이 발동했는지는 `decision_trace.tier: cold_rule`(프로바이더)과
+`params.fallback: true`(엔진 폴백)로 구분한다.
 
 ```bash
 # compose (infra/compose/.env 에 추가 — .env는 gitignore 대상)
