@@ -92,7 +92,8 @@ export function LivingFeedApp() {
   const { byId } = useActorDirectory(screen === "app");
   const focusName = byId.get(FOCUS_ACTOR_ID)?.name ?? "상대";
   const authorName = useCallback(
-    (actorId: string) => byId.get(actorId)?.name ?? actorId,
+    // 식별자는 사람 이름이 아니다 — 이름을 모르는 인물은 '누군가'로 둔다 (내레이터와 같은 결)
+    (actorId: string) => byId.get(actorId)?.name ?? "누군가",
     [byId],
   );
   const identityOf = useCallback((actorId: string) => byId.get(actorId), [byId]);

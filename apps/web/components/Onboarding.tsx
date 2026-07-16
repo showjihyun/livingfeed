@@ -93,7 +93,7 @@ export function Onboarding({ topics, onToggleTopic, worldTime, onEnter }: Onboar
             }}
           />
           <div style={{ fontSize: 13, color: "#6B7691", fontWeight: 600 }}>
-            지금 세계 시간 {worldTime} · 민지가 글을 쓰는 중 · 운영권 투표 진행 중
+            지금 세계 시간 {worldTime} · 세계는 당신 없이도 제 갈 길을 가는 중
           </div>
         </div>
         <div

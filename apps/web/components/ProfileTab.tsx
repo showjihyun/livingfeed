@@ -35,7 +35,8 @@ export function ProfileTab({
   // 지난 장들 (연대기, 오래된 순) — 마지막 항목은 현재 장이라 카드가 이미 보여준다
   const pastChapters = (profile?.arcHistory ?? []).slice(0, -1);
   // 표시 이름·소개·목표는 라이브 identity에서 — 없으면 중립 문구 (특정 인물 하드코딩 금지)
-  const displayName = identity?.name ?? "프로필";
+  // 정체성 실측이 아직 없으면 중립 지칭 — 문장 속에서도 어색하지 않아야 한다
+  const displayName = identity?.name ?? "이 사람";
   const displayBio = identity?.bio ?? "아직 소개가 연결되지 않았어요";
   const topGoal = identity?.goals.slice().sort((a, b) => b.priority - a.priority)[0];
   const tagline = topGoal ? `요즘 몰두하는 것 — ${topGoal.description}` : "";
@@ -131,9 +132,9 @@ export function ProfileTab({
         >
           <Icon d={ICON.journey} size={18} color="#A87F24" />
           {aboutMe.length > 0 ? (
-            // 실측 — 민지가 나에 대해 실제로 형성한 신념 (reflection, ADR-008)
+            // 실측 — 이 액터가 나에 대해 실제로 형성한 신념 (reflection, ADR-008)
             <div style={{ fontSize: 13, color: "#6B7691", fontWeight: 600 }}>
-              <span style={{ fontWeight: 800, color: "#3A4256" }}>민지의 마음속</span>
+              <span style={{ fontWeight: 800, color: "#3A4256" }}>{displayName}의 마음속</span>
               {aboutMe.map((b) =>
                 b.confidence <= FADED_BELIEF_MAX ? (
                   // 철회된 신념 — 잔불로 남은 흔적 (ADR-008 신념 폐기)
@@ -155,11 +156,11 @@ export function ProfileTab({
               )}
             </div>
           ) : (
+            // 실측이 없으면 없다고 말한다 — 가공의 역사를 그리지 않는다
             <div style={{ fontSize: 13, color: "#6B7691", fontWeight: 600 }}>
-              <span style={{ fontWeight: 800, color: "#3A4256" }}>당신과의 역사</span> · 3월 2일 첫
-              댓글 → 아는 사이 · 3월 8일 DM으로 조언 →{" "}
-              <span style={{ fontWeight: 800, color: "#3A4256" }}>친한 사이</span> · 민지는 당신의
-              조언을 기억하고 있어요
+              <span style={{ fontWeight: 800, color: "#3A4256" }}>당신과의 역사</span> · 아직
+              형성된 마음이 없어요 — 댓글이나 DM이 쌓이면 {displayName}이(가) 당신을
+              곱씹기 시작합니다
             </div>
           )}
         </div>
@@ -252,7 +253,7 @@ export function ProfileTab({
         )}
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ fontSize: 14, fontWeight: 800 }}>민지의 기억</div>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>{displayName}의 기억</div>
           <div
             style={{
               fontSize: 11,
