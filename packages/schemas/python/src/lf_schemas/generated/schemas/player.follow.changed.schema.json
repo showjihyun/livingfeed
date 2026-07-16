@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/player.follow.changed.schema.json",
+  "title": "PlayerFollowChanged",
+  "description": "플레이어의 명시적 팔로우 선언/철회 (ADR-014 진짜 팔로우 모델). 관계 stand-in(관계 엣지 유래 팔로워 인덱스)을 대체해 가는 첫 조각 — redis-projector가 소비해 personal 타임라인의 팔로워 인덱스를 갱신한다. 철회는 명시적 의사다: 언팔로우한 대상은 관계 엣지가 남아 있어도 타임라인에 다시 들어오지 않는다.",
+  "type": "object",
+  "properties": {
+    "player_id": {
+      "type": "string",
+      "pattern": "^p_[a-z0-9_]+$"
+    },
+    "target_actor_id": {
+      "type": "string",
+      "description": "팔로우/언팔로우 대상 액터",
+      "pattern": "^[a-z0-9_]+$"
+    },
+    "following": {
+      "type": "boolean",
+      "description": "true=팔로우, false=언팔로우 (마지막 선언이 이긴다)"
+    }
+  },
+  "required": ["player_id", "target_actor_id", "following"],
+  "additionalProperties": false
+}

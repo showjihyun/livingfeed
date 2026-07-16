@@ -40,6 +40,7 @@ export function useActorSession(opts: {
   sendDm: (targetActorId: string, text: string) => boolean;
   sendComment: (targetActorId: string, postId: string, text: string) => boolean;
   addReaction: (targetActorId: string, postId: string) => boolean;
+  setFollow: (targetActorId: string, following: boolean) => boolean;
 } {
   const [status, setStatus] = useState<SessionStatus>("connecting");
   const handleRef = useRef<SessionHandle | null>(null);
@@ -100,6 +101,11 @@ export function useActorSession(opts: {
     handleRef.current.addReaction(targetActorId, postId);
     return true;
   }, []);
+  const setFollow = useCallback((targetActorId: string, following: boolean) => {
+    if (!liveRef.current || !handleRef.current) return false;
+    handleRef.current.setFollow(targetActorId, following);
+    return true;
+  }, []);
 
-  return { status, sendDm, sendComment, addReaction };
+  return { status, sendDm, sendComment, addReaction, setFollow };
 }

@@ -7,8 +7,9 @@
 4. 단방향 — 도메인 이벤트를 발행하지 않는다
 5. 격리 — 다른 프로젝터와 consumer 독립
 
-소스 셋이 곧 팬아웃 파이프라인이다:
-- relationship.*        → 팔로워 인덱스 (누가 누구의 소식을 받는가)
+소스 넷이 곧 팬아웃 파이프라인이다:
+- relationship.*        → 팔로워 인덱스 stand-in (누가 누구의 소식을 받는가)
+- player.follow.changed → 명시 팔로우/철회 (진짜 팔로우 모델 — 철회가 이긴다)
 - feed.post.published   → 팔로워 타임라인으로 fan-out-on-write
 - actor.message.sent    → 수신 플레이어 타임라인 (Private 단독 배달)
 """
@@ -34,6 +35,7 @@ logger = logging.getLogger("lf.projector.redis")
 
 REPLY_TYPE = "actor.message.sent"
 POST_TYPE = "feed.post.published"
+FOLLOW_TYPE = "player.follow.changed"
 
 
 class RedisProjector:
@@ -46,6 +48,7 @@ class RedisProjector:
         """(스트림, filter subject 조각, 핸들러) — durable은 스트림 이름에서 파생된다."""
         return (
             ("LF_REL", "relationship.>", self._apply_relationship(store)),
+            ("LF_PLAYER", FOLLOW_TYPE, self._apply_follow(store)),
             ("LF_FEED", POST_TYPE, self._apply_post(store)),
             ("LF_ACTOR", REPLY_TYPE, self._apply_reply(store)),
         )
@@ -55,6 +58,19 @@ class RedisProjector:
             pair = follower_pair(envelope["payload"])
             if pair is not None:
                 await store.register_follower(envelope["world_id"], *pair)
+        return apply
+
+    def _apply_follow(self, store: TimelineStore):
+        async def apply(envelope: dict[str, Any]) -> None:
+            p = envelope["payload"]
+            await store.set_follow(
+                envelope["world_id"], p["target_actor_id"],
+                p["player_id"], bool(p["following"]),
+            )
+            logger.info(
+                "팔로우 %s — %s → %s",
+                "선언" if p["following"] else "철회", p["player_id"], p["target_actor_id"],
+            )
         return apply
 
     def _apply_post(self, store: TimelineStore):

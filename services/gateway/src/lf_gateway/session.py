@@ -1,7 +1,7 @@
 """WS 상호작용 세션 — 커맨드 검증·적재와 액터 응답 push (ADR-010 §WS).
 
 메시지 봉투는 양방향 {type, seq, payload}다.
-- 클라→서버: dm.send / comment.post / reaction.add
+- 클라→서버: dm.send / comment.post / reaction.add / follow.set
 - 서버→클라: ack(적재 확인) / error(명시적 거부 — 조용한 유실 금지) /
              actor.reply(actor.message.sent 봉투 push)
 
@@ -35,6 +35,8 @@ COMMANDS: dict[str, tuple[str, tuple[str, ...]]] = {
     "dm.send": ("player.dm.sent", ("target_actor_id", "text")),
     "comment.post": ("player.comment.posted", ("target_actor_id", "post_id", "text")),
     "reaction.add": ("player.reaction.added", ("target_actor_id", "post_id", "kind")),
+    # 팔로우는 세계에 남는 선언이다 (ADR-014 진짜 팔로우 모델) — 로컬 토글이 아니라
+    "follow.set": ("player.follow.changed", ("target_actor_id", "following")),
 }
 
 

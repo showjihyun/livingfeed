@@ -29,6 +29,8 @@ export interface SessionHandle {
   sendComment(targetActorId: string, postId: string, text: string): number;
   /** 반응(좋아요) — 응답 의무 없는 개입 */
   addReaction(targetActorId: string, postId: string, kind?: string): number;
+  /** 팔로우 선언/철회 — 세계에 남는 선언 (진짜 팔로우 모델, ADR-014) */
+  setFollow(targetActorId: string, following: boolean): number;
   close(): void;
 }
 

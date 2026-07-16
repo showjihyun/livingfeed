@@ -169,6 +169,8 @@ function openWsSession(opts: TransportOptions, session: SessionOptions): Session
       sendCommand("comment.post", { target_actor_id: targetActorId, post_id: postId, text }),
     addReaction: (targetActorId, postId, kind = "like") =>
       sendCommand("reaction.add", { target_actor_id: targetActorId, post_id: postId, kind }),
+    setFollow: (targetActorId, following) =>
+      sendCommand("follow.set", { target_actor_id: targetActorId, following }),
     close: () => {
       closed = true;
       session.onStatus?.("closed");

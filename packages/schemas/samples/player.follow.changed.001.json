@@ -1,0 +1,17 @@
+{
+  "event_id": "01JZK7Q3W0000000000000000X",
+  "stream": "player",
+  "type": "player.follow.changed",
+  "schema_version": 1,
+  "world_id": "w_main",
+  "actor_id": null,
+  "tick": 42,
+  "occurred_at": "2026-07-12T08:10:00Z",
+  "causation_id": null,
+  "correlation_id": "01JZK7Q3W0000000000000000X",
+  "payload": {
+    "player_id": "p_observer_0417",
+    "target_actor_id": "a_minji_kim",
+    "following": true
+  }
+}

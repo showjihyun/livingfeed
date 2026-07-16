@@ -68,6 +68,29 @@ async def test_command_appends_player_event_and_acks(gateway, conn):
     assert stored.envelope["payload"]["player_id"] == PLAYER
 
 
+async def test_follow_set_appends_follow_changed(gateway, conn):
+    """팔로우는 로컬 토글이 아니라 세계에 남는 선언이다 (ADR-014 진짜 팔로우 모델)."""
+    async with websockets.connect(f"ws://{gateway}/session?player_id={PLAYER}") as ws:
+        await ws.send(json.dumps({
+            "type": "follow.set", "seq": 1,
+            "payload": {"target_actor_id": "a_aria_kim", "following": True},
+        }))
+        ack = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+        assert ack["type"] == "ack" and ack["seq"] == 1
+        # 철회도 같은 경로 — 마지막 선언이 이긴다
+        await ws.send(json.dumps({
+            "type": "follow.set", "seq": 2,
+            "payload": {"target_actor_id": "a_aria_kim", "following": False},
+        }))
+        ack = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+        assert ack["type"] == "ack" and ack["seq"] == 2
+
+    stored = [s.envelope for s in await read_stream(conn, WORLD, "player", PLAYER)]
+    assert [e["type"] for e in stored] == ["player.follow.changed"] * 2
+    assert stored[0]["payload"]["following"] is True
+    assert stored[1]["payload"]["following"] is False
+
+
 async def test_bad_commands_get_error_frames_not_silence(gateway, conn):
     async with websockets.connect(f"ws://{gateway}/session?player_id={PLAYER}") as ws:
         await ws.send(json.dumps({"type": "world.destroy", "seq": 2, "payload": {}}))

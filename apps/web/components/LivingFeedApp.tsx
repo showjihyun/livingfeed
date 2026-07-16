@@ -291,7 +291,13 @@ export function LivingFeedApp() {
         {tab === "profile" && (
           <ProfileTab
             following={following}
-            onToggleFollow={() => setFollowing((f) => !f)}
+            onToggleFollow={() => {
+              // 팔로우는 세계에 남는 선언이다 — 세션이 살아있으면 함께 보낸다
+              // (오프라인이면 로컬 토글만 — 조용한 강등)
+              const next = !following;
+              setFollowing(next);
+              session.setFollow(FOCUS_ACTOR_ID, next);
+            }}
             goDm={goDm}
             profile={focusProfile.profile}
             hasMoreEpisodes={focusProfile.hasMoreEpisodes}

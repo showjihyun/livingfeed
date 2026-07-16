@@ -42,6 +42,34 @@ async def test_relationship_event_registers_follower(redis):
     assert await store.followers(WORLD, "a_aria_kim") == {PLAYER}
 
 
+async def test_explicit_unfollow_wins_over_relationship_standin(redis):
+    """진짜 팔로우 모델 (ADR-014) — 명시 철회는 관계 stand-in을 이긴다.
+
+    언팔로우한 대상은 관계 엣지가 계속 이벤트를 내도 타임라인에 되살아나지
+    않는다. 다시 명시 팔로우하면 거부 마커가 걷힌다 (마지막 선언이 이긴다).
+    """
+    store = TimelineStore(redis)
+    actor = "a_aria_kim"
+
+    # 명시 팔로우 → 인덱스에 오른다
+    await store.set_follow(WORLD, actor, PLAYER, True)
+    assert await store.followers(WORLD, actor) == {PLAYER}
+
+    # 명시 철회 → 빠지고, 관계 유래 등록도 되살리지 못한다
+    await store.set_follow(WORLD, actor, PLAYER, False)
+    assert await store.followers(WORLD, actor) == set()
+    await store.register_follower(WORLD, actor, PLAYER)  # 관계 stand-in 시도
+    assert await store.followers(WORLD, actor) == set()  # 철회는 명시적 의사다
+
+    # 다른 플레이어의 관계 유래 등록은 그대로 동작한다
+    await store.register_follower(WORLD, actor, "p_other")
+    assert await store.followers(WORLD, actor) == {"p_other"}
+
+    # 재선언 → 마커가 걷히고 되돌아온다
+    await store.set_follow(WORLD, actor, PLAYER, True)
+    assert await store.followers(WORLD, actor) == {PLAYER, "p_other"}
+
+
 async def test_fan_out_reaches_participants_followers(redis):
     store = TimelineStore(redis)
     # 참여자(준호)만 아는 플레이어에게도 이 포스트가 실려야 한다

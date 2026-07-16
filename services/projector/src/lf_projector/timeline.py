@@ -1,13 +1,17 @@
 """Redis 타임라인 — fan-out-on-write 개인 피드 (ADR-014 §2단, ADR-003).
 
-팔로우 모델이 아직 없으므로 관계 엣지가 팔로우를 대신한다 (ADR-016):
-액터↔플레이어 관계가 생기면(relationship.* 이벤트) 그 액터의 포스트가
-플레이어 타임라인에 실린다 — "아는 사람의 소식이 내 피드다".
+팔로우의 두 원천이 공존한다:
+- 명시 팔로우 (player.follow.changed — 진짜 팔로우 모델): 플레이어의 선언.
+  **철회는 명시적 의사라 이긴다** — 언팔로우한 대상은 관계 엣지가 남아 있어도
+  타임라인에 다시 들어오지 않는다 (거부 마커).
+- 관계 stand-in (relationship.* — ADR-016): 액터↔플레이어 관계가 생기면
+  자동으로 실린다 — "아는 사람의 소식이 내 피드다". 명시 철회 앞에서만 물러난다.
 
 키:
-- lf:tl:{world}:{player}    ZSET — member는 피드 아이템 doc(JSON),
+- lf:tl:{world}:{player}     ZSET — member는 피드 아이템 doc(JSON),
   score는 event_id(ULID)의 ms 타임스탬프. ZADD가 재전달을 자연 흡수한다(멱등).
-- lf:tlflw:{world}:{actor}  SET — 이 액터의 소식을 받을 플레이어들.
+- lf:tlflw:{world}:{actor}   SET — 이 액터의 소식을 받을 플레이어들.
+- lf:tlunfl:{world}:{actor}  SET — 명시적으로 언팔로우한 플레이어들 (거부 마커).
 
 한계(수용): 같은 tick에서 first_met과 포스트가 함께 나오면 포스트가 인덱스보다
 먼저 도착할 수 있다 — 그 포스트는 실리지 않고 다음 포스트부터 실린다 (최종 일관성).
@@ -91,8 +95,28 @@ class TimelineStore:
     def follower_key(world_id: str, actor_id: str) -> str:
         return f"lf:tlflw:{world_id}:{actor_id}"
 
+    @staticmethod
+    def unfollow_key(world_id: str, actor_id: str) -> str:
+        return f"lf:tlunfl:{world_id}:{actor_id}"
+
     async def register_follower(self, world_id: str, actor_id: str, player_id: str) -> None:
+        """관계 유래(stand-in) 등록 — 명시적으로 철회한 플레이어는 되살리지 않는다."""
+        if await self._redis.sismember(self.unfollow_key(world_id, actor_id), player_id):
+            return  # 철회는 명시적 의사다 — 관계가 남아 있어도 존중한다
         await self._redis.sadd(self.follower_key(world_id, actor_id), player_id)
+
+    async def set_follow(
+        self, world_id: str, actor_id: str, player_id: str, following: bool
+    ) -> None:
+        """명시 팔로우 선언/철회 (player.follow.changed) — 마지막 선언이 이긴다."""
+        pipe = self._redis.pipeline()
+        if following:
+            pipe.sadd(self.follower_key(world_id, actor_id), player_id)
+            pipe.srem(self.unfollow_key(world_id, actor_id), player_id)
+        else:
+            pipe.srem(self.follower_key(world_id, actor_id), player_id)
+            pipe.sadd(self.unfollow_key(world_id, actor_id), player_id)
+        await pipe.execute()
 
     async def followers(self, world_id: str, actor_id: str) -> set[str]:
         members = await self._redis.smembers(self.follower_key(world_id, actor_id))
@@ -125,8 +149,10 @@ class TimelineStore:
         )
 
     async def drop_all(self) -> None:
-        """재구축용 파괴 (ADR-003 계약 3) — 타임라인과 팔로워 인덱스 전부."""
+        """재구축용 파괴 (ADR-003 계약 3) — 타임라인·팔로워 인덱스·거부 마커 전부."""
         async for key in self._redis.scan_iter(match="lf:tl:*"):
             await self._redis.delete(key)
         async for key in self._redis.scan_iter(match="lf:tlflw:*"):
+            await self._redis.delete(key)
+        async for key in self._redis.scan_iter(match="lf:tlunfl:*"):
             await self._redis.delete(key)
