@@ -17,7 +17,8 @@ CI가 아니라 **손으로 돌리는 검증**이다: 결정적 테스트(규칙
 | `uv run --package lf-feed python scripts/smoke/arc_chain.py` | 아크 계획 → relay → 전이 피드 → read.actor_arcs → 프로필 → 시즌 회고 | 불필요 |
 | `uv run --package lf-feed python scripts/smoke/narrate_boost.py` | 편집 조명(boost_feed) → 경계 행동 승격 + 고드라마 본문 서사화 | qwen3 |
 | `uv run --package lf-actor python scripts/smoke/reflect_insight.py` | 작업 기억 → LLM reflection 통찰 (스키마·하드룰 통과) | qwen3 |
-| `uv run --package lf-actor python scripts/smoke/sns_lifecycle_llm.py` | 신규 캐릭터 생성 → 정체성 → LLM 행동/답장 — SNS 생활 정성 평가 | qwen3 |
+| `uv run --package lf-actor python scripts/smoke/sns_lifecycle_llm.py` | 신규 캐릭터 생성 → 정체성 → LLM 행동/답장 (+아크 부여 전/후) — SNS 생활 정성 평가 | qwen3 |
+| `uv run --package lf-gateway python scripts/smoke/follow_chain.py` | WS follow.set → 적재 → 인덱스 → 팬아웃 → 철회 + verify_timeline | 불필요 |
 
 성공 시 `SMOKE: OK` 를 출력하고 0으로 종료한다. LLM 표현 품질은 출력을
 직접 읽고 판단한다 — 그게 이 스크립트들이 CI가 아닌 이유다.
