@@ -11,6 +11,7 @@ import sys
 from datetime import UTC, datetime
 
 import nats
+from lf_actor.arc import ArcStore
 from lf_actor.client import AiRuntimeClient
 from lf_actor.emotion import EmotionAdapter
 from lf_actor.goal import GoalAdapter
@@ -94,6 +95,14 @@ async def main() -> None:
             head = await run_tick(conn, phases, CLOCK, WORLD, tick=tick, head=head)
             print(f"— tick {tick} 완료")
 
+        # 2막 — Director가 인생의 장을 그린다: 행동의 결이 바뀌는지 관측 (plan/08)
+        intention = "이제는 증명의 시간 — 완성한 것을 세상에 내보인다"
+        await ArcStore(redis).set(WORLD, persona.id, "prime", intention)
+        print(f"\n== 아크 부여: prime — {intention!r} ==\n")
+        for tick in range(3, 6):
+            head = await run_tick(conn, phases, CLOCK, WORLD, tick=tick, head=head)
+            print(f"— tick {tick} 완료")
+
         events = [s.envelope for s in await read_stream(conn, WORLD, "actor", persona.id)]
         actions = [e for e in events if e["type"] == "actor.action.performed"]
         replies = [e for e in events if e["type"] == "actor.message.sent"]
@@ -104,8 +113,9 @@ async def main() -> None:
               f"{len(actions) - len(llm_actions)}):")
         for act in actions:
             marker = "llm" if not act["payload"]["params"].get("fallback") else "rule"
+            phase = "아크후" if act["tick"] >= 3 else "아크전"
             headline = act["payload"].get("headline") or "-"
-            print(f"  [{marker}] {act['payload']['intent']}  (headline: {headline})")
+            print(f"  [{marker}|{phase}] {act['payload']['intent']}  (headline: {headline})")
         print(f"\n답장: {replies[0]['payload']['text']!r}")
         print(
             "\nSMOKE: OK — 신규 캐릭터가 LLM으로 SNS 생활을 살았다"
