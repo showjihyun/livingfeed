@@ -75,6 +75,8 @@ async def run() -> None:
             identity_redis=redis,
             arc=ArcStore(redis),
             decay_ledger=DecayLedger(redis),
+            # 고강도 사건 승격 임계 — 세계 톤에 맞춰 조정 가능 (ADR-011 관심 신호)
+            promote_intensity=float(os.environ.get("LF_PROMOTE_INTENSITY", "0.7")),
         )
         # tick 루프와 메일박스 라우터(LF_PLAYER → Redis)가 나란히 돈다 (ADR-012)
         await asyncio.gather(

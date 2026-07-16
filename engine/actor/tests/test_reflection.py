@@ -27,6 +27,7 @@ from lf_eventstore import read_stream
 from lf_relationship import RelationshipState
 from lf_tick.clock import TickClock
 from lf_tick.engine import run_tick
+from lf_tick.lod import COLD_INTERVAL, ActorLod, Tier, phase_offset
 
 from .conftest import PERSONAS_DIR
 from .test_mailbox import player_envelope
@@ -196,6 +197,41 @@ async def test_llm_insight_joins_rule_beliefs(conn, redis):
     # 곱씹음이 작업 기억으로 — 다음 결정의 컨텍스트 (규칙 경로와 같은 계약)
     recent = await WorkingMemory(redis).recent(WORLD, "a_aria_kim")
     assert any("곱씹은 생각" in m for m in recent)
+
+
+async def test_sleeping_cold_actor_does_not_reflect(conn, redis):
+    """잠든(Cold 비-due) 액터는 곱씹지 않는다 (ADR-012 Cold 정합) — 감쇠 미정산
+    상태로 신념을 세우면 최대 100 tick 낡은 세계관이 굳는다. 깨어나면 곱씹는다."""
+    aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
+    rel = RelationshipAdapter(redis)
+    await rel.save(WORLD, "a_aria_kim", "p_observer_0417", edge(trust=0.3, intimacy=0.2))
+    await rel._register_edge(WORLD, "a_aria_kim", "p_observer_0417")
+
+    mailbox = Mailbox(redis)
+    phases = ActorPhases(
+        [aria], ai=_StubReflectAi(None),
+        memory=WorkingMemory(redis), mailbox=mailbox,
+        emotion=EmotionAdapter(redis), relationship=rel,
+        belief_ledger=BeliefLedger(redis), reflection_interval=2,
+    )
+    phases._lods["a_aria_kim"] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
+
+    # 비-due reflection tick — 관계가 데워져 있어도 신념이 서지 않는다 (잠들어 있다)
+    sleeping_tick = 2 if phase_offset("a_aria_kim", COLD_INTERVAL) != 2 else 4
+    head = await run_tick(conn, phases, CLOCK, WORLD, tick=sleeping_tick, head=0)
+    events = [s.envelope for s in await read_stream(conn, WORLD, "actor", "a_aria_kim")]
+    assert not [e for e in events if e["type"] == "actor.belief.formed"]
+
+    # DM으로 깨어난 reflection tick — 정산된 상태로 곱씹어 신념이 선다
+    wake_tick = sleeping_tick + 2
+    await mailbox.push(
+        WORLD, "a_aria_kim",
+        player_envelope("player.dm.sent", {"text": "잘 지냈어요?"}),
+    )
+    await run_tick(conn, phases, CLOCK, WORLD, tick=wake_tick, head=head)
+    events = [s.envelope for s in await read_stream(conn, WORLD, "actor", "a_aria_kim")]
+    beliefs = [e for e in events if e["type"] == "actor.belief.formed"]
+    assert beliefs and beliefs[0]["payload"]["kind"] == "supporter"
 
 
 async def test_person_insight_raises_relationship_salience(conn, redis):

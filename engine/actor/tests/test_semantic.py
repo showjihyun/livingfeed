@@ -4,6 +4,7 @@ import os
 import uuid
 
 import pytest
+from lf_actor.reflection import RETRACTED_CONFIDENCE, Belief, belief_point_key
 from lf_actor.semantic import SemanticMemory, embed
 
 QDRANT_URL = os.environ.get("LF_TEST_QDRANT_URL")
@@ -58,5 +59,37 @@ async def test_remember_and_recall_roundtrip():
 
         # 중요도 하한 — 임계보다 낮은 기억은 회상되지 않는다
         assert await memory.recall(world, "a_aria_kim", "기획안", min_importance=0.9) == []
+    finally:
+        await memory.close()
+
+
+@pytestmark_integration
+async def test_retracted_belief_falls_below_recall_floor():
+    """신념 철회의 회상 배제 (ADR-008 신념 폐기): 철회가 같은 자리(point_key)를
+    잔불 확신으로 덮어쓰면 회상 하한(0.3) 아래로 떨어진다 — 흐려진 믿음은
+    더 이상 떠오르지 않는다. 별도 가중 로직 없이 계약의 합으로 동작한다."""
+    world = f"w_t{uuid.uuid4().hex[:8]}"
+    memory = SemanticMemory(QDRANT_URL)
+    belief = Belief("관찰자는 힘이 되는 사람이다", "supporter", 0.5, "p_observer_0417", [])
+    key = belief_point_key("a_aria_kim", belief)
+    try:
+        await memory.remember(
+            world, "a_aria_kim",
+            event_id="01JZK7Q3W0000000000000000A",
+            text=belief.statement, importance=belief.confidence,
+            source_event_ids=[], point_key=key,
+        )
+        recalled = await memory.recall(world, "a_aria_kim", "힘이 되는 사람")
+        assert any("힘이 되는" in text for text in recalled)  # 확립된 신념은 떠오른다
+
+        # 철회 — 같은 자리를 잔불 확신으로 덮어쓴다 (reflection retract_stale 계약)
+        await memory.remember(
+            world, "a_aria_kim",
+            event_id="01JZK7Q3W0000000000000000B",
+            text="힘이 되는 사람이라 믿었지만 — 지금은 그 확신이 흐려졌다",
+            importance=RETRACTED_CONFIDENCE,
+            source_event_ids=[], point_key=key,
+        )
+        assert await memory.recall(world, "a_aria_kim", "힘이 되는 사람") == []
     finally:
         await memory.close()

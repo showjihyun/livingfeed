@@ -102,21 +102,28 @@ def sanitize_target(payload: dict[str, Any], valid_ids: set[str], actor_id: str)
     return payload
 
 
-def lod_after_perception(lod: ActorLod, items: list[dict[str, Any]], tick: int) -> ActorLod:
+def lod_after_perception(
+    lod: ActorLod,
+    items: list[dict[str, Any]],
+    tick: int,
+    *,
+    high_intensity: float = HIGH_INTENSITY,
+) -> ActorLod:
     """지각한 항목들 → LOD 갱신 (ADR-011 §관심 신호).
 
     Hot 승격 신호 셋: 응답 의무가 있는 상호작용(dm/comment — 상호작용 우선,
     ADR-012 규칙 2), Director의 사적 지목(nudge 관측 — 반응을 기대하고 심은
     지각이라 잠든 채 두면 다음 due까지 썩는다, ADR-013), 고강도 세계 사건
-    (내 삶을 흔든 사건은 곧바로 반응하게 한다). 그 밖의 지각(반응·저강도
-    사건)은 관심 신호 — 티어는 유지하고 강등 타이머만 리셋한다(touch).
+    (내 삶을 흔든 사건은 곧바로 반응하게 한다 — 임계는 high_intensity, 운영
+    설정으로 조정 가능). 그 밖의 지각(반응·저강도 사건)은 관심 신호 —
+    티어는 유지하고 강등 타이머만 리셋한다(touch).
     """
     for envelope in items:
         if envelope["type"] in _REPLYABLE or envelope["type"] == OBSERVATION_TYPE:
             return promote(lod, tick)
         if (
             envelope["type"] == INCIDENT_TYPE
-            and float(envelope["payload"].get("intensity", 0.0)) >= HIGH_INTENSITY
+            and float(envelope["payload"].get("intensity", 0.0)) >= high_intensity
         ):
             return promote(lod, tick)
     return touch(lod, tick)
@@ -146,6 +153,7 @@ class ActorPhases:
         identity_redis: Redis | None = None,
         arc: ArcStore | None = None,
         decay_ledger: DecayLedger | None = None,
+        promote_intensity: float = HIGH_INTENSITY,
     ) -> None:
         if not personas:
             raise ValueError("액터가 없다 — 최소 1명의 페르소나가 필요하다")
@@ -162,6 +170,8 @@ class ActorPhases:
         self._weights = importance_weights or ImportanceWeights()
         self._ledger = belief_ledger
         self._reflection_interval = max(1, reflection_interval)
+        #: 잠든 액터도 깨우는 세계 사건 강도 임계 (ADR-011 §관심 신호, 운영 노브)
+        self._promote_intensity = promote_intensity
         # 정체성 선언 1회 발행 가드 — Redis SETNX(재시작·다중 워커) + in-memory(tick당 재확인 회피)
         self._identity_redis = identity_redis
         self._declared: set[str] = set()
@@ -268,7 +278,8 @@ class ActorPhases:
                 self._lods[actor_id] = promote(self._lods[actor_id], ctx.tick)
             elif items:
                 self._lods[actor_id] = lod_after_perception(
-                    self._lods[actor_id], items, ctx.tick
+                    self._lods[actor_id], items, ctx.tick,
+                    high_intensity=self._promote_intensity,
                 )
             else:
                 self._lods[actor_id] = maybe_demote(self._lods[actor_id], ctx.tick)
@@ -566,10 +577,8 @@ class ActorPhases:
         goal_relevance, goal_actions = await self._consolidate_goals(ctx)
         # 기억 응고 — 이번 tick의 재료가 에피소드로 접힌다 (ADR-008)
         await self._consolidate_memories(ctx, rel_counts, goal_relevance, goal_actions)
-        # reflection — 주기적으로 상태의 패턴이 신념이 된다 (ADR-008)
-        if ctx.tick > 0 and ctx.tick % self._reflection_interval == 0:
-            await self._reflect(ctx)
-        # 감정 감쇠·baseline 회귀 (ADR-015 §감쇠) — Cold는 배치로 (ADR-012)
+        # 감정 감쇠·baseline 회귀 (ADR-015 §감쇠) — Cold는 배치로 (ADR-012).
+        # reflection보다 먼저 — 곱씹음은 이 tick까지 정산된 상태를 읽어야 한다
         if self._emotion is not None:
             for actor_id, ticks in sorted(decay_plan.items()):
                 await self._emotion.decay_ticks(ctx.world_id, self._personas[actor_id], ticks)
@@ -577,6 +586,10 @@ class ActorPhases:
         if self._goal is not None:
             for actor_id, ticks in sorted(decay_plan.items()):
                 await self._goal.decay_ticks(ctx.world_id, self._personas[actor_id], ticks)
+        # reflection — 주기적으로 상태의 패턴이 신념이 된다 (ADR-008).
+        # 잠든(Cold 비-due) 액터는 곱씹지 않는다 — 미정산 상태로 신념을 세우지 않는다
+        if ctx.tick > 0 and ctx.tick % self._reflection_interval == 0:
+            await self._reflect(ctx, decay_plan)
         # 감쇠 장부 갱신 — 이 tick까지 정산됐다. 갱신분만 일괄 영속 (재시작 연속성)
         for actor_id in decay_plan:
             self._ledger_set(actor_id, ctx.tick)
@@ -699,17 +712,21 @@ class ActorPhases:
                 expected_head=head,
             )
 
-    async def _reflect(self, ctx: TickContext) -> None:
+    async def _reflect(self, ctx: TickContext, decay_plan: dict[str, int]) -> None:
         """경험 → 신념 (ADR-008 reflection). 두 경로가 한 저장 계약을 공유한다:
 
         규칙(derive_beliefs)은 상태 패턴에서 — 결정적, 언제나 돈다.
         LLM(_llm_insight)은 작업 기억을 곱씹은 통찰 하나를 더한다 — 미지원·실패면
         조용히 생략 (규칙 신념이 바닥을 지킨다).
+
+        decay_plan에 없는 액터(잠든 Cold)는 건너뛴다 — 감쇠 미정산 상태로
+        신념을 세우면 최대 100 tick 낡은 세계관이 굳는다 (ADR-012 Cold 정합).
+        깨어나는 tick(정산 후)에 곱씹는다.
         """
         if self._emotion is None or self._relationship is None or self._ledger is None:
             return
         names = {p.id: p.name for p in self._personas.values()}
-        for actor_id in sorted(self._personas):
+        for actor_id in sorted(decay_plan):
             emotion_state = await self._emotion.load(ctx.world_id, actor_id)
             edges = {}
             for other_id in await self._relationship.counterparts(ctx.world_id, actor_id):

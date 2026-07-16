@@ -185,6 +185,14 @@ def test_lod_high_intensity_incident_promotes_low_touches():
     assert mild.tier is Tier.COLD and mild.last_interest_tick == 42
 
 
+def test_lod_high_intensity_threshold_is_tunable():
+    # 고강도 승격 임계는 운영 노브다 (LF_PROMOTE_INTENSITY) — 기본 0.7
+    cold = ActorLod(tier=Tier.COLD, last_interest_tick=0)
+    incident = [_envelope("world.incident.occurred", {"intensity": 0.5})]
+    assert lod_after_perception(cold, incident, 42).tier is Tier.COLD
+    assert lod_after_perception(cold, incident, 42, high_intensity=0.4).tier is Tier.HOT
+
+
 def test_lod_soft_signal_touches_without_promoting():
     # 반응·저강도 사건은 관심 신호 — 티어 유지, 강등 타이머만 리셋
     warm = ActorLod(tier=Tier.WARM, last_interest_tick=0)
