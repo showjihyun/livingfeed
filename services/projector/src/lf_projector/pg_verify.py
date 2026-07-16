@@ -59,7 +59,17 @@ _KEY_SETS: tuple[tuple[str, str, str], ...] = (
     ),
 )
 
-_WORLDS_SQL = "SELECT DISTINCT world_id FROM es.events"
+#: 원천 ∪ 프로젝션 — read 쪽 세계를 합쳐야 고아 프로젝션(원천에 없는 세계의
+#: 잔여 행)이 보인다. 원천만 보면 그런 세계는 검사 자체가 건너뛰어진다.
+_WORLDS_SQL = (
+    "SELECT DISTINCT world_id FROM es.events"
+    " UNION SELECT world_id FROM read.actors"
+    " UNION SELECT world_id FROM read.actor_arcs"
+    " UNION SELECT world_id FROM read.actor_arc_history"
+    " UNION SELECT world_id FROM read.actor_episodes"
+    " UNION SELECT world_id FROM read.messages"
+    " UNION SELECT world_id FROM read.actor_beliefs"
+)
 
 
 async def verify_pg_world(conn: AsyncConnection, world_id: str) -> dict[str, Any]:

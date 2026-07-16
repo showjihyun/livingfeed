@@ -55,12 +55,16 @@ async def expected_edges(conn: AsyncConnection, world_id: str) -> set[tuple[str,
 async def verify_worlds(
     conn: AsyncConnection, graph: RelGraph, *, world_id: str | None = None
 ) -> dict[str, Any]:
-    """세계별 무결성 리포트 — world_id를 주면 그 세계만, 아니면 원천의 전 세계."""
+    """세계별 무결성 리포트 — world_id를 주면 그 세계만, 아니면 원천∪그래프 전 세계.
+
+    그래프 쪽 세계도 합쳐야 고아 프로젝션(원천에 없는 세계의 DB)이 보인다 —
+    원천만 보면 그런 세계는 검사 자체가 건너뛰어진다.
+    """
     if world_id is not None:
         worlds = [world_id]
     else:
         rows = await (await conn.execute(_WORLDS_SQL)).fetchall()
-        worlds = sorted(w for (w,) in rows)
+        worlds = sorted({w for (w,) in rows} | graph.worlds())
 
     reports: dict[str, dict[str, Any]] = {}
     for world in worlds:

@@ -103,3 +103,31 @@ async def test_verify_timeline_detects_index_drift(pg, redis):
         follow["payload"]["player_id"], True,
     )
     assert (await verify_timeline(pg, redis, world_id=WORLD))["ok"]
+
+
+# ── 고아 프로젝션 — 원천에 없는 세계는 열거에서 빠지면 영영 안 보인다 ──
+
+
+async def test_verify_pg_sees_orphan_world_projection_only(pg):
+    await pg.execute("DROP SCHEMA IF EXISTS es CASCADE")
+    await migrate(pg)
+    store = ReadStore(pg)
+    await store.ensure()
+
+    identity = sample("actor.identity.declared")
+    await store.apply(identity)  # es에는 아무것도 없다 — 스모크 잔여물 시나리오
+
+    report = await verify_pg(pg)  # 자동 열거
+    world = report["worlds"][identity["world_id"]]
+    assert not report["ok"]
+    assert world["tables"]["actors"]["extra"] == [identity["actor_id"]]
+
+
+async def test_verify_timeline_sees_orphan_world_index_only(pg, redis):
+    await pg.execute("DROP SCHEMA IF EXISTS es CASCADE")
+    await migrate(pg)
+    await TimelineStore(redis).set_follow("w_ghost", "a_aria_kim", "p_ghost", True)
+
+    report = await verify_timeline(pg, redis)  # 자동 열거 — es는 비어 있다
+    assert not report["ok"]
+    assert "a_aria_kim" in report["worlds"]["w_ghost"]["mismatched"]

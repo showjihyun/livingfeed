@@ -219,6 +219,18 @@ class RelGraph:
             pairs.append([from_id, to_id, round(resentment, 4), round(trust, 4)])
         return pairs
 
+    def worlds(self) -> set[str]:
+        """디스크에 DB가 있는 세계들 — verify가 프로젝션 쪽 세계를 열거하는 눈.
+
+        kuzu 0.10+ 단일 파일(+ .wal 사이드카)과 구버전 디렉터리 형식을 겸용한다.
+        """
+        if not self._base.is_dir():
+            return set()
+        return {
+            p.name for p in self._base.iterdir()
+            if p.is_dir() or not p.name.endswith(".wal")
+        }
+
     def drop_world(self, world_id: str) -> None:
         """재구축용 파괴 (ADR-003 계약 3). Windows 파일 락 대비 짧은 재시도."""
         conn = self._conns.pop(world_id, None)

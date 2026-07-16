@@ -106,14 +106,29 @@ async def verify_timeline_world(
     return report
 
 
+async def _index_worlds(redis: Redis) -> set[str]:
+    """인덱스 쪽 세계 열거 — lf:tlflw:{world}:{actor} 키에서 파싱한다."""
+    worlds: set[str] = set()
+    async for key in redis.scan_iter(match="lf:tlflw:*"):
+        name = key.decode() if isinstance(key, bytes) else key
+        world, _, actor = name.removeprefix("lf:tlflw:").partition(":")
+        if actor:
+            worlds.add(world)
+    return worlds
+
+
 async def verify_timeline(
     conn: AsyncConnection, redis: Redis, *, world_id: str | None = None
 ) -> dict[str, Any]:
-    """세계별 팔로워 인덱스 무결성 — world_id를 주면 그 세계만."""
+    """세계별 팔로워 인덱스 무결성 — world_id를 주면 그 세계만, 아니면 원천∪인덱스.
+
+    인덱스 쪽 세계도 합쳐야 고아 프로젝션(원천에 없는 세계의 팔로워 키)이
+    보인다 — 원천만 보면 그런 세계는 검사 자체가 건너뛰어진다.
+    """
     if world_id is not None:
         worlds = [world_id]
     else:
         rows = await (await conn.execute(_WORLDS_SQL)).fetchall()
-        worlds = sorted(w for (w,) in rows)
+        worlds = sorted({w for (w,) in rows} | await _index_worlds(redis))
     reports = {world: await verify_timeline_world(conn, redis, world) for world in worlds}
     return {"ok": all(r["ok"] for r in reports.values()), "worlds": reports}

@@ -60,3 +60,19 @@ async def test_verify_detects_projection_gap_and_recovery(pg, tmp_path):
         assert (await verify_worlds(pg, graph))["ok"]
     finally:
         graph.close()
+
+
+async def test_verify_sees_orphan_world_in_graph_only(pg, tmp_path):
+    """원천에 없는 세계의 그래프 DB(고아 프로젝션)도 세계 열거에 잡혀야 한다."""
+    await pg.execute("DROP SCHEMA IF EXISTS es CASCADE")
+    await migrate(pg)
+
+    graph = RelGraph(tmp_path)
+    try:
+        graph.apply_state_changed("w_ghost", sample("relationship.state.changed"))
+        report = await verify_worlds(pg, graph)  # 자동 열거 — es는 비어 있다
+        assert not report["ok"]
+        assert report["worlds"]["w_ghost"]["extra"]  # 고아 엣지가 보인다
+        assert report["worlds"]["w_ghost"]["missing"] == []
+    finally:
+        graph.close()
