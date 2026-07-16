@@ -168,3 +168,24 @@ async def test_session_token_gate(token_gateway):
         await ws.send(json.dumps({"type": "nope", "seq": 1, "payload": {}}))
         frame = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
         assert frame["type"] == "error"  # 접속 자체는 살아 있다
+
+
+async def test_session_token_gate_bearer_header(token_gateway):
+    """비브라우저 클라이언트 경로 — Authorization: Bearer도 ?token=과 동등하게 통한다."""
+    url = f"ws://{token_gateway}/session?player_id={PLAYER}"
+    with pytest.raises(websockets.exceptions.InvalidStatus):
+        async with websockets.connect(
+            url, additional_headers={"Authorization": "Bearer wrong"}
+        ):
+            pass
+    with pytest.raises(websockets.exceptions.InvalidStatus):
+        async with websockets.connect(  # Bearer 외 스킴은 토큰으로 치지 않는다
+            url, additional_headers={"Authorization": "Basic s3cret"}
+        ):
+            pass
+    async with websockets.connect(
+        url, additional_headers={"Authorization": "Bearer s3cret"}
+    ) as ws:
+        await ws.send(json.dumps({"type": "nope", "seq": 1, "payload": {}}))
+        frame = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+        assert frame["type"] == "error"  # 접속 자체는 살아 있다

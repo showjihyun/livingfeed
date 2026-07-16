@@ -185,9 +185,15 @@ def create_app(cfg: Config | None = None, nc: nats.NATS | None = None) -> FastAP
         # 생기면 검증된 신원에서 도출한다. 그전에 로컬 밖에 노출하려면
         # LF_SESSION_TOKEN(공유 토큰 게이트)을 반드시 설정하라 (config.py).
         if cfg.session_token is not None:
-            supplied = ws.query_params.get("token", "")
+            # 브라우저 EventSource와 달리 WS 클라이언트는 헤더를 실을 수 있다 —
+            # ?token=(웹 앱)과 Authorization: Bearer(비브라우저) 둘 다 허용.
+            supplied = ws.query_params.get("token")
+            if supplied is None:
+                scheme, _, credential = ws.headers.get("authorization", "").partition(" ")
+                supplied = credential.strip() if scheme.lower() == "bearer" else ""
             if not hmac.compare_digest(supplied, cfg.session_token):
-                await ws.close(code=4401, reason="세션 토큰이 필요하다 (LF_SESSION_TOKEN)")
+                # accept 전 close — 핸드셰이크 자체를 거부한다 (1008 = 정책 위반, RFC 6455)
+                await ws.close(code=1008, reason="세션 토큰이 필요하다 (LF_SESSION_TOKEN)")
                 return
         player_id = ws.query_params.get("player_id", "")
         world_id = ws.query_params.get("world_id", "w_main")
