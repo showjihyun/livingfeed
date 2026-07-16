@@ -27,6 +27,12 @@ budget:
   window_ticks: 60
   max_interventions: 2
 
+# boost_feed — 편집 조명 (ADR-013/014): LLM·규칙은 대상만 고른다, 강도·기간은 노브다
+# (행동 반경 제한 — 조명의 세기를 모델이 정하게 두지 않는다)
+boost:
+  strength: 0.6        # worthiness boost 항 (incident의 1.0보다 약한 상시 조명)
+  duration_ticks: 60   # 세계 1시간 — 조명은 영원하지 않다
+
 # 회고 → 페이싱 자기 조정 (비례 제어의 첫 절단면, ADR-013 회고 후속).
 # 지난 날 드라마 개입 밀도가 목표 대역을 벗어나면 quiet_ticks_to_fire를
 # 한 걸음씩 움직인다 — 시즌 테마가 기조라면 이건 미세 조정이다.

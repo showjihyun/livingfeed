@@ -35,10 +35,10 @@ THEMES = [
 
 
 def test_plan_schema_lists_only_drama_tools():
-    # 드라마 게이트 도구는 셋 — set_season_theme은 저빈도 시즌 계획으로 분리됐다
+    # 드라마 게이트 도구는 넷 — set_season_theme은 저빈도 시즌 계획으로 분리됐다
     schema = plan_schema(["chance_encounter", "rumor_spread"])
     assert schema["properties"]["tool"]["enum"] == [
-        "inject_incident", "nudge_perception", "promote_actor"
+        "inject_incident", "nudge_perception", "promote_actor", "boost_feed"
     ]
     assert schema["properties"]["incident_kind"]["enum"] == ["chance_encounter", "rumor_spread"]
     assert "season_theme" not in schema["properties"]  # 드라마 스키마엔 없다
@@ -49,7 +49,9 @@ def test_plan_schema_lists_only_drama_tools():
 def test_plan_schema_excludes_streak_capped_tool():
     # 연속 사용 상한에 걸린 도구는 enum에서 빠진다 — 힌트가 아니라 스키마 강제 (hard rule)
     schema = plan_schema(["chance_encounter"], exclude_tool="inject_incident")
-    assert schema["properties"]["tool"]["enum"] == ["nudge_perception", "promote_actor"]
+    assert schema["properties"]["tool"]["enum"] == [
+        "nudge_perception", "promote_actor", "boost_feed"
+    ]
 
 
 def test_build_plan_user_announces_excluded_tool():
@@ -317,6 +319,39 @@ def test_build_season_user_shows_themes_and_current():
     assert "calm" in user and "turmoil" in user  # 고를 수 있는 테마
     assert "calm" in user  # 현재 테마도 표시
     assert str(SNAP.drama_ma) in user
+
+
+# --- boost_feed 도구 (편집 조명) -----------------------------------------------
+
+
+def test_valid_boost_is_control_signal_with_knob_values():
+    """boost_feed — LLM은 대상만 고른다, 강도·기간은 노브다 (행동 반경 제한)."""
+    plan = {"tool": "boost_feed", "target_actor_id": "a_minji",
+            "rationale": "이미 일어나는 이야기에 빛을 줄 때다"}
+    result = intervention_from_plan(
+        plan, SNAP, TENSION, INCIDENTS, NAMES,
+        model="qwen3:8b", boost_cfg={"strength": 0.7, "duration_ticks": 30},
+    )
+    assert result is not None
+    assert result.tool == "boost_feed"
+    assert result.stream == "system"  # 세계 사건이 아니라 편집 제어 신호
+    assert result.event_type == "system.director.feed_boosted"
+    assert result.stream_key == "boost"
+    assert result.payload == {
+        "target_actor_id": "a_minji", "boost": 0.7,
+        "until_tick": SNAP.tick + 30,  # 조명은 영원하지 않다
+    }
+
+
+def test_boost_outside_candidates_returns_none():
+    # 관찰 후보 밖 대상 — 환각 조명은 켤 수 없다 (규칙 폴백)
+    plan = {"tool": "boost_feed", "target_actor_id": "a_ghost", "rationale": "x"}
+    assert intervention_from_plan(plan, SNAP, TENSION, INCIDENTS, NAMES) is None
+
+
+def test_build_plan_user_describes_boost_tool():
+    user = build_plan_user(SNAP, TENSION, INCIDENTS, NAMES)
+    assert "boost_feed" in user and "편집 조명" in user
 
 
 # --- plan_arc 도구 (저빈도 인생 아크) ------------------------------------------

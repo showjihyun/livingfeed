@@ -214,6 +214,33 @@ async def test_llm_promote_spotlights_actor_on_system_stream(conn):
     assert await read_stream(conn, WORLD, "world", "observations") == []
 
 
+async def test_llm_boost_lights_feed_on_system_stream(conn):
+    # 네 번째 도구: boost_feed → system.director.feed_boosted (편집 제어 신호)
+    tension = [["a_minji_kim", "a_seongho_park", 0.8, 0.2]]
+    plan = {
+        "tool": "boost_feed",
+        "target_actor_id": "a_seongho_park",
+        "rationale": "이미 일어나는 그의 이야기에 빛을 줄 때다",
+    }
+    ai = _StubAiClient(plan)
+    director = make_llm_director(ai)
+    fired = await director.evaluate(
+        conn, Snapshot(tick=122, drama_ma=0.05, quiet_ticks=30), _StubGraph(tension)
+    )
+    assert fired
+
+    [audit] = [s.envelope for s in await read_stream(conn, WORLD, "system", "director")]
+    assert audit["payload"]["tool"] == "boost_feed"
+
+    [boost] = [s.envelope for s in await read_stream(conn, WORLD, "system", "boost")]
+    assert boost["type"] == "system.director.feed_boosted"
+    assert boost["payload"]["target_actor_id"] == "a_seongho_park"
+    assert boost["payload"]["boost"] == 0.6  # 강도는 params 노브 — LLM이 못 정한다
+    assert boost["payload"]["until_tick"] == 122 + 60
+    # 세계 사건이 아니다 — world 스트림에는 없다
+    assert await read_stream(conn, WORLD, "world", "incidents") == []
+
+
 async def test_plan_season_records_on_system_stream_without_budget(conn):
     # 저빈도 시즌 계획 — 드라마 게이트·예산과 분리된 별도 경로 (ADR-013)
     plan = {"season_theme": "turmoil", "rationale": "세계가 격동으로 접어들 때다"}

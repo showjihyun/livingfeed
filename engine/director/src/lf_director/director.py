@@ -134,7 +134,8 @@ class Director:
             )
             if output is not None:
                 chosen = intervention_from_plan(
-                    output, snapshot, tension, self._incidents, self._names, model=model
+                    output, snapshot, tension, self._incidents, self._names,
+                    model=model, boost_cfg=self._params.get("boost"),
                 )
                 # 제외 도구를 그래도 골랐다면 무효 — 방어적 재집행 (스키마가 1차 방어)
                 if chosen is not None and chosen.tool != capped:

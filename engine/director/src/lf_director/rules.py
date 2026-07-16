@@ -30,6 +30,9 @@ OBSERVATION_STREAM_KEY = "observations"
 PROMOTE_TOOL = "promote_actor"
 SPOTLIGHT_TYPE = "system.director.spotlighted"
 SPOTLIGHT_STREAM_KEY = "spotlight"
+BOOST_TOOL = "boost_feed"
+BOOST_TYPE = "system.director.feed_boosted"
+BOOST_STREAM_KEY = "boost"
 SEASON_TOOL = "set_season_theme"
 SEASON_TYPE = "system.director.season_set"
 SEASON_STREAM_KEY = "season"
@@ -140,7 +143,10 @@ def decide(
         "selector": "rule",  # 개입 선택 주체 — 감사에서 규칙/LLM 구분 (ADR-013)
     }
 
-    tools = [INCIDENT_TOOL, NUDGE_TOOL, PROMOTE_TOOL] if tension_pairs else [INCIDENT_TOOL]
+    tools = (
+        [INCIDENT_TOOL, NUDGE_TOOL, PROMOTE_TOOL, BOOST_TOOL]
+        if tension_pairs else [INCIDENT_TOOL]
+    )
     tool = tools[zlib.crc32(f"tool:{budget.interventions_total}".encode()) % len(tools)]
 
     if tool == PROMOTE_TOOL:
@@ -149,6 +155,19 @@ def decide(
             tool=PROMOTE_TOOL, stream=SYSTEM_STREAM,
             event_type=SPOTLIGHT_TYPE, stream_key=SPOTLIGHT_STREAM_KEY,
             payload={"target_actor_id": tension_pairs[0][0]},
+            reason=reason, signals=signals,
+        )
+    if tool == BOOST_TOOL:
+        # 긴장 상위 인물의 이야기에 편집 조명 — 이미 일어나는 일이 더 잘 보이게
+        cfg = params.get("boost", {})
+        return Intervention(
+            tool=BOOST_TOOL, stream=SYSTEM_STREAM,
+            event_type=BOOST_TYPE, stream_key=BOOST_STREAM_KEY,
+            payload={
+                "target_actor_id": tension_pairs[0][0],
+                "boost": float(cfg.get("strength", 0.6)),
+                "until_tick": snapshot.tick + int(cfg.get("duration_ticks", 60)),
+            },
             reason=reason, signals=signals,
         )
     if tool == NUDGE_TOOL:

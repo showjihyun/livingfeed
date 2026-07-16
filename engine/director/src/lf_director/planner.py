@@ -23,6 +23,9 @@ from lf_director.rules import (
     ARC_STREAM_KEY,
     ARC_TOOL,
     ARC_TYPE,
+    BOOST_STREAM_KEY,
+    BOOST_TOOL,
+    BOOST_TYPE,
     INCIDENT_STREAM_KEY,
     INCIDENT_TOOL,
     INCIDENT_TYPE,
@@ -68,7 +71,9 @@ def plan_schema(
     set_season_theme은 여기 없다 — 시즌 계획은 드라마 게이트가 아니라 저빈도
     케이던스(plan_season)의 몫이다 (ADR-013 §실행 모델).
     """
-    tools = [t for t in (INCIDENT_TOOL, NUDGE_TOOL, PROMOTE_TOOL) if t != exclude_tool]
+    tools = [
+        t for t in (INCIDENT_TOOL, NUDGE_TOOL, PROMOTE_TOOL, BOOST_TOOL) if t != exclude_tool
+    ]
     return {
         "type": "object",
         "properties": {
@@ -262,6 +267,9 @@ def build_plan_user(
         "about_actor_id는 그 관측이 향한 상대(후보 중 하나, 없으면 null).",
         "· tool=promote_actor (잠자던 인물을 무대로 — 사건 없이 그를 더 자주 움직이게 한다): "
         "target_actor_id는 후보 한 명. 지금 조명이 필요한 인물이 있을 때.",
+        "· tool=boost_feed (편집 조명 — 그의 이야기가 피드에서 더 잘 보이게): "
+        "target_actor_id는 후보 한 명. 이미 일어나고 있는 일에 빛을 줄 때 "
+        "(promote가 행동 빈도라면 이것은 가시성이다).",
         "",
         "rationale은 왜 지금 이 개입인지 한 줄.",
     ]
@@ -296,10 +304,12 @@ def intervention_from_plan(
     names: dict[str, str],
     *,
     model: str | None = None,
+    boost_cfg: dict[str, Any] | None = None,
 ) -> Intervention | None:
     """검증된 드라마 개입 응답 → Intervention. 도구별로 hard rule을 방어적으로 재집행한다.
 
     무효(화이트리스트 밖 도구·kind, 없는 대상 등)면 None — 호출자가 규칙 폴백한다.
+    boost_cfg는 boost_feed의 강도·기간 노브 — LLM은 대상만 고른다 (행동 반경 제한).
     시즌 계획(set_season_theme)은 여기가 아니라 season_from_plan이 담당한다.
     """
     signals = _signals(snapshot, tension_pairs, model)
@@ -311,7 +321,42 @@ def intervention_from_plan(
         return _nudge_intervention(plan, tension_pairs, rationale, signals)
     if tool == PROMOTE_TOOL:
         return _promote_intervention(plan, tension_pairs, rationale, signals)
+    if tool == BOOST_TOOL:
+        return _boost_intervention(plan, tension_pairs, snapshot, boost_cfg, rationale, signals)
     return None  # 화이트리스트 밖 도구 — 존재하지 않는다
+
+
+def _boost_intervention(
+    plan: dict[str, Any],
+    tension_pairs: list[list[Any]],
+    snapshot: Snapshot,
+    boost_cfg: dict[str, Any] | None,
+    rationale: str,
+    signals: dict[str, Any],
+) -> Intervention | None:
+    """boost_feed — 편집 조명 (ADR-013/014). 대상은 관찰 후보 안에서만 (환각 차단).
+
+    강도·기간은 params 노브다 — 조명의 세기를 모델이 정하게 두지 않는다.
+    promote_actor(행동 빈도)와 달리 이미 일어나는 행동의 피드 가시성을 올린다.
+    """
+    candidates = set(candidate_actor_ids(tension_pairs))
+    target = plan.get("target_actor_id")
+    if target not in candidates:
+        return None
+    cfg = boost_cfg or {}
+    return Intervention(
+        tool=BOOST_TOOL,
+        stream=SYSTEM_STREAM,  # 세계 사건이 아니라 편집 제어 신호다
+        event_type=BOOST_TYPE,
+        stream_key=BOOST_STREAM_KEY,
+        payload={
+            "target_actor_id": target,
+            "boost": float(cfg.get("strength", 0.6)),
+            "until_tick": snapshot.tick + int(cfg.get("duration_ticks", 60)),
+        },
+        reason=rationale,
+        signals=signals,
+    )
 
 
 def season_from_plan(

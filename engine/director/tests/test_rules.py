@@ -18,19 +18,21 @@ def test_no_intervention_below_threshold():
 def test_fires_at_threshold_and_rotates_tools_with_tension():
     """긴장 후보가 있으면 규칙 경로도 도구를 순환한다 — 규칙 폴백의 다양성 (ADR-013).
 
-    셋 다 화이트리스트 안이고, 도구별 payload가 제 모양이어야 한다.
+    넷 다 화이트리스트 안이고, 도구별 payload가 제 모양이어야 한다.
     """
     tension = [["a_junho_park", "a_aria_kim", 0.42, -0.1]]
     budget = BudgetState()
     seen = {}
-    for i in range(6):
+    for i in range(8):
         intervention = decide(quiet_snapshot(tick=100 + i * 200), budget, tension)
         assert intervention is not None
         assert "침체 감지" in intervention.reason
         assert intervention.signals["tension_top"] == tension
         seen[intervention.tool] = intervention
         budget.record(100 + i * 200, None)
-    assert set(seen) == {"inject_incident", "nudge_perception", "promote_actor"}
+    assert set(seen) == {
+        "inject_incident", "nudge_perception", "promote_actor", "boost_feed"
+    }
 
     incident = seen["inject_incident"]
     assert incident.event_type == "world.incident.occurred"
@@ -44,6 +46,11 @@ def test_fires_at_threshold_and_rotates_tools_with_tension():
     promote = seen["promote_actor"]
     assert promote.stream == "system"  # 세계 사건이 아니라 제어 신호
     assert promote.payload == {"target_actor_id": "a_junho_park"}
+    boost = seen["boost_feed"]
+    assert boost.event_type == "system.director.feed_boosted"
+    assert boost.payload["target_actor_id"] == "a_junho_park"
+    assert 0 < boost.payload["boost"] <= 1  # 강도·기간은 노브다
+    assert boost.payload["until_tick"] > 100  # 조명은 영원하지 않다
 
 
 def test_no_tension_means_incident_only():
