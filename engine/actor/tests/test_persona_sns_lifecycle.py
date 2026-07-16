@@ -60,6 +60,107 @@ def make_newcomer() -> Persona:
     )
 
 
+def make_companion() -> Persona:
+    """두 번째 신규 캐릭터 — 소속 편향 (다수 투입 시나리오의 상대역)."""
+    return Persona(
+        id="a_probe_companion",
+        name="길동무",
+        archetype="probe_companion",
+        identity_core="같은 날 들어온 또 한 사람 — 곁을 먼저 살피는 성격이다.",
+        big_five={"openness": 0.5, "conscientiousness": 0.5, "extraversion": 0.7,
+                  "agreeableness": 0.8, "neuroticism": 0.4},
+        needs_bias={"achievement": 0.4, "belonging": 0.9, "security": 0.5},
+        goals=({"id": "g_find_people", "description": "마음 붙일 사람들 찾기",
+                "priority": 0.8, "need": "belonging"},),
+    )
+
+
+class _ScriptedAi:
+    """대인 행동을 고르는 LLM을 재현하는 스텁 — 서로에게 말을 걸게 한다.
+
+    규칙 폴백은 대상 있는 행동을 만들지 않으므로, LLM이 골랐을 speak를
+    결정적으로 재현한다. resolve→CONSOLIDATE(관계·기억·피드)는 실제 경로다.
+    """
+
+    def __init__(self, targets: dict[str, str]) -> None:
+        self._targets = targets
+
+    async def decide_action(self, bundle, schema, *, tier, actor_id, tick):
+        return {
+            "action_kind": "speak",
+            "intent": "같은 날 들어온 동료에게 먼저 인사를 건넨다",
+            "target_actor_id": self._targets.get(actor_id),
+            "location_id": None,
+            "params": {},
+            "decision_trace": {"trace_id": f"scripted-{actor_id}-{tick}", "tier": tier},
+        }
+
+    async def converse(self, *args, **kwargs):
+        return None
+
+    async def reflect(self, *args, **kwargs):
+        return None
+
+
+async def test_multiple_new_characters_form_a_society(conn, redis):
+    """다수 신규 캐릭터 동시 투입 — 서로의 존재가 관계·피드·기억에 남는다.
+
+    테스트 계획 확장: 캐릭터들이 혼자가 아니라 '사회'로 사는지 — 상호 관계
+    엣지, 첫 만남 마일스톤, 대인 행동의 피드 승격, 서로에 대한 기억.
+    """
+    a, b = make_newcomer(), make_companion()
+    phases = ActorPhases(
+        [a, b],
+        ai=_ScriptedAi({a.id: b.id, b.id: a.id}),  # 서로에게 말을 건다
+        memory=WorkingMemory(redis),
+        emotion=EmotionAdapter(redis),
+        relationship=RelationshipAdapter(redis),
+        identity_redis=redis,
+    )
+    head = 0
+    for tick in range(2):
+        head = await run_tick(conn, phases, CLOCK, WORLD, tick=tick, head=head)
+
+    # 둘 다 세계에 입장했다
+    for persona in (a, b):
+        events = [s.envelope for s in await read_stream(conn, WORLD, "actor", persona.id)]
+        assert any(e["type"] == "actor.identity.declared" for e in events)
+        actions = [e for e in events if e["type"] == "actor.action.performed"]
+        assert actions and all(act["payload"]["target_actor_id"] for act in actions)
+
+    # 상호 관계 — 양방향 엣지와 첫 만남 마일스톤 (규칙 1b: 대상 있는 행동은 양방향)
+    rel = RelationshipAdapter(redis)
+    assert await rel.load(WORLD, a.id, b.id) is not None
+    assert await rel.load(WORLD, b.id, a.id) is not None
+    for pair in (f"{a.id}|{b.id}", f"{b.id}|{a.id}"):
+        rel_events = [
+            s.envelope for s in await read_stream(conn, WORLD, "relationship", pair)
+        ]
+        assert any(
+            e["type"] == "relationship.milestone.reached"
+            and e["payload"]["milestone"] == "first_met"
+            for e in rel_events
+        )
+
+    # 대인 행동이 피드에 오른다 — 두 이름이 한 제목에
+    composer = FeedComposer(
+        FeedConfig(pg_dsn="unused", nats_url="unused", env="test",
+                   personas_dir=Path("agents/personas-없음")),
+        actor_names={a.id: a.name, b.id: b.name},
+    )
+    events = [s.envelope for s in await read_stream(conn, WORLD, "actor", a.id)]
+    first_action = next(e for e in events if e["type"] == "actor.action.performed")
+    post_id = await composer.compose_once(conn, first_action)
+    assert post_id is not None
+    [post] = await read_stream(conn, WORLD, "feed", post_id)
+    title = post.envelope["payload"]["title"]
+    assert a.name in title and b.name in title  # "새내기, 길동무에게 말을 걸다"
+
+    # 서로의 흔적이 기억에 남는다
+    recent_a = await WorkingMemory(redis).recent(WORLD, a.id)
+    assert any("인사를 건넨다" in m for m in recent_a)
+
+
 def dm_envelope(text: str) -> dict:
     event_id = new_ulid()
     return {
