@@ -53,9 +53,14 @@ uv run --package lf-projector python -m lf_projector.main --kind pg --verify [--
 | redis | 팔로워 인덱스·타임라인 vs es 선언 fold | 서비스와 병행 안전 (읽기 전용) |
 
 - 종료 코드 1 → stdout의 JSON 리포트(`mismatched`/`missing`/`extra`)로 원인 확인
-  후, 해당 프로젝터만 `--rebuild`로 재구축한다 (각 서비스 정의의 주석 참고).
+  후, 해당 프로젝터만 `--rebuild --once`로 재구축한다: durable과 프로젝션을
+  파괴하고 스트림이 유휴해질 때까지 재소비한 뒤 **스스로 종료**하는 일회성
+  배치다 (--once 없이는 상시 서비스 루프로 계속 돈다). 재구축 후 같은 verify로
+  exit 0을 확인하면 사이클이 닫힌다.
 - os(OpenSearch)는 verify가 없다 — `_id=event_id` upsert 멱등이라 의심되면 바로
-  `--kind os --rebuild`.
+  `--kind os --rebuild --once`.
+- **재구축의 원천은 JetStream 스트림이다** — 스트림 보존 한도를 넘긴 과거
+  이벤트는 재소비되지 않는다. es(SoT)로부터의 완전 재구축은 후속 조각.
 - 소비 지연은 배치가 아니라 상시 로그로 본다: 각 프로젝터가
   `projection_lag_seconds max=… avg=… count=…`를 주기 발화한다 (ADR-020 §1, 예산 <2s).
 

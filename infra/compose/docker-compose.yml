@@ -277,7 +277,7 @@ services:
 
   projector:
     # 배치 2단 저장: LF_FEED → OpenSearch 색인 (os-projector, ADR-003/014)
-    # 재구축: docker compose run --rm projector python -m lf_projector.main --kind os --rebuild
+    # 재구축(일회성): docker compose run --rm projector python -m lf_projector.main --kind os --rebuild --once
     profiles: [full]
     restart: unless-stopped
     build:
@@ -321,7 +321,7 @@ services:
 
   kuzu-projector:
     # 관계 그래프 프로젝션 + graph query API (ADR-006) — Kuzu는 임베디드(볼륨에 DB 파일)
-    # 재구축: docker compose run --rm kuzu-projector python -m lf_projector.main --kind kuzu --rebuild
+    # 재구축(일회성): docker compose run --rm kuzu-projector python -m lf_projector.main --kind kuzu --rebuild --once
     profiles: [full]
     restart: unless-stopped
     build:
@@ -335,15 +335,19 @@ services:
       NATS_URL: nats://nats:4222
       LF_ENV: dev
       LF_KUZU_DIR: /data/kuzu
+      # 소비에는 불필요 — --verify(원천 es 대비 그래프 비교)가 쓴다
+      LF_DATABASE_URL: postgresql://${POSTGRES_USER:-livingfeed}:${POSTGRES_PASSWORD:-livingfeed}@postgres:5432/${POSTGRES_DB:-livingfeed}
     volumes:
       - kuzu_data:/data/kuzu
     depends_on:
       nats:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
 
   pg-projector:
     # PG read 테이블: 에피소드·신념·대화 (ADR-003, ADR-008 후속)
-    # 재구축: docker compose run --rm pg-projector python -m lf_projector.main --kind pg --rebuild
+    # 재구축(일회성): docker compose run --rm pg-projector python -m lf_projector.main --kind pg --rebuild --once
     profiles: [full]
     restart: unless-stopped
     build:
@@ -365,7 +369,7 @@ services:
 
   redis-projector:
     # Redis 타임라인: 관계 기반 fan-out-on-write — Personal/Private 피드 (ADR-014 §2단)
-    # 재구축: docker compose run --rm redis-projector python -m lf_projector.main --kind redis --rebuild
+    # 재구축(일회성): docker compose run --rm redis-projector python -m lf_projector.main --kind redis --rebuild --once
     profiles: [full]
     restart: unless-stopped
     build:
@@ -379,10 +383,14 @@ services:
       NATS_URL: nats://nats:4222
       REDIS_URL: redis://redis:6379/1
       LF_ENV: dev
+      # 소비에는 불필요 — --verify(원천 es의 팔로우 선언 fold)가 쓴다
+      LF_DATABASE_URL: postgresql://${POSTGRES_USER:-livingfeed}:${POSTGRES_PASSWORD:-livingfeed}@postgres:5432/${POSTGRES_DB:-livingfeed}
     depends_on:
       nats:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
 
   # qdrant 프로젝터는 자신의 로드맵 단계에서 추가된다.
