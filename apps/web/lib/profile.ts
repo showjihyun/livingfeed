@@ -8,12 +8,15 @@
  * 화면은 데모 서사를 유지한다 (라이브 피드·관계도와 같은 폴백 규약).
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type { ActorIdentity } from "./actors";
 import { PLAYER_ID } from "./config";
 
 const FEED_API_URL = process.env.NEXT_PUBLIC_LF_FEED_API_URL ?? "http://localhost:8001";
+
+/** 에피소드 한 페이지 크기 — 이보다 덜 오면 더 과거가 없다는 뜻 (커서를 닫는 근거) */
+const EPISODE_PAGE_SIZE = 8;
 
 export interface ActorBelief {
   kind: string;
@@ -92,6 +95,8 @@ interface ProfileResponse {
       occurred_at: string;
       tags: string[];
     }[];
+    /** 더 과거 에피소드 커서 — 마지막 페이지에서도 남는다 (빈 페이지가 곧 끝) */
+    next_cursor: string | null;
   };
   arc: { stage: string; intention: string; planned_at: string } | null;
   arc_history: { stage: string; intention: string; planned_at: string }[];
@@ -109,6 +114,21 @@ export function humanize(text: string): string {
       .replaceAll("당신을(를)", "당신을")
       .replaceAll("당신과(와)", "당신과")
   );
+}
+
+function toEpisode(e: ProfileResponse["episodes"]["items"][number]): ActorEpisode {
+  return {
+    id: e.event_id,
+    summary: e.summary,
+    importance: e.importance,
+    occurredAt: e.occurred_at,
+    tags: e.tags,
+  };
+}
+
+/** 응답의 에피소드 커서 — 페이지가 덜 찼으면 더 과거가 없으니 여기서 닫는다 */
+function episodesNextCursor(episodes: ProfileResponse["episodes"]): string | null {
+  return episodes.items.length < EPISODE_PAGE_SIZE ? null : episodes.next_cursor;
 }
 
 function fromResponse(body: ProfileResponse): ActorProfile {
@@ -132,13 +152,7 @@ function fromResponse(body: ProfileResponse): ActorProfile {
       : null,
     aboutMe: beliefs.filter((b) => b.aboutId === PLAYER_ID),
     beliefs,
-    episodes: body.episodes.items.map((e) => ({
-      id: e.event_id,
-      summary: e.summary,
-      importance: e.importance,
-      occurredAt: e.occurred_at,
-      tags: e.tags,
-    })),
+    episodes: body.episodes.items.map(toEpisode),
     arc: body.arc
       ? { stage: body.arc.stage, intention: body.arc.intention, plannedAt: body.arc.planned_at }
       : null,
@@ -153,20 +167,33 @@ function fromResponse(body: ProfileResponse): ActorProfile {
 export function useActorProfile(
   actorId: string,
   enabled: boolean,
-): { profile: ActorProfile | null; available: boolean } {
+): {
+  profile: ActorProfile | null;
+  available: boolean;
+  /** 더 과거 기억 페이지가 남아있는가 — 빈 페이지를 받으면 닫힌다 */
+  hasMoreEpisodes: boolean;
+  loadingEpisodes: boolean;
+  loadMoreEpisodes: () => void;
+} {
   const [profile, setProfile] = useState<ActorProfile | null>(null);
+  const [episodeCursor, setEpisodeCursor] = useState<string | null>(null);
+  const [loadingEpisodes, setLoadingEpisodes] = useState(false);
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
+    // 대상 액터가 바뀌면 이전 커서는 무효 — 첫 페이지부터 다시
+    setEpisodeCursor(null);
     void (async () => {
       try {
         const response = await fetch(
-          `${FEED_API_URL}/actors/${actorId}/profile?episode_limit=8`,
+          `${FEED_API_URL}/actors/${actorId}/profile?episode_limit=${EPISODE_PAGE_SIZE}`,
         );
         if (!response.ok) throw new Error(`feed-api ${response.status}`);
         const body = (await response.json()) as ProfileResponse;
-        if (!cancelled) setProfile(fromResponse(body));
+        if (cancelled) return;
+        setProfile(fromResponse(body));
+        setEpisodeCursor(episodesNextCursor(body.episodes));
       } catch {
         // 미가용 — 데모 서사 유지 (조용한 강등, 라이브 피드와 같은 규약)
       }
@@ -176,6 +203,34 @@ export function useActorProfile(
     };
   }, [actorId, enabled]);
 
+  // 과거 기억 이어받기 — 같은 프로필 응답에서 에피소드 페이지만 취해 아래에 붙인다
+  const loadMoreEpisodes = useCallback(() => {
+    if (!episodeCursor || loadingEpisodes) return;
+    setLoadingEpisodes(true);
+    void (async () => {
+      try {
+        const response = await fetch(
+          `${FEED_API_URL}/actors/${actorId}/profile?episode_limit=${EPISODE_PAGE_SIZE}&episode_cursor=${episodeCursor}`,
+        );
+        if (!response.ok) throw new Error(`feed-api ${response.status}`);
+        const body = (await response.json()) as ProfileResponse;
+        const older = body.episodes.items.map(toEpisode);
+        setProfile((prev) => {
+          if (!prev) return prev;
+          // 중복(event id) 제거 — 커서 경계에서 같은 행이 두 번 오면 한 번만 남긴다
+          const seen = new Set(prev.episodes.map((e) => e.id));
+          return { ...prev, episodes: [...prev.episodes, ...older.filter((e) => !seen.has(e.id))] };
+        });
+        // 빈 페이지가 곧 끝 — 커서를 닫아 버튼을 숨긴다
+        setEpisodeCursor(older.length ? episodesNextCursor(body.episodes) : null);
+      } catch {
+        // 미가용 — 이미 보이는 기억은 유지, 커서도 남긴다 (재시도 가능)
+      } finally {
+        setLoadingEpisodes(false);
+      }
+    })();
+  }, [actorId, episodeCursor, loadingEpisodes]);
+
   // 실측이 "있다"고 말하려면 내용이 있어야 한다 — 정체성·신념·기억·아크 중 하나라도
   const available =
     profile !== null &&
@@ -183,5 +238,11 @@ export function useActorProfile(
       profile.episodes.length > 0 ||
       profile.beliefs.length > 0 ||
       profile.arc !== null);
-  return { profile: available ? profile : null, available };
+  return {
+    profile: available ? profile : null,
+    available,
+    hasMoreEpisodes: available && episodeCursor !== null,
+    loadingEpisodes,
+    loadMoreEpisodes,
+  };
 }

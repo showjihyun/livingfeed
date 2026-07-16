@@ -16,6 +16,10 @@ interface DmTabProps {
   draft: string;
   onDraftChange: (value: string) => void;
   onSend: () => void;
+  /** 더 과거 대화 페이지가 남아있는가 — 커서 소진·백엔드 미가용이면 숨긴다 */
+  canLoadOlder: boolean;
+  loadingOlder: boolean;
+  onLoadOlder: () => void;
 }
 
 export function DmTab({
@@ -26,6 +30,9 @@ export function DmTab({
   draft,
   onDraftChange,
   onSend,
+  canLoadOlder,
+  loadingOlder,
+  onLoadOlder,
 }: DmTabProps) {
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") onSend();
@@ -64,6 +71,27 @@ export function DmTab({
           gap: 14,
         }}
       >
+        {canLoadOlder && (
+          // 과거 방향 커서 페이지네이션 — 과거 메시지를 목록 위에 이어 붙인다
+          <div
+            onClick={loadingOlder ? undefined : onLoadOlder}
+            className={styles.press95}
+            style={{
+              alignSelf: "center",
+              fontSize: 12,
+              color: "#5F7EC9",
+              background: "#EDF3FD",
+              padding: "5px 14px",
+              borderRadius: 9999,
+              fontWeight: 700,
+              cursor: loadingOlder ? "default" : "pointer",
+              opacity: loadingOlder ? 0.6 : 1,
+            }}
+          >
+            {loadingOlder ? "이전 대화 불러오는 중..." : "이전 대화 더 보기"}
+          </div>
+        )}
+
         <div
           style={{
             alignSelf: "center",
@@ -83,8 +111,9 @@ export function DmTab({
           const next = messages[i + 1];
           const showAvatar = !mine && (i === messages.length - 1 || next?.from === "me");
           return (
+            // 히스토리 메시지는 event id로 고정 — 위로 이어 붙여도 기존 말풍선이 리마운트되지 않는다
             <div
-              key={i}
+              key={msg.eventId ?? `local-${i}`}
               style={{
                 display: "flex",
                 gap: 10,

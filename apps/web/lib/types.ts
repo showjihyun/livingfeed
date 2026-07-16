@@ -24,4 +24,6 @@ export interface DmMessage {
   /** 발신 주체 — 나(플레이어) 또는 상대 액터 (특정 인물에 묶지 않는다) */
   from: "me" | "actor";
   text: string;
+  /** read.messages 행의 event id — 페이지를 이어 붙일 때 중복 제거 키 (실시간·방금 보낸 메시지는 없음) */
+  eventId?: string;
 }

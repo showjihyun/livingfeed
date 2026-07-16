@@ -37,6 +37,9 @@ export function LivingFeedApp() {
   const [dmMsgs, setDmMsgs] = useState<DmMessage[]>([]);
   const [dmDraft, setDmDraft] = useState("");
   const [dmTyping, setDmTyping] = useState(false);
+  // 더 과거 대화로 가는 커서 (read.messages) — null이면 끝이거나 히스토리 미연결
+  const [dmCursor, setDmCursor] = useState<string | null>(null);
+  const [dmLoadingOlder, setDmLoadingOlder] = useState(false);
 
   // 라이브 포스트별 댓글 — 댓글은 특정 데모 카드가 아니라 실제 포스트에 붙는다
   const [commentsByPost, setCommentsByPost] = useState<Record<string, FeedComment[]>>({});
@@ -101,14 +104,35 @@ export function LivingFeedApp() {
   useEffect(() => {
     if (screen !== "app") return;
     let cancelled = false;
-    void fetchDmHistory(FOCUS_ACTOR_ID).then((history) => {
-      if (cancelled || !history) return;
-      setDmMsgs((current) => (current.length === 0 ? history : current));
+    void fetchDmHistory(FOCUS_ACTOR_ID).then((page) => {
+      if (cancelled || !page) return;
+      setDmCursor(page.nextCursor);
+      if (page.messages.length === 0) return;
+      setDmMsgs((current) => (current.length === 0 ? page.messages : current));
     });
     return () => {
       cancelled = true;
     };
   }, [screen]);
+
+  // 이전 대화 더 보기 — 과거 페이지를 받아 목록 위에 이어 붙인다 (event id 중복 제거)
+  const loadOlderDms = useCallback(() => {
+    if (!dmCursor || dmLoadingOlder) return;
+    setDmLoadingOlder(true);
+    void fetchDmHistory(FOCUS_ACTOR_ID, dmCursor).then((page) => {
+      setDmLoadingOlder(false);
+      // 미가용 — 커서를 남겨 다음 클릭에 재시도 (조용한 강등)
+      if (!page) return;
+      setDmCursor(page.nextCursor);
+      if (page.messages.length === 0) return;
+      setDmMsgs((current) => {
+        const seen = new Set(current.map((m) => m.eventId).filter(Boolean));
+        const older = page.messages.filter((m) => !m.eventId || !seen.has(m.eventId));
+        // 페이지는 시간 오름차순 — 앞에 붙이면 전체 시간순이 유지된다
+        return [...older, ...current];
+      });
+    });
+  }, [dmCursor, dmLoadingOlder]);
 
   // 상호작용 세션 (WS) — DM/댓글/좋아요를 실세계에 꽂는다. 미가용이면 데모 폴백.
   const session = useActorSession({
@@ -270,6 +294,9 @@ export function LivingFeedApp() {
             onToggleFollow={() => setFollowing((f) => !f)}
             goDm={goDm}
             profile={focusProfile.profile}
+            hasMoreEpisodes={focusProfile.hasMoreEpisodes}
+            loadingEpisodes={focusProfile.loadingEpisodes}
+            onLoadMoreEpisodes={focusProfile.loadMoreEpisodes}
           />
         )}
         {tab === "dm" && (
@@ -281,6 +308,9 @@ export function LivingFeedApp() {
             draft={dmDraft}
             onDraftChange={setDmDraft}
             onSend={sendDm}
+            canLoadOlder={dmCursor !== null}
+            loadingOlder={dmLoadingOlder}
+            onLoadOlder={loadOlderDms}
           />
         )}
         {tab === "hidden" && <HiddenTab items={hidden.items} nameOf={authorName} />}

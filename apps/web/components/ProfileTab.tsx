@@ -13,9 +13,21 @@ interface ProfileTabProps {
   goDm: () => void;
   /** pg-projector 실측 내면 (ADR-003/008) — null이면 데모 서사를 유지한다 */
   profile: ActorProfile | null;
+  /** 더 과거 기억 페이지가 남아있는가 — 없으면 버튼을 숨긴다 */
+  hasMoreEpisodes: boolean;
+  loadingEpisodes: boolean;
+  onLoadMoreEpisodes: () => void;
 }
 
-export function ProfileTab({ following, onToggleFollow, goDm, profile }: ProfileTabProps) {
+export function ProfileTab({
+  following,
+  onToggleFollow,
+  goDm,
+  profile,
+  hasMoreEpisodes,
+  loadingEpisodes,
+  onLoadMoreEpisodes,
+}: ProfileTabProps) {
   const aboutMe = profile?.aboutMe ?? [];
   const episodes = profile?.episodes ?? [];
   const identity = profile?.identity ?? null;
@@ -287,6 +299,26 @@ export function ProfileTab({ following, onToggleFollow, goDm, profile }: Profile
               }}
             >
               아직 쌓인 기억이 없어요 — 함께 겪은 일이 생기면 여기에 남습니다.
+            </div>
+          )}
+          {episodes.length > 0 && hasMoreEpisodes && (
+            // 과거 방향 커서 페이지네이션 — 오래된 기억을 목록 아래에 이어 붙인다
+            <div
+              onClick={loadingEpisodes ? undefined : onLoadMoreEpisodes}
+              className={styles.press95}
+              style={{
+                alignSelf: "center",
+                padding: "9px 22px",
+                background: "#F2F6FC",
+                color: "#5F7EC9",
+                borderRadius: 9999,
+                fontSize: 13,
+                fontWeight: 800,
+                cursor: loadingEpisodes ? "default" : "pointer",
+                opacity: loadingEpisodes ? 0.6 : 1,
+              }}
+            >
+              {loadingEpisodes ? "기억을 꺼내는 중..." : "기억 더 보기"}
             </div>
           )}
         </div>
