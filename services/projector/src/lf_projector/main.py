@@ -5,7 +5,7 @@
     uv run --package lf-projector python -m lf_projector.main --kind kuzu
     uv run --package lf-projector python -m lf_projector.main --kind pg
     uv run --package lf-projector python -m lf_projector.main --kind redis
-    uv run --package lf-projector python -m lf_projector.main --kind os --rebuild
+    uv run --package lf-projector python -m lf_projector.main --kind os --rebuild --once
     uv run --package lf-projector python -m lf_projector.main --kind kuzu --verify [--world w_x]
 설정: NATS_URL, OPENSEARCH_URL, LF_KUZU_DIR, LF_DATABASE_URL, REDIS_URL, LF_ENV
 (config.py 참고). qdrant 프로젝터는 자신의 로드맵 단계에서 추가된다.
@@ -45,14 +45,14 @@ PROJECTORS = {
 }
 
 
-async def run(kind: str, rebuild: bool) -> None:
+async def run(kind: str, rebuild: bool, once: bool) -> None:
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, stop.set)
     cfg = Config.from_env()
-    await PROJECTORS[kind](cfg).run(stop=stop, rebuild=rebuild)
+    await PROJECTORS[kind](cfg).run(stop=stop, rebuild=rebuild, once=once)
 
 
 async def run_verify(kind: str, world: str | None) -> int:
@@ -89,6 +89,10 @@ def main() -> None:
         help="프로젝션 파괴 후 이벤트 로그 처음부터 재구축 (ADR-003 계약 3)",
     )
     parser.add_argument(
+        "--once", action="store_true",
+        help="스트림이 유휴해질 때까지 소비하고 종료 — --rebuild와 함께 일회성 배치",
+    )
+    parser.add_argument(
         "--verify", action="store_true",
         help="원천(es) 대비 프로젝션 무결성 검사(kuzu/pg/redis) — 어긋나면 종료 코드 1",
     )
@@ -105,7 +109,7 @@ def main() -> None:
         if args.kind not in ("kuzu", "pg", "redis"):
             parser.error("--verify 는 kuzu/pg/redis 전용이다 (os는 색인 재구축으로 갈음)")
         raise SystemExit(asyncio.run(run_verify(args.kind, args.world)))
-    asyncio.run(run(args.kind, args.rebuild))
+    asyncio.run(run(args.kind, args.rebuild, args.once))
 
 
 if __name__ == "__main__":

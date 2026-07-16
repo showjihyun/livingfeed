@@ -23,12 +23,12 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import nats
-import nats.errors
 from lf_dispatcher.subjects import dlq_subject
 from nats.js.errors import NotFoundError
 from redis.asyncio import Redis
 
 from lf_projector.config import Config
+from lf_projector.consume import batches
 from lf_projector.lag import LagAggregator, observe
 from lf_projector.timeline import TimelineStore, follower_pair
 
@@ -98,6 +98,7 @@ class RedisProjector:
         segment: str,
         apply: Callable[[dict[str, Any]], Awaitable[None]],
         stop: asyncio.Event,
+        once: bool,
     ) -> None:
         cfg = self._cfg
         js = nc.jetstream()
@@ -108,13 +109,13 @@ class RedisProjector:
         logger.info(
             "redis-projector 대기 — filter=%s durable=%s", filter_subject, self._durable(stream)
         )
-        while not stop.is_set():
-            try:
-                msgs = await psub.fetch(cfg.batch_size, timeout=cfg.fetch_timeout_s)
-            except (TimeoutError, nats.errors.TimeoutError):
-                continue
+        async for msgs in batches(
+            psub, batch_size=cfg.batch_size, timeout_s=cfg.fetch_timeout_s, stop=stop, once=once
+        ):
             for msg in msgs:
                 await self._handle(msg, apply, js)
+        # pull 구독을 남기면 nc.drain()이 타임아웃(30s)까지 매달린다 — 명시 해지
+        await psub.unsubscribe()
 
     async def _handle(
         self, msg: Any, apply: Callable[[dict[str, Any]], Awaitable[None]], js: Any
@@ -144,7 +145,9 @@ class RedisProjector:
         logger.warning("DLQ 이동 — subject=%s 사유=%s", subj, reason)
         await msg.ack()
 
-    async def run(self, *, stop: asyncio.Event | None = None, rebuild: bool = False) -> None:
+    async def run(
+        self, *, stop: asyncio.Event | None = None, rebuild: bool = False, once: bool = False
+    ) -> None:
         stop = stop or asyncio.Event()
         cfg = self._cfg
         redis = Redis.from_url(cfg.redis_url)
@@ -162,7 +165,7 @@ class RedisProjector:
                         pass
             await asyncio.gather(
                 *(
-                    self._consume(nc, stream, segment, apply, stop)
+                    self._consume(nc, stream, segment, apply, stop, once)
                     for stream, segment, apply in sources
                 )
             )

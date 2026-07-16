@@ -20,6 +20,7 @@ PG_DSN = os.environ.get(
     "postgresql://livingfeed:livingfeed@localhost:5432/livingfeed",
 )
 REDIS_URL = os.environ.get("LF_TEST_REDIS_URL", "redis://localhost:6379/15")
+NATS_URL = os.environ.get("LF_TEST_NATS_URL", "nats://localhost:4222")
 
 
 def sample(name: str) -> dict:
@@ -39,6 +40,32 @@ async def pg():
     async with conn:
         await conn.execute("DROP SCHEMA IF EXISTS read CASCADE")
         yield conn
+
+
+@pytest.fixture
+async def js():
+    """스트림이 초기화된 JetStream 컨텍스트 (dispatcher conftest와 동일 규약)."""
+    import nats
+    from lf_dispatcher.streams import STREAMS, ensure_streams
+    from nats.js.errors import NotFoundError
+
+    try:
+        nc = await asyncio.wait_for(nats.connect(NATS_URL, connect_timeout=3), timeout=5)
+    except Exception:
+        if "LF_TEST_NATS_URL" in os.environ:
+            raise
+        pytest.skip(f"NATS 미가용 ({NATS_URL}) — infra/compose에서 nats를 켜라")
+    try:
+        context = nc.jetstream()
+        for spec in STREAMS:  # 테스트 격리: 이전 실행의 메시지 제거
+            try:
+                await context.delete_stream(spec.name)
+            except NotFoundError:
+                pass
+        await ensure_streams(context)
+        yield context
+    finally:
+        await nc.close()
 
 
 @pytest.fixture

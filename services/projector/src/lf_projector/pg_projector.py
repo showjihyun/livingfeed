@@ -22,12 +22,12 @@ import logging
 from typing import Any
 
 import nats
-import nats.errors
 from lf_dispatcher.subjects import dlq_subject
 from nats.js.errors import NotFoundError
 from psycopg import AsyncConnection
 
 from lf_projector.config import Config
+from lf_projector.consume import batches
 from lf_projector.lag import LagAggregator, observe
 from lf_projector.pg_read import ReadStore
 
@@ -53,7 +53,8 @@ class PgProjector:
         return f"{self._cfg.pg_durable}-{stream.removeprefix('LF_').lower()}"
 
     async def _consume(
-        self, nc: nats.NATS, store: ReadStore, stream: str, segment: str, stop: asyncio.Event
+        self, nc: nats.NATS, store: ReadStore, stream: str, segment: str,
+        stop: asyncio.Event, once: bool,
     ) -> None:
         cfg = self._cfg
         js = nc.jetstream()
@@ -64,13 +65,13 @@ class PgProjector:
         logger.info(
             "pg-projector 대기 — filter=%s durable=%s", filter_subject, self._durable(stream)
         )
-        while not stop.is_set():
-            try:
-                msgs = await psub.fetch(cfg.batch_size, timeout=cfg.fetch_timeout_s)
-            except (TimeoutError, nats.errors.TimeoutError):
-                continue
+        async for msgs in batches(
+            psub, batch_size=cfg.batch_size, timeout_s=cfg.fetch_timeout_s, stop=stop, once=once
+        ):
             for msg in msgs:
                 await self._handle(msg, store, js)
+        # pull 구독을 남기면 nc.drain()이 타임아웃(30s)까지 매달린다 — 명시 해지
+        await psub.unsubscribe()
 
     async def _handle(self, msg: Any, store: ReadStore, js: Any) -> None:
         cfg = self._cfg
@@ -101,7 +102,9 @@ class PgProjector:
         logger.warning("DLQ 이동 — subject=%s 사유=%s", subj, reason)
         await msg.ack()
 
-    async def run(self, *, stop: asyncio.Event | None = None, rebuild: bool = False) -> None:
+    async def run(
+        self, *, stop: asyncio.Event | None = None, rebuild: bool = False, once: bool = False
+    ) -> None:
         stop = stop or asyncio.Event()
         cfg = self._cfg
         conn = await AsyncConnection.connect(cfg.database_url, autocommit=True)
@@ -118,7 +121,10 @@ class PgProjector:
                         pass
             await store.ensure()
             await asyncio.gather(
-                *(self._consume(nc, store, stream, segment, stop) for stream, segment in SOURCES)
+                *(
+                    self._consume(nc, store, stream, segment, stop, once)
+                    for stream, segment in SOURCES
+                )
             )
         finally:
             await nc.drain()

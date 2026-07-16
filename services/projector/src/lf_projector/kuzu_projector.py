@@ -20,11 +20,11 @@ from pathlib import Path
 from typing import Any
 
 import nats
-import nats.errors
 from lf_dispatcher.subjects import dlq_subject
 from nats.js.errors import NotFoundError
 
 from lf_projector.config import Config
+from lf_projector.consume import batches
 from lf_projector.graph import RelGraph
 from lf_projector.graph_api import serve_graph_api
 from lf_projector.lag import LagAggregator, observe
@@ -54,7 +54,7 @@ class KuzuProjector:
         if handler is not None:
             handler(self._graph, envelope["world_id"], envelope)
 
-    async def _consume(self, nc: nats.NATS, stop: asyncio.Event) -> None:
+    async def _consume(self, nc: nats.NATS, stop: asyncio.Event, once: bool) -> None:
         cfg = self._cfg
         js = nc.jetstream()
         filter_subject = f"lf.{cfg.env}.*.relationship.>"
@@ -65,13 +65,15 @@ class KuzuProjector:
             "kuzu-projector 대기 — filter=%s durable=%s dir=%s",
             filter_subject, cfg.kuzu_durable, cfg.kuzu_dir,
         )
-        while not stop.is_set():
-            try:
-                msgs = await psub.fetch(cfg.batch_size, timeout=cfg.fetch_timeout_s)
-            except (TimeoutError, nats.errors.TimeoutError):
-                continue
+        async for msgs in batches(
+            psub, batch_size=cfg.batch_size, timeout_s=cfg.fetch_timeout_s, stop=stop, once=once
+        ):
             for msg in msgs:
                 await self._handle(msg, js)
+        # pull 구독을 남기면 nc.drain()이 타임아웃(30s)까지 매달린다 — 명시 해지
+        await psub.unsubscribe()
+        if once:
+            stop.set()  # 드레인이 끝나면 나란히 도는 graph API도 내린다
 
     async def _handle(self, msg: Any, js: Any) -> None:
         cfg = self._cfg
@@ -102,7 +104,9 @@ class KuzuProjector:
             observe(self._lag, envelope, logger)
             await msg.ack()
 
-    async def run(self, *, stop: asyncio.Event | None = None, rebuild: bool = False) -> None:
+    async def run(
+        self, *, stop: asyncio.Event | None = None, rebuild: bool = False, once: bool = False
+    ) -> None:
         stop = stop or asyncio.Event()
         cfg = self._cfg
         nc = await nats.connect(cfg.nats_url)
@@ -116,7 +120,7 @@ class KuzuProjector:
                     pass
             # 소비 루프와 질의 API가 한 프로세스에서 나란히 돈다 (임베디드 중재)
             await asyncio.gather(
-                self._consume(nc, stop),
+                self._consume(nc, stop, once),
                 serve_graph_api(nc, self._graph, cfg.env, stop=stop),
             )
         finally:

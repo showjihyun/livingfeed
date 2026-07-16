@@ -16,11 +16,11 @@ import logging
 from typing import Any
 
 import nats
-import nats.errors
 from lf_dispatcher.subjects import dlq_subject
 from nats.js.errors import NotFoundError
 
 from lf_projector.config import Config
+from lf_projector.consume import batches
 from lf_projector.lag import LagAggregator, observe
 from lf_projector.os_index import OpenSearchIndex, envelope_to_doc
 
@@ -86,7 +86,9 @@ class OsProjector:
         logger.warning("DLQ 이동 — subject=%s 사유=%s", subj, reason)
         await msg.ack()
 
-    async def run(self, *, stop: asyncio.Event | None = None, rebuild: bool = False) -> None:
+    async def run(
+        self, *, stop: asyncio.Event | None = None, rebuild: bool = False, once: bool = False
+    ) -> None:
         stop = stop or asyncio.Event()
         cfg = self._cfg
         filter_subject = f"lf.{cfg.env}.*.{FEED_POST_TYPE}"
@@ -111,15 +113,15 @@ class OsProjector:
                 "os-projector 대기 — filter=%s durable=%s index=%s",
                 filter_subject, cfg.durable, cfg.index,
             )
-            while not stop.is_set():
-                try:
-                    msgs = await psub.fetch(cfg.batch_size, timeout=cfg.fetch_timeout_s)
-                except (TimeoutError, nats.errors.TimeoutError):
-                    # nats-py fetch는 경로에 따라 asyncio.TimeoutError도 던진다
-                    continue
+            async for msgs in batches(
+                psub, batch_size=cfg.batch_size, timeout_s=cfg.fetch_timeout_s,
+                stop=stop, once=once,
+            ):
                 projected = await self.project_batch(msgs, index, js)
                 if projected:
                     logger.info("색인 %d건", projected)
+            # pull 구독을 남기면 nc.drain()이 타임아웃(30s)까지 매달린다 — 명시 해지
+            await psub.unsubscribe()
         finally:
             await nc.drain()
             await index.close()
