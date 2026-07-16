@@ -167,6 +167,69 @@ def transition_stage(state: RelationshipState, stage: str) -> RelationshipState:
     )
 
 
+@dataclass(frozen=True)
+class StageTransition:
+    """상위 전이 행동의 판정 결과 — stage가 None인 방향은 유지된다 (거절 등)."""
+
+    actor_stage: str | None  # 행위자→대상 엣지의 새 stage
+    target_stage: str | None  # 대상→행위자 엣지의 새 stage
+    milestone: str
+    note: str
+
+
+#: stage 전이를 만드는 행동들 — LLM decide만 고른다 (action_kind는 스키마상
+#: 자유 패턴). 규칙 폴백은 절대 안 골라 dev 결정성은 불변이다 (ADR-016).
+STAGE_ACTION_KINDS = frozenset({"confess", "sever"})
+
+#: confess 수락 임계 — 대상→행위자 엣지 기준: 신뢰가 닿아 있어야 하고(trust ≥),
+#: 쌓인 앙금이 답을 막지 않아야 한다(resentment <)
+_CONFESS_TRUST = 0.2
+_CONFESS_RESENTMENT = 0.3
+
+
+def stage_after_action(
+    action_kind: str,
+    actor_edge: RelationshipState,
+    target_edge: RelationshipState,
+) -> StageTransition | None:
+    """상위 전이 행동(confess/sever) → stage 전이 판정 (ADR-016).
+
+    stage 전이는 수치가 아니라 이벤트가 만든다 — 차원은 전이의 *조건*일 뿐이다.
+    confess(고백)의 답은 대상→행위자 엣지가 정한다: 조건이 맞으면 양쪽이
+    romantic이 되고, 아니면 stage 변화 없는 거절 마일스톤이다 — 거절도 세계에
+    남는 사건. sever(절교)는 조건 없이 양쪽을 stranger로 되돌린다 — salience는
+    손대지 않는다 (끊었어도 마음의 흔적은 남는다). 이미 그 관계라면 None:
+    재고백·재절교는 마일스톤이 아니다. 결정적·순수 — I/O 없음.
+    """
+    if action_kind == "confess":
+        if actor_edge.stage == "romantic" and target_edge.stage == "romantic":
+            return None
+        accepted = (
+            target_edge.dimensions["trust"] >= _CONFESS_TRUST
+            and target_edge.dimensions["resentment"] < _CONFESS_RESENTMENT
+        )
+        if accepted:
+            return StageTransition(
+                actor_stage="romantic", target_stage="romantic",
+                milestone="confession_accepted",
+                note="고백이 받아들여졌다 — 연인이 되었다",
+            )
+        return StageTransition(
+            actor_stage=None, target_stage=None,
+            milestone="confession_declined",
+            note="고백했지만 받아들여지지 않았다 — 마음이 아직 닿지 않는다",
+        )
+    if action_kind == "sever":
+        if actor_edge.stage == "stranger" and target_edge.stage == "stranger":
+            return None
+        return StageTransition(
+            actor_stage="stranger", target_stage="stranger",
+            milestone="severed",
+            note="관계를 끊어냈다 — 남남으로 돌아갔지만 흔적은 남는다",
+        )
+    return None
+
+
 #: 결 판정 임계 — reflection의 규칙 신념(derive_beliefs)과 감각을 맞춘다:
 #: supporter(trust 0.25 · intimacy 0.15) / threat(resentment 0.3)
 _TRUST_CLOSE = 0.25
@@ -202,6 +265,10 @@ _DISTRUST = _Texture(
     tension=True, solo="선뜻 믿기 어려운 상대다",
     lead="", tail="선뜻 믿기 어려운 상대다",
 )
+_CONTEMPT = _Texture(
+    tension=True, solo="어딘가 얕보게 되는 상대다",
+    lead="", tail="어딘가 얕보게 되는 상대다",
+)
 _DRAWN = _Texture(
     tension=False, solo="자꾸 눈이 가는 사람이다",
     lead="자꾸 눈이 가는 사람이", tail="자꾸 눈이 가는 사람이다",
@@ -221,7 +288,7 @@ def _edge_texture(dims: dict[str, float]) -> str:
 
     애증은 공존한다 — 차원들이 독립 축이라(ADR-016) 임계를 넘은 결은 함께
     말한다. 화해했어도 앙금은 남는다. 다만 최대 2개까지 — 나열이 길어지면
-    감각이 아니라 목록이 된다. 선별 우선순위는 긴장(앙금·불신) > 끌림 >
+    감각이 아니라 목록이 된다. 선별 우선순위는 긴장(앙금·불신·경멸) > 끌림 >
     존중 > 친밀·신뢰: 긴장이 서사적으로 우선이다. 두 결의 조합은 온기
     앞절 + 긴장 뒷절을 "…지만"으로(대비), 온기끼리는 "…고"로(병렬) 잇는다.
     """
@@ -230,6 +297,8 @@ def _edge_texture(dims: dict[str, float]) -> str:
         candidates.append(_GRUDGE)
     elif dims["trust"] <= -_TRUST_CLOSE:  # 앙금이 있으면 불신은 그 안에 접힌다
         candidates.append(_DISTRUST)
+    elif dims["respect"] <= -_RESPECT_DEFER:  # 경멸 — 더 뜨거운 긴장(앙금·불신)에 접힌다
+        candidates.append(_CONTEMPT)
     if dims["attraction"] >= _ATTRACTION_DRAWN:
         candidates.append(_DRAWN)
     if dims["respect"] >= _RESPECT_DEFER:

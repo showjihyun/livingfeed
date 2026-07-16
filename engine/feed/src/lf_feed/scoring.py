@@ -15,8 +15,14 @@ from dataclasses import dataclass, field
 
 
 def _default_action_drama() -> dict[str, float]:
-    """action_kind별 기본 드라마 점수 — 대인 갈등 > 협력 > 일상 (docs/plan/06)."""
+    """action_kind별 기본 드라마 점수 — 대인 갈등 > 협력 > 일상 (docs/plan/06).
+
+    confess/sever는 관계의 이름이 바뀌는 stage 전이 행동 (ADR-016) —
+    갈등(confront)보다 위, 드라마의 정점이다.
+    """
     return {
+        "confess": 0.90,
+        "sever": 0.90,
         "confront": 0.85,
         "help": 0.60,
         "speak": 0.45,

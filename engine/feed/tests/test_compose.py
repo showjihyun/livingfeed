@@ -77,6 +77,23 @@ def test_llm_headline_becomes_title_with_llm_narration():
     assert list(Draft202012Validator(schema).iter_errors(event.payload)) == []
 
 
+def test_confess_and_sever_title_templates():
+    """고백·절교 제목 템플릿 — 대상 유무에 따라 갈라진다 (ADR-016 stage 전이 행동)."""
+    cases = {
+        "confess": ("김아리, 박준호에게 마음을 고백하다", "김아리, 오래 품은 마음을 꺼내다"),
+        "sever": ("김아리, 박준호와의 관계를 끊다", "김아리, 관계 하나를 정리하다"),
+    }
+    for kind, (with_target, without_target) in cases.items():
+        targeted = {**SAMPLE, "payload": {**SAMPLE["payload"], "action_kind": kind}}
+        assert build_post_event(
+            targeted, drama=0.9, score=0.6, actor_names=NAMES
+        ).payload["title"] == with_target
+        solo = {**targeted, "payload": {**targeted["payload"], "target_actor_id": None}}
+        assert build_post_event(
+            solo, drama=0.9, score=0.6, actor_names=NAMES
+        ).payload["title"] == without_target
+
+
 def test_missing_or_blank_headline_falls_back_to_template():
     event = build_post_event(SAMPLE, drama=0.5, score=0.4, actor_names=NAMES)
     assert event.payload["narration_kind"] == "template"

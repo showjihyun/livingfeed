@@ -22,6 +22,14 @@ interaction_effects:
   action.confront:
     outgoing: { salience: 0.10, intimacy: -0.01 }
     incoming: { trust: -0.05, resentment: 0.06, salience: 0.10 }
+  # stage 전이 행동 (ADR-016: 전이는 stage_after_action이 판정) — 여기는 차원에
+  # 남는 흔적만: 고백은 마음을 흔들고(받은 쪽이 더 크게), 절교는 벤다
+  action.confess:
+    outgoing: { intimacy: 0.04, salience: 0.12 }
+    incoming: { attraction: 0.05, intimacy: 0.04, salience: 0.15 }
+  action.sever:
+    outgoing: { intimacy: -0.05, salience: 0.12 }
+    incoming: { trust: -0.08, resentment: 0.10, intimacy: -0.06, salience: 0.15 }
 
 # 감정 응고 (ADR-016 갱신 규칙 2): 대상 있는 감정 인스턴스 → 차원 반영.
 # 델타 = 계수 × 감정 강도. 반복 anger → resentment 누적이 핵심 서사 장치.

@@ -22,6 +22,7 @@ from lf_relationship import (
     decay,
     default_params,
     describe_edges,
+    stage_after_action,
     transition_stage,
 )
 from redis.asyncio import Redis
@@ -193,6 +194,50 @@ class RelationshipAdapter:
         state, created = await self._ensure_edge(world_id, from_id, to_id, cause)
         result = apply_interaction(state, source_kind, direction, params=self._params)
         return await self._apply(world_id, from_id, to_id, result, cause, created)
+
+    async def record_stage_action(
+        self,
+        world_id: str,
+        actor_id: str,
+        target_id: str,
+        action_kind: str,
+        cause: dict[str, Any],
+    ) -> list[PendingRelEvent]:
+        """상위 전이 행동(confess/sever) → stage 전이 저장 + 마일스톤 적재 준비 (ADR-016).
+
+        판정은 순수 규칙(stage_after_action)이고, 여기는 양쪽 엣지 수화(없으면
+        생성 — 모르는 사람에게 고백할 수도 있다)·저장과 마일스톤 1건(행위자
+        방향 엣지 기준)만 담당한다. 거절도 마일스톤이다 — 세계에 남는 사건.
+        전이 판정이 None(재고백·재절교)이면 마일스톤 없이 조용히 끝난다.
+        """
+        actor_edge, created = await self._ensure_edge(world_id, actor_id, target_id, cause)
+        target_edge, reverse_created = await self._ensure_edge(world_id, target_id, actor_id, cause)
+        events = created + reverse_created
+        transition = stage_after_action(action_kind, actor_edge, target_edge)
+        if transition is not None:
+            if transition.actor_stage is not None:
+                actor_edge = transition_stage(actor_edge, transition.actor_stage)
+            if transition.target_stage is not None:
+                target_edge = transition_stage(target_edge, transition.target_stage)
+            events.append(
+                PendingRelEvent(
+                    from_id=actor_id,
+                    to_id=target_id,
+                    type=MILESTONE_TYPE,
+                    payload={
+                        "from_id": actor_id,
+                        "to_id": target_id,
+                        "milestone": transition.milestone,
+                        "stage": actor_edge.stage,  # 전이 후 stage (전이 없으면 현 stage)
+                        "note": transition.note[:200],
+                    },
+                    causation_id=cause.get("event_id"),
+                    correlation_id=cause.get("correlation_id"),
+                )
+            )
+        await self.save(world_id, actor_id, target_id, actor_edge)
+        await self.save(world_id, target_id, actor_id, target_edge)
+        return events
 
     async def record_emotion(
         self,

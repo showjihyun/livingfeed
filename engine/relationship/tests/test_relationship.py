@@ -9,6 +9,7 @@ from lf_relationship import (
     decay,
     default_params,
     describe_edges,
+    stage_after_action,
     transition_stage,
 )
 
@@ -204,3 +205,62 @@ def test_describe_edges_grounds_names_via_map():
 
 def test_describe_edges_empty_returns_none():
     assert describe_edges({}) is None  # 섹션 생략 규약 — 빈 관계는 소음이다
+
+
+def test_describe_edges_contempt_texture():
+    """경멸 결 — respect 음극(-0.25 이하)이면 얕보는 감각이 스민다 (양극 축의 반대쪽)."""
+    assert describe_edges({"a_x": _edge(respect=-0.3)}) == "- a_x: 어딘가 얕보게 되는 상대다"
+    # 온기(끌림)와 공존하면 긴장은 뒷절 — 대비의 방향이 서사다
+    both = describe_edges({"a_x": _edge(attraction=0.5, respect=-0.5)})
+    assert both == "- a_x: 자꾸 눈이 가는 사람이지만, 어딘가 얕보게 되는 상대다"
+
+
+def test_describe_edges_contempt_folds_under_grudge_and_distrust():
+    """긴장 결 우선순위 — 앙금 > 불신 > 경멸: 더 뜨거운 긴장이 있으면 접힌다."""
+    grudge = describe_edges({"a_x": _edge(resentment=0.5, respect=-0.5)})
+    assert "앙금" in grudge and "얕보" not in grudge
+    distrust = describe_edges({"a_x": _edge(trust=-0.5, respect=-0.5)})
+    assert "믿기 어려운" in distrust and "얕보" not in distrust
+
+
+def test_stage_after_action_confess_acceptance_boundary():
+    """고백 수락 경계 — 대상→행위자 엣지의 trust ≥ 0.2 ∧ resentment < 0.3 (ADR-016)."""
+    me = _edge(stage="acquaintance")
+    accepted = stage_after_action("confess", me, _edge(trust=0.2, resentment=0.29))
+    assert accepted is not None
+    assert (accepted.actor_stage, accepted.target_stage) == ("romantic", "romantic")
+    assert accepted.milestone == "confession_accepted"
+    assert len(accepted.note) <= 200  # 스키마 note 상한
+
+    # 신뢰가 모자라거나 앙금이 답을 막으면 거절 — stage 불변이지만 마일스톤은 남는다
+    for other in (_edge(trust=0.19), _edge(trust=0.5, resentment=0.3)):
+        declined = stage_after_action("confess", me, other)
+        assert declined is not None
+        assert (declined.actor_stage, declined.target_stage) == (None, None)
+        assert declined.milestone == "confession_declined"
+        assert len(declined.note) <= 200
+
+
+def test_stage_after_action_sever_returns_both_to_stranger():
+    """절교 — 조건 없이 양쪽 stranger 회귀. 끊는 데는 상대의 동의가 필요 없다."""
+    result = stage_after_action("sever", _edge(stage="friend"), _edge(stage="close_friend"))
+    assert result is not None
+    assert (result.actor_stage, result.target_stage) == ("stranger", "stranger")
+    assert result.milestone == "severed"
+
+
+def test_stage_after_action_repeat_is_noop():
+    """재고백·재절교는 마일스톤이 아니다 — 이미 그 관계면 None."""
+    romantic = _edge(trust=0.5, stage="romantic")
+    assert stage_after_action("confess", romantic, romantic) is None
+    stranger = _edge(stage="stranger")
+    assert stage_after_action("sever", stranger, stranger) is None
+    # 한쪽만 그 stage면 전이는 여전히 일어난다 (엇갈린 상태의 정합 회복)
+    assert stage_after_action("confess", romantic, _edge(trust=0.5)) is not None
+    assert stage_after_action("sever", stranger, _edge(stage="friend")) is not None
+
+
+def test_stage_after_action_other_kinds_are_none():
+    """그 외 행동은 stage를 못 바꾼다 — 전이는 오직 상위 전이 행동으로 (ADR-016)."""
+    assert stage_after_action("speak", _edge(trust=0.9), _edge(trust=0.9)) is None
+    assert stage_after_action("confront", _edge(), _edge()) is None

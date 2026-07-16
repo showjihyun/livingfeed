@@ -9,6 +9,12 @@ relationship.* 이벤트 적재는 Actor Runtime의 relationship 어댑터가 �
 """
 
 from lf_relationship.engine import (
+    STAGE_ACTION_KINDS as STAGE_ACTION_KINDS,
+)
+from lf_relationship.engine import (
+    StageTransition as StageTransition,
+)
+from lf_relationship.engine import (
     UpdateResult as UpdateResult,
 )
 from lf_relationship.engine import (
@@ -31,6 +37,9 @@ from lf_relationship.engine import (
 )
 from lf_relationship.engine import (
     describe_edges as describe_edges,
+)
+from lf_relationship.engine import (
+    stage_after_action as stage_after_action,
 )
 from lf_relationship.engine import (
     transition_stage as transition_stage,

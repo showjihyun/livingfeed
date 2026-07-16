@@ -20,6 +20,17 @@ def test_drama_target_bonus_and_clamp():
     assert drama_score("confront", has_target=True, cfg=CFG) <= 1.0
 
 
+def test_stage_transition_actions_top_the_drama_scale():
+    """고백·절교 — 관계의 이름이 바뀌는 순간은 갈등보다 위다 (ADR-016 stage 전이)."""
+    confess = drama_score("confess", has_target=False, cfg=CFG)
+    sever = drama_score("sever", has_target=False, cfg=CFG)
+    confront = drama_score("confront", has_target=False, cfg=CFG)
+    assert confess == sever == 0.9
+    assert confess > confront
+    # 대상 보너스가 붙어도 1.0 클램프 안이다
+    assert drama_score("confess", has_target=True, cfg=CFG) == 1.0
+
+
 def test_unknown_action_uses_default():
     assert drama_score("juggle", has_target=False, cfg=CFG) == CFG.default_drama
 

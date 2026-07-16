@@ -14,6 +14,7 @@ import logging
 from typing import Any
 
 from lf_eventstore import NewEvent, append, current_head
+from lf_relationship import STAGE_ACTION_KINDS
 from lf_schemas import registry
 from lf_tick.lod import (
     ActorLod,
@@ -933,13 +934,19 @@ class ActorPhases:
         # 규칙 1b: 대상 있는 액터 행동 → 양방향 엣지 (비대칭 델타)
         for actor_id, envelope in self._resolved_actions:
             target = envelope["payload"]["target_actor_id"]
-            kind = f"action.{envelope['payload']['action_kind']}"
+            action_kind = envelope["payload"]["action_kind"]
+            kind = f"action.{action_kind}"
             pending += await rel.record_interaction(
                 ctx.world_id, actor_id, target, kind, "outgoing", cause=envelope
             )
             pending += await rel.record_interaction(
                 ctx.world_id, target, actor_id, kind, "incoming", cause=envelope
             )
+            # 상위 전이 행동(고백·절교) — stage는 수치가 아니라 이벤트가 만든다 (ADR-016)
+            if action_kind in STAGE_ACTION_KINDS:
+                pending += await rel.record_stage_action(
+                    ctx.world_id, actor_id, target, action_kind, cause=envelope
+                )
 
         # 규칙 2: 감정 응고 — 대상 있는 감정이 관계로 스며든다
         for shift in self._resolved_shifts:

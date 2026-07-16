@@ -31,6 +31,8 @@ _TITLES: dict[str, tuple[str, str]] = {
     "speak": ("{author}, {target}에게 말을 걸다", "{author}, 이야기를 꺼내다"),
     "confront": ("{author}, {target}에게 맞서다", "{author}, 갈등의 한복판에 서다"),
     "help": ("{author}, {target}에게 손을 내밀다", "{author}, 도움의 손길을 내밀다"),
+    "confess": ("{author}, {target}에게 마음을 고백하다", "{author}, 오래 품은 마음을 꺼내다"),
+    "sever": ("{author}, {target}와의 관계를 끊다", "{author}, 관계 하나를 정리하다"),
     "move": ("{author}, {target}을 향해 자리를 옮기다", "{author}, 자리를 옮기다"),
     "work": ("{author}, 일에 몰두하다", "{author}, 일에 몰두하다"),
     "rest": ("{author}, 잠시 숨을 고르다", "{author}, 잠시 숨을 고르다"),
