@@ -126,6 +126,8 @@ class EmotionAdapter:
             state = result.state
             if not result.significant:
                 continue
+            # 이번 신호가 만든/강화한 인스턴스 — 강도가 에피소드 중요도의 감정 항이
+            # 된다 (ADR-008 peak). 대상은 어차피 None이라 관계엔 안 스며든다.
             triggered = next(
                 (e.to_json() for e in state.emotions if e.source_event == source_event),
                 {"type": "goal", "intensity": 0.0, "target_id": None},
@@ -140,7 +142,7 @@ class EmotionAdapter:
                     },
                     causation_id=causation,
                     correlation_id=correlation,
-                    instance={"type": "goal", "intensity": 0.0, "target_id": None},
+                    instance=triggered,
                 )
             )
         await self.save(world_id, persona.id, state)

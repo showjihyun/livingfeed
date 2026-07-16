@@ -4,12 +4,12 @@ reply 프롬프트가 대화를 흐름으로 보려면 (1) Working Memory에서 
 턴을 시간순으로 뽑고, (2) 소형 모델의 사고흐름 누출을 자를 수 있어야 한다.
 """
 
+from datetime import UTC, datetime
+
 from lf_actor.client import sanitize_reply
 from lf_actor.context import WorldContext, build
 from lf_actor.conversation import conversation_turns
 from lf_actor.persona import load_persona
-
-from datetime import UTC, datetime
 
 from .conftest import PERSONAS_DIR
 

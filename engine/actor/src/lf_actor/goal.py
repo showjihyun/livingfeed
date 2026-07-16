@@ -103,7 +103,9 @@ class GoalAdapter:
         """
         payload = action_envelope["payload"]
         state = await self.load(world_id, persona)
-        result = appraise_action(state, payload["action_kind"], list(persona.goals), persona.needs_bias)
+        result = appraise_action(
+            state, payload["action_kind"], list(persona.goals), persona.needs_bias
+        )
         await self.save(world_id, persona.id, result.state)
         events = [self._goal_event(persona.id, action_envelope, adv) for adv in result.advances]
         achieved = any(a.achieved for a in result.advances)

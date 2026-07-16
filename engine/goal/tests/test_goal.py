@@ -16,8 +16,10 @@ from lf_goal import (
 )
 
 MINJI_GOALS = [
-    {"id": "g_decide_resignation", "description": "퇴사 결정", "priority": 0.9, "need": "security"},
-    {"id": "g_side_project", "description": "사이드 프로젝트 완성", "priority": 0.6, "need": "achievement"},
+    {"id": "g_decide_resignation", "description": "퇴사 결정",
+     "priority": 0.9, "need": "security"},
+    {"id": "g_side_project", "description": "사이드 프로젝트 완성",
+     "priority": 0.6, "need": "achievement"},
 ]
 MINJI_BIAS = {"achievement": 0.55, "belonging": 0.85, "security": 0.60}
 
