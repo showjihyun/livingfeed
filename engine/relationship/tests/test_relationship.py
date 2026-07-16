@@ -112,14 +112,18 @@ def test_state_roundtrips_json():
     assert RelationshipState.from_json(canonical).to_json() == canonical
 
 
-def _edge(trust=0.0, intimacy=0.0, resentment=0.0, salience=0.0) -> RelationshipState:
+def _edge(
+    trust=0.0, intimacy=0.0, resentment=0.0, respect=0.0, attraction=0.0,
+    salience=0.0, stage="stranger",
+) -> RelationshipState:
     base = RelationshipState()
     return RelationshipState(
         dimensions={
             **base.dimensions,
             "trust": trust, "intimacy": intimacy, "resentment": resentment,
+            "respect": respect, "attraction": attraction,
         },
-        stage=base.stage, salience=salience, pending=base.pending,
+        stage=stage, salience=salience, pending=base.pending,
     )
 
 
@@ -146,6 +150,48 @@ def test_describe_edges_love_and_hate_coexist():
     assert "믿고 가까운" in close_only and "앙금" not in close_only
     grudge_only = describe_edges({"a_x": _edge(resentment=0.5)})
     assert "앙금" in grudge_only and "믿고 가까운" not in grudge_only
+
+
+def test_describe_edges_respect_texture():
+    """존중 결 — respect 임계(0.25)를 넘으면 한 수 접어주는 감각이 스민다."""
+    text = describe_edges({"a_x": _edge(respect=0.4)})
+    assert text == "- a_x: 한 수 접어주게 되는 상대다"
+
+
+def test_describe_edges_attraction_texture():
+    """끌림 결 — attraction 임계(0.25)를 넘으면 자꾸 눈이 가는 감각이 스민다."""
+    text = describe_edges({"a_x": _edge(attraction=0.4)})
+    assert text == "- a_x: 자꾸 눈이 가는 사람이다"
+
+
+def test_describe_edges_attraction_and_grudge_coexist():
+    """끌림+앙금 공존 — 독립 축(ADR-016), 애증처럼 둘 다 말한다. 긴장이 뒷절."""
+    text = describe_edges({"a_x": _edge(attraction=0.5, resentment=0.5)})
+    assert text == "- a_x: 자꾸 눈이 가는 사람이지만, 앙금도 남아 있다"
+
+
+def test_describe_edges_caps_at_two_textures():
+    """최대 2결 — 우선순위 긴장 > 끌림 > 존중 > 친밀·신뢰, 나머지는 접힌다."""
+    text = describe_edges(
+        {"a_x": _edge(trust=0.5, intimacy=0.4, respect=0.5, attraction=0.5, resentment=0.5)}
+    )
+    assert "앙금" in text and "자꾸 눈이" in text  # 긴장 + 끌림만 살아남는다
+    assert "한 수" not in text and "믿고 가까운" not in text
+
+
+def test_describe_edges_labels_named_stage():
+    """기본 아닌 stage는 관계 라벨을 이름 뒤에 — 라이벌의 앙금은 낯선 이의 앙금과 다르다."""
+    edges = {"a_junho_park": _edge(resentment=0.4, stage="rival")}
+    text = describe_edges(edges, {"a_junho_park": "박준호"})
+    assert text is not None
+    assert text.startswith("- 박준호(라이벌): 앙금")
+
+
+def test_describe_edges_omits_default_stage_label():
+    """기본 stage(stranger/acquaintance)는 라벨 생략 — 현행 유지."""
+    for stage in ("stranger", "acquaintance"):
+        text = describe_edges({"a_x": _edge(trust=0.5, intimacy=0.4, stage=stage)})
+        assert text == "- a_x: 믿고 가까운 사이다"
 
 
 def test_describe_edges_grounds_names_via_map():
