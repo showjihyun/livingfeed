@@ -213,7 +213,9 @@ class RelationshipAdapter:
         actor_edge, created = await self._ensure_edge(world_id, actor_id, target_id, cause)
         target_edge, reverse_created = await self._ensure_edge(world_id, target_id, actor_id, cause)
         events = created + reverse_created
-        transition = stage_after_action(action_kind, actor_edge, target_edge)
+        transition = stage_after_action(
+            action_kind, actor_edge, target_edge, params=self._params
+        )
         if transition is not None:
             if transition.actor_stage is not None:
                 actor_edge = transition_stage(actor_edge, transition.actor_stage)

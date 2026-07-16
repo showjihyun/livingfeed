@@ -50,6 +50,12 @@ decay_per_tick:
 # 차원은 안 바뀐다 — 생각만으로 마음이 바뀌진 않지만, 그 사람의 비중은 는다
 insight_salience: 0.05
 
+# stage 전이 판정 (ADR-016 stage_after_action) — confess 수락의 문턱.
+# 답은 대상→행위자 엣지가 정한다: 신뢰가 닿아 있고, 앙금이 답을 막지 않아야 한다
+stage_transitions:
+  confess_accept_trust: 0.2
+  confess_reject_resentment: 0.3
+
 # 발행 임계 (ADR-016 갱신 규칙 5): 직전 발행 이후 누적 |델타| L1 합이
 # 이 값을 넘을 때만 relationship.state.changed 발행
 publish_threshold: 0.08

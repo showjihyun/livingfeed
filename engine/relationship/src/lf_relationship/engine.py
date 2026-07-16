@@ -181,8 +181,7 @@ class StageTransition:
 #: 자유 패턴). 규칙 폴백은 절대 안 골라 dev 결정성은 불변이다 (ADR-016).
 STAGE_ACTION_KINDS = frozenset({"confess", "sever"})
 
-#: confess 수락 임계 — 대상→행위자 엣지 기준: 신뢰가 닿아 있어야 하고(trust ≥),
-#: 쌓인 앙금이 답을 막지 않아야 한다(resentment <)
+#: confess 수락 임계 기본값 — params.yaml stage_transitions가 재정의한다 (튜닝 노브)
 _CONFESS_TRUST = 0.2
 _CONFESS_RESENTMENT = 0.3
 
@@ -191,6 +190,8 @@ def stage_after_action(
     action_kind: str,
     actor_edge: RelationshipState,
     target_edge: RelationshipState,
+    *,
+    params: dict[str, Any] | None = None,
 ) -> StageTransition | None:
     """상위 전이 행동(confess/sever) → stage 전이 판정 (ADR-016).
 
@@ -201,12 +202,16 @@ def stage_after_action(
     손대지 않는다 (끊었어도 마음의 흔적은 남는다). 이미 그 관계라면 None:
     재고백·재절교는 마일스톤이 아니다. 결정적·순수 — I/O 없음.
     """
+    params = params or default_params()
+    knobs = params.get("stage_transitions", {})
     if action_kind == "confess":
         if actor_edge.stage == "romantic" and target_edge.stage == "romantic":
             return None
         accepted = (
-            target_edge.dimensions["trust"] >= _CONFESS_TRUST
-            and target_edge.dimensions["resentment"] < _CONFESS_RESENTMENT
+            target_edge.dimensions["trust"]
+            >= float(knobs.get("confess_accept_trust", _CONFESS_TRUST))
+            and target_edge.dimensions["resentment"]
+            < float(knobs.get("confess_reject_resentment", _CONFESS_RESENTMENT))
         )
         if accepted:
             return StageTransition(
