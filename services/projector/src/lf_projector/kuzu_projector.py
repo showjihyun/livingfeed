@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +54,12 @@ class KuzuProjector:
         handler = HANDLERS.get(envelope["type"])
         if handler is not None:
             handler(self._graph, envelope["world_id"], envelope)
+
+    def replay_apply(self) -> Callable[[dict[str, Any]], Awaitable[None]]:
+        """from-es 리플레이 어댑터 — NATS 대신 es 봉투를 같은 project에 먹인다."""
+        async def apply(envelope: dict[str, Any]) -> None:
+            self.project(envelope)
+        return apply
 
     async def _consume(self, nc: nats.NATS, stop: asyncio.Event, once: bool) -> None:
         cfg = self._cfg

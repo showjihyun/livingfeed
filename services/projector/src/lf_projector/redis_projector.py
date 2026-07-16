@@ -30,6 +30,7 @@ from redis.asyncio import Redis
 from lf_projector.config import Config
 from lf_projector.consume import batches
 from lf_projector.lag import LagAggregator, observe
+from lf_projector.replay import matches
 from lf_projector.timeline import TimelineStore, follower_pair
 
 logger = logging.getLogger("lf.projector.redis")
@@ -86,6 +87,20 @@ class RedisProjector:
     def _apply_reply(self, store: TimelineStore):
         async def apply(envelope: dict[str, Any]) -> None:
             await store.push_reply(envelope)
+        return apply
+
+    def replay_apply(
+        self, store: TimelineStore
+    ) -> Callable[[dict[str, Any]], Awaitable[None]]:
+        """from-es 리플레이 어댑터 — _sources와 같은 술어로 적용자를 고른다."""
+        routes = tuple((segment, apply) for _, segment, apply in self._sources(store))
+
+        async def apply(envelope: dict[str, Any]) -> None:
+            for pattern, fn in routes:
+                if matches(pattern, envelope["type"]):
+                    await fn(envelope)
+                    return
+
         return apply
 
     def _durable(self, stream: str) -> str:
