@@ -27,6 +27,15 @@ budget:
   window_ticks: 60
   max_interventions: 2
 
+# 회고 → 페이싱 자기 조정 (비례 제어의 첫 절단면, ADR-013 회고 후속).
+# 지난 날 드라마 개입 밀도가 목표 대역을 벗어나면 quiet_ticks_to_fire를
+# 한 걸음씩 움직인다 — 시즌 테마가 기조라면 이건 미세 조정이다.
+retrospect_tuning:
+  target_interventions_per_day: 6   # 세계 하루(360 tick) 기준 드라마 개입 목표
+  adjust_step: 5                    # 한 번에 움직이는 quiet_ticks_to_fire 폭
+  quiet_ticks_min: 6                # 몰아쳐도 이 아래로는 안 내려간다
+  quiet_ticks_max: 60               # 참아도 이 위로는 안 올라간다
+
 # inject_incident 라이브러리 — 같은 도구 반복의 기계감 방지를 위해 순환한다.
 # description의 {a}/{b}는 갈등 후보 쌍(그래프 tension 질의)으로 채워진다.
 incidents:

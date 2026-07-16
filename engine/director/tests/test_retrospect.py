@@ -4,7 +4,7 @@ fold_report는 순수·결정적: 같은 봉투 열 → 같은 리포트 (리플
 PG 통합은 season_retrospective가 그 날의 스트림만 접는지 확인한다.
 """
 
-from lf_director.retrospect import fold_report, season_retrospective
+from lf_director.retrospect import fold_report, season_retrospective, tune_pacing
 from lf_eventstore import NewEvent, append
 
 WORLD = "w_test"
@@ -71,6 +71,31 @@ def test_fold_report_is_order_insensitive_and_empty_safe():
     assert empty["interventions"]["total"] == 0
     assert empty["diversity"]["tool_diversity"] is None
     assert empty["world"]["avg_intensity"] is None
+
+
+TUNING = {"retrospect_tuning": {
+    "target_interventions_per_day": 6, "adjust_step": 5,
+    "quiet_ticks_min": 6, "quiet_ticks_max": 60,
+}}
+
+
+def test_tune_pacing_moves_one_step_toward_target():
+    quiet = {"interventions": {"drama": 2}}
+    busy = {"interventions": {"drama": 9}}
+    on_target = {"interventions": {"drama": 6}}
+    # 조용했다 → 침체를 덜 참는다 (한 걸음), 북적였다 → 더 참는다
+    lowered, why_low = tune_pacing(quiet, 30, TUNING)
+    assert lowered == 25 and "조용" in why_low
+    raised, why_high = tune_pacing(busy, 30, TUNING)
+    assert raised == 35 and "북적" in why_high
+    assert tune_pacing(on_target, 30, TUNING) == (30, None)  # 목표면 그대로
+
+
+def test_tune_pacing_clamps_and_respects_missing_config():
+    quiet = {"interventions": {"drama": 0}}
+    assert tune_pacing(quiet, 6, TUNING) == (6, None)  # 벽 — 더 갈 곳이 없다
+    assert tune_pacing(quiet, 8, TUNING)[0] == 6       # 부분 스텝으로 벽까지만
+    assert tune_pacing(quiet, 30, {}) == (30, None)    # 설정 없으면 조정 없음
 
 
 async def test_season_retrospective_folds_only_that_day(conn):

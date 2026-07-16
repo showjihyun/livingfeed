@@ -398,6 +398,19 @@ async def test_review_season_folds_previous_day_as_log(conn):
     assert quiet["interventions"]["total"] == 0
 
 
+async def test_review_season_tunes_pacing_by_density(conn):
+    """회고 → 페이싱 자기 조정 (P 제어): 조용한 날이면 침체를 덜 참게 된다.
+    명시 override(테스트·운영 고정)면 손대지 않는다."""
+    director = make_director()
+    before = director._params["observation"]["quiet_ticks_to_fire"]
+    await director.review_season(conn, 0)  # 개입 0 — 조용했다
+    assert director._params["observation"]["quiet_ticks_to_fire"] == before - 5
+
+    pinned = make_director(quiet_override=30)
+    await pinned.review_season(conn, 1)
+    assert pinned._params["observation"]["quiet_ticks_to_fire"] == 30  # 고정 유지
+
+
 def test_apply_season_updates_pacing_params_and_current_theme():
     # 자기 season_set 이벤트 소비 → 개입 빈도 파라미터 + 현재 테마 갱신 (이벤트 소싱)
     director = make_director()

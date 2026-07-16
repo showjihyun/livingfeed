@@ -39,7 +39,7 @@ from lf_director.planner import (
     season_from_plan,
     season_schema,
 )
-from lf_director.retrospect import season_retrospective
+from lf_director.retrospect import season_retrospective, tune_pacing
 from lf_director.rules import (
     ARC_TOOL,
     SEASON_TOOL,
@@ -298,6 +298,16 @@ class Director:
         logger.info(
             "시즌 회고 day=%d: %s", day, json.dumps(report, ensure_ascii=False)
         )
+        # 회고 → 페이싱 자기 조정 (P 제어) — 명시 override(테스트·운영 고정)면 손대지 않는다
+        if self._cfg.quiet_ticks_override is None:
+            current = int(self._params["observation"]["quiet_ticks_to_fire"])
+            adjusted, reason = tune_pacing(report, current, self._params)
+            if reason is not None:
+                self._params["observation"]["quiet_ticks_to_fire"] = adjusted
+                logger.info(
+                    "페이싱 자기 조정: quiet_ticks_to_fire %d → %d (%s)",
+                    current, adjusted, reason,
+                )
         return report
 
     def _restore_budget(self, envelope: dict[str, Any]) -> None:

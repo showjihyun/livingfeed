@@ -100,6 +100,35 @@ def fold_report(envelopes: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def tune_pacing(
+    report: dict[str, Any], current_quiet_to_fire: int, params: dict[str, Any]
+) -> tuple[int, str | None]:
+    """회고 → 페이싱 조정 (비례 제어의 첫 절단면, ADR-013 회고 후속). 순수·결정적.
+
+    지난 날 드라마 개입이 목표보다 적었으면 세계가 조용했던 것 — 침체를 덜
+    참게(quiet_ticks_to_fire ↓), 많았으면 더 참게(↑) 한 걸음 움직인다.
+    반환: (새 값, 사유) — 조정 없음이면 (현재 값, None). 클램프가 폭주를 막는다.
+    """
+    cfg = params.get("retrospect_tuning")
+    if not cfg:
+        return current_quiet_to_fire, None
+    drama = int(report["interventions"]["drama"])
+    target = int(cfg["target_interventions_per_day"])
+    step = int(cfg["adjust_step"])
+    if drama < target:
+        proposed = current_quiet_to_fire - step
+        reason = f"조용했다 (개입 {drama} < 목표 {target}) — 침체를 덜 참는다"
+    elif drama > target:
+        proposed = current_quiet_to_fire + step
+        reason = f"북적였다 (개입 {drama} > 목표 {target}) — 더 참는다"
+    else:
+        return current_quiet_to_fire, None
+    clamped = max(int(cfg["quiet_ticks_min"]), min(int(cfg["quiet_ticks_max"]), proposed))
+    if clamped == current_quiet_to_fire:
+        return current_quiet_to_fire, None  # 이미 벽에 붙어 있다 — 더 갈 곳이 없다
+    return clamped, reason
+
+
 async def season_retrospective(
     conn: AsyncConnection, world_id: str, day: int, *, interval_ticks: int = 360
 ) -> dict[str, Any]:
