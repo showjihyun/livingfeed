@@ -1,4 +1,4 @@
-"""관계 갱신의 순수 로직 (ADR-016 §갱신 규칙).
+"""관계 갱신·서술의 순수 로직 (ADR-016 §갱신 규칙).
 
 전부 결정적 순수 함수 — 같은 (상태, 사건, 파라미터) → 같은 결과.
 LLM 호출·I/O 금지 (ADR-015와 동일 논거). 저장·이벤트 적재는 어댑터의 몫.
@@ -164,4 +164,54 @@ def transition_stage(state: RelationshipState, stage: str) -> RelationshipState:
     return RelationshipState(
         dimensions=state.dimensions, stage=stage,
         salience=state.salience, pending=state.pending,
+    )
+
+
+#: 결 판정 임계 — reflection의 규칙 신념(derive_beliefs)과 감각을 맞춘다:
+#: supporter(trust 0.25 · intimacy 0.15) / threat(resentment 0.3)
+_TRUST_CLOSE = 0.25
+_INTIMACY_CLOSE = 0.15
+_RESENTMENT_GRUDGE = 0.3
+
+
+def _edge_texture(dims: dict[str, float]) -> str:
+    """엣지 하나의 지배적 결 — 수치가 아니라 감각의 언어로 (ADR-009 Relationship(3)).
+
+    애증은 공존한다 — trust·intimacy와 resentment는 독립 축이라(ADR-016)
+    둘 다 임계를 넘으면 둘 다 말한다. 화해했어도 앙금은 남는다.
+    """
+    close = dims["trust"] >= _TRUST_CLOSE and dims["intimacy"] >= _INTIMACY_CLOSE
+    grudge = dims["resentment"] >= _RESENTMENT_GRUDGE
+    if close and grudge:
+        return "믿고 가까운 사이지만, 앙금도 남아 있다"
+    if close:
+        return "믿고 가까운 사이다"
+    if grudge:
+        return "앙금이 남아 있다 — 쌓인 것이 쉽게 사라지지 않는다"
+    if dims["trust"] <= -_TRUST_CLOSE:
+        return "선뜻 믿기 어려운 상대다"
+    return "아직 마음의 결이 뚜렷하지 않은 사이다"
+
+
+def describe_edges(
+    edges: dict[str, RelationshipState],
+    name_map: dict[str, str] | None = None,
+    *,
+    limit: int = 3,
+) -> str | None:
+    """관계 요약 — salience 상위 엣지를 사람이 읽는 한 줄씩으로 (ADR-009 §3).
+
+    decide 컨텍스트의 Relationship(3) 섹션 재료다: 원한이 쌓인 상대에게
+    태연히 말을 걸지 않으려면, 결정 앞에 관계의 온도가 놓여야 한다.
+    이름은 name_map으로 그라운딩(없으면 id — 플레이어 등 명부 밖 상대).
+    결정적·순수: salience 내림차순, 동률은 id 순. 엣지가 없으면 None
+    (섹션 생략 규약 — 빈 관계는 소음이다).
+    """
+    if not edges:
+        return None
+    names = name_map or {}
+    ranked = sorted(edges, key=lambda other: (-edges[other].salience, other))[:limit]
+    return "\n".join(
+        f"- {names.get(other, other)}: {_edge_texture(edges[other].dimensions)}"
+        for other in ranked
     )

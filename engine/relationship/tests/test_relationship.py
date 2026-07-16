@@ -8,6 +8,7 @@ from lf_relationship import (
     consume_pending,
     decay,
     default_params,
+    describe_edges,
     transition_stage,
 )
 
@@ -109,3 +110,51 @@ def test_state_roundtrips_json():
     state = apply_interaction(RelationshipState(), "action.help", "incoming").state
     canonical = state.to_json()
     assert RelationshipState.from_json(canonical).to_json() == canonical
+
+
+def _edge(trust=0.0, intimacy=0.0, resentment=0.0, salience=0.0) -> RelationshipState:
+    base = RelationshipState()
+    return RelationshipState(
+        dimensions={
+            **base.dimensions,
+            "trust": trust, "intimacy": intimacy, "resentment": resentment,
+        },
+        stage=base.stage, salience=salience, pending=base.pending,
+    )
+
+
+def test_describe_edges_picks_top_salience_deterministically():
+    """비중(salience) 상위만 접힌다 — 삶에서 자리가 큰 관계부터 (ADR-009 §3)."""
+    edges = {f"a_{i}": _edge(salience=i / 10) for i in range(5)}
+    text = describe_edges(edges, limit=3)
+    assert text is not None
+    lines = text.splitlines()
+    assert len(lines) == 3
+    assert "a_4" in lines[0] and "a_3" in lines[1] and "a_2" in lines[2]
+    assert "a_0" not in text  # 비중 낮은 관계는 접힌다
+    assert describe_edges(edges, limit=3) == text  # 결정적
+
+
+def test_describe_edges_love_and_hate_coexist():
+    """애증 공존 — trust·intimacy와 resentment는 독립 축 (ADR-016), 둘 다면 둘 다."""
+    text = describe_edges({"a_x": _edge(trust=0.5, intimacy=0.4, resentment=0.5)})
+    assert text is not None
+    assert "믿고 가까운" in text and "앙금" in text
+
+    # 단독 결은 단독으로만
+    close_only = describe_edges({"a_x": _edge(trust=0.5, intimacy=0.4)})
+    assert "믿고 가까운" in close_only and "앙금" not in close_only
+    grudge_only = describe_edges({"a_x": _edge(resentment=0.5)})
+    assert "앙금" in grudge_only and "믿고 가까운" not in grudge_only
+
+
+def test_describe_edges_grounds_names_via_map():
+    edges = {"a_junho_park": _edge(resentment=0.4, salience=0.5)}
+    text = describe_edges(edges, {"a_junho_park": "박준호"})
+    assert "박준호" in text and "a_junho_park" not in text
+    # name_map에 없는 상대(플레이어 등)는 id 그대로 — 기존 관례
+    assert "a_junho_park" in describe_edges(edges)
+
+
+def test_describe_edges_empty_returns_none():
+    assert describe_edges({}) is None  # 섹션 생략 규약 — 빈 관계는 소음이다

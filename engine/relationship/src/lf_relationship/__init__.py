@@ -30,6 +30,9 @@ from lf_relationship.engine import (
     default_params as default_params,
 )
 from lf_relationship.engine import (
+    describe_edges as describe_edges,
+)
+from lf_relationship.engine import (
     transition_stage as transition_stage,
 )
 from lf_relationship.model import (

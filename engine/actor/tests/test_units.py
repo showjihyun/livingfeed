@@ -62,6 +62,29 @@ def test_context_without_arc_omits_section():
     assert "## 인생 아크" not in bundle.user
 
 
+def test_context_relationships_between_arc_and_episodes():
+    # Relationship(3)은 아크 뒤·에피소드 앞 — ADR-009 고정 순서 (Relationship(3) < Episodes(4))
+    aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
+    arc = Arc(stage="newcomer", intention="이 도시에서 자기 자리를 만들기 시작한다")
+    bundle = build(
+        aria, [], WORLD, trace_id="t", arc=arc,
+        relationships="- 박준호: 앙금이 남아 있다 — 쌓인 것이 쉽게 사라지지 않는다",
+    )
+    assert (
+        bundle.user.index("## 인생 아크")
+        < bundle.user.index("## 얽힌 사람들")
+        < bundle.user.index("## 떠오르는 기억")
+    )
+    assert "박준호" in bundle.user
+
+
+def test_context_without_relationships_omits_section():
+    # 아직 아무와도 얽히지 않은 액터 — 섹션 자체가 없다 (아크와 같은 규약)
+    aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
+    bundle = build(aria, [], WORLD, trace_id="t")
+    assert "## 얽힌 사람들" not in bundle.user
+
+
 def test_context_unknown_stage_falls_back_to_code():
     # 닫힌 어휘 밖 단계(미래 확장)라도 컨텍스트 조립은 깨지지 않는다
     aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")

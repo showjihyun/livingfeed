@@ -328,7 +328,11 @@ class ActorPhases:
                     )
                     working = [summary, *working]
                 episodes = await self._recall(ctx.world_id, actor_id, working)
-                bundle = build(persona, working, world, episodes=episodes, arc=arc)
+                relationships = await self._relationship_summary(ctx.world_id, actor_id)
+                bundle = build(
+                    persona, working, world,
+                    episodes=episodes, arc=arc, relationships=relationships,
+                )
                 payload = await self._ai.decide_action(
                     bundle, schema, tier=tier.value, actor_id=actor_id, tick=ctx.tick
                 )
@@ -351,9 +355,12 @@ class ActorPhases:
                 conversation = conversation_turns(working, envelope["payload"]["player_id"])
                 # 답장도 결정이다 — 인생 방향이 대화의 결까지 물들인다 (ADR-013)
                 arc = await self._arc_of(ctx.world_id, actor_id)
+                # 관계의 온도도 — 앙금이 남은 상대에겐 답의 결이 달라야 한다 (ADR-009 §3)
+                relationships = await self._relationship_summary(ctx.world_id, actor_id)
                 bundle = build(
                     persona, working, world, purpose="reply_to_player",
                     episodes=episodes, conversation=conversation, arc=arc,
+                    relationships=relationships,
                 )
                 text = await self._ai.converse(
                     bundle, tier="hot", actor_id=actor_id, tick=ctx.tick
@@ -385,6 +392,17 @@ class ActorPhases:
         if self._arc is None:
             return None
         return await self._arc.get(world_id, actor_id)
+
+    async def _relationship_summary(self, world_id: str, actor_id: str) -> str | None:
+        """관계 요약 — decide의 Relationship(3) 섹션 재료 (ADR-009 §3, ADR-016).
+
+        이름은 페르소나 명부로 그라운딩한다 — 플레이어 id는 명부에 없어 id
+        그대로 (기존 관례). 액터당 Redis 조회가 늘지만 Phase 1(소수 액터) 허용.
+        """
+        if self._relationship is None:
+            return None
+        names = {p.id: p.name for p in self._personas.values()}
+        return await self._relationship.summary(world_id, actor_id, names)
 
     async def _hydrate_ledger(self, world_id: str) -> None:
         """감쇠 장부 수화 — 재시작 후 첫 tick, 잠든 액터의 경과를 되찾는다 (ADR-012)."""

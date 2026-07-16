@@ -3,8 +3,8 @@
 섹션 순서는 고정이다 — 변동성 낮은 것부터. 이 순서가 prompt cache 적중률을
 만든다 (ADR-018 §2). 순서 변경은 ADR-009 대체 없이는 금지.
 
-Phase 1 범위: Identity(1) / Working(5) / World(6) / Task Frame(7).
-Beliefs(2)·Relationship(3)·Episodes(4)는 해당 계층(Qdrant/Kuzu) 도입 시 채워진다.
+Phase 1 범위: Identity(1) / Relationship(3) / Episodes(4) / Working(5) / World(6) /
+Task Frame(7). Beliefs(2)는 해당 계층 도입 시 채워진다.
 순수 함수적: 같은 입력 → 같은 번들 (trace_id 제외). LLM 호출·상태 변경 없음.
 """
 
@@ -23,6 +23,7 @@ CHARS_PER_TOKEN = 2.5
 
 #: 섹션별 토큰 예산 (ADR-009 §토큰 예산, Phase 1 기본값)
 BUDGET_IDENTITY = 800
+BUDGET_RELATIONSHIPS = 300
 BUDGET_EPISODES = 600
 BUDGET_WORKING = 1_200
 BUDGET_WORLD = 400
@@ -51,6 +52,18 @@ def _arc_section(arc: Arc | None) -> str:
         f"- 지금 당신은 {label}에 있다.\n"
         f"- 이 시즌 당신의 인생은 이렇게 향한다: {arc.intention}"
     )
+
+
+def _relationships_section(relationships: str | None) -> str:
+    """Relationship(3) — 얽힌 사람들의 온도 (ADR-016 → ADR-009 §3).
+
+    원한이 쌓인 상대에게 태연히 말을 걸지 않으려면, 결정 앞에 관계의
+    온도가 놓여야 한다. 관계가 없으면 섹션을 생략한다 — 아직 아무와도
+    얽히지 않은 액터에게 빈 관계는 소음이다 (아크와 같은 규약).
+    """
+    if not relationships:
+        return ""
+    return _clip("## 얽힌 사람들 (관계의 온도)\n" + relationships, BUDGET_RELATIONSHIPS)
 
 
 @dataclass(frozen=True)
@@ -198,12 +211,15 @@ def build(
     episodes: list[str] | None = None,
     conversation: list[tuple[str, str]] | None = None,
     arc: Arc | None = None,
+    relationships: str | None = None,
 ) -> Bundle:
-    """ContextBundle 조립 — 섹션 순서 고정 (ADR-009 규칙 1: Episodes(4) < Working(5)).
+    """ContextBundle 조립 — 섹션 순서 고정 (ADR-009 규칙 1: Relationship(3) <
+    Episodes(4) < Working(5)).
 
     arc(있으면)가 최상위 프레임으로 앞에 온다 — 인생 방향이 이번 결정을 물들인다.
-    conversation(reply_to_player 전용)이 있으면 Working 앞에 대화 흐름 섹션을
-    끼운다 — 답장은 뒤섞인 버퍼가 아니라 시간순 대화를 보고 써야 한다.
+    relationships(있으면)는 아크 뒤·에피소드 앞 — 기억을 회상하기 전에 상대와의
+    온도가 먼저 놓인다. conversation(reply_to_player 전용)이 있으면 Working 앞에
+    대화 흐름 섹션을 끼운다 — 답장은 뒤섞인 버퍼가 아니라 시간순 대화를 보고 써야 한다.
     """
     frame = _TASK_FRAMES.get(purpose)
     if frame is None:
@@ -211,6 +227,8 @@ def build(
     sections: list[str] = []
     if (arc_text := _arc_section(arc)):
         sections.append(arc_text)
+    if (rel_text := _relationships_section(relationships)):
+        sections.append(rel_text)
     sections.append(_episodes_section(episodes or []))
     if conversation:
         sections.append(_conversation_section(conversation))

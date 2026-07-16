@@ -21,6 +21,7 @@ from lf_relationship import (
     consume_pending,
     decay,
     default_params,
+    describe_edges,
     transition_stage,
 )
 from redis.asyncio import Redis
@@ -72,6 +73,21 @@ class RelationshipAdapter:
     async def counterparts(self, world_id: str, from_id: str) -> list[str]:
         members = await self._redis.smembers(self._index_key(world_id, from_id))
         return sorted(m.decode() if isinstance(m, bytes) else m for m in members)
+
+    async def summary(
+        self, world_id: str, from_id: str, names: dict[str, str] | None = None
+    ) -> str | None:
+        """decide 컨텍스트용 관계 요약 — Relationship(3) 섹션 재료 (ADR-009 §3).
+
+        엣지 전체를 수화해 describe_edges(순수)로 접는다. 액터당 엣지 수는
+        max_active_edges가 상한이라 tick당 조회는 유계다. 엣지 없으면 None.
+        """
+        edges: dict[str, RelationshipState] = {}
+        for to_id in await self.counterparts(world_id, from_id):
+            state = await self.load(world_id, from_id, to_id)
+            if state is not None:
+                edges[to_id] = state
+        return describe_edges(edges, names)
 
     async def _ensure_edge(
         self, world_id: str, from_id: str, to_id: str, cause: dict[str, Any]
