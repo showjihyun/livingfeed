@@ -32,6 +32,7 @@ from lf_feed.compose import (
     load_actor_names,
 )
 from lf_feed.config import Config
+from lf_feed.narrator import FeedNarrator
 from lf_feed.scoring import RarityTracker
 
 logger = logging.getLogger("lf.feed.composer")
@@ -40,6 +41,7 @@ SOURCE_EVENT_TYPE = "actor.action.performed"
 INCIDENT_EVENT_TYPE = "world.incident.occurred"
 GOAL_ACHIEVED_TYPE = "actor.goal.achieved"
 ARC_EVENT_TYPE = "system.director.arc_planned"
+BOOST_EVENT_TYPE = "system.director.feed_boosted"
 
 
 async def previous_arc_stage(
@@ -63,15 +65,38 @@ async def previous_arc_stage(
 class FeedComposer:
     """편집 1단 워커. 인스턴스 여러 개여도 durable consumer가 작업을 분배한다."""
 
-    def __init__(self, cfg: Config, *, actor_names: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        cfg: Config,
+        *,
+        actor_names: dict[str, str] | None = None,
+        narrator: Any | None = None,
+    ) -> None:
         self._cfg = cfg
         self._names = (
             actor_names if actor_names is not None else load_actor_names(cfg.personas_dir)
         )
         self._rarity = RarityTracker(cfg.scoring.rarity_window)
+        #: Director의 편집 조명 (boost_feed, ADR-013/014): actor → (boost, until_tick).
+        #: in-memory — 재시작 시 남은 조명이 꺼진다 (시즌 복원과 같은 MVP 허용 오차)
+        self._boosts: dict[str, tuple[float, int]] = {}
+        #: 고드라마 포스트의 본문 서사화 (ADR-018 narrate) — None이면 언제나 템플릿.
+        #: run()이 cfg.narrate에 따라 배선하고, 테스트는 스텁을 주입한다
+        self._narrator = narrator
 
     async def compose_once(self, conn: AsyncConnection, envelope: dict[str, Any]) -> str | None:
         """봉투 하나를 편집한다. 반환: 승격된 post_id, 임계 미달이면 None."""
+        if envelope["type"] == BOOST_EVENT_TYPE:
+            # 편집 조명 (boost_feed) — 포스트가 아니라 제어 신호다: 조명만 켠다
+            payload = envelope["payload"]
+            self._boosts[payload["target_actor_id"]] = (
+                float(payload["boost"]), int(payload["until_tick"])
+            )
+            logger.info(
+                "편집 조명: %s boost=%.2f until_tick=%d",
+                payload["target_actor_id"], payload["boost"], payload["until_tick"],
+            )
+            return None
         if envelope["type"] == INCIDENT_EVENT_TYPE:
             # Director boost 항이 실값(1.0)인 유일한 소스 (ADR-013/014)
             drama, score = evaluate_incident(envelope, self._rarity, self._cfg.scoring)
@@ -96,7 +121,10 @@ class FeedComposer:
                 envelope, drama=drama, score=score, actor_names=self._names
             )
         else:
-            drama, score = evaluate(envelope, self._rarity, self._cfg.scoring)
+            drama, score = evaluate(
+                envelope, self._rarity, self._cfg.scoring,
+                director_boost=self._active_boost(envelope),
+            )
             event = build_post_event(
                 envelope, drama=drama, score=score, actor_names=self._names
             )
@@ -106,12 +134,41 @@ class FeedComposer:
                 envelope["event_id"], score, self._cfg.scoring.threshold,
             )
             return None
+        # 고드라마 포스트는 본문을 서사로 다듬는다 (ADR-018 narrate) — 승격 판정은
+        # 이미 끝났다: 실패해도 템플릿 본문이 그대로 간다 (조용한 강등)
+        if (
+            self._narrator is not None
+            and event.payload["drama_score"] >= self._cfg.narrate_threshold
+        ):
+            narrated = await self._narrator.narrate(
+                title=event.payload["title"],
+                body=event.payload["body"],
+                participants=[
+                    self._names.get(p, p) for p in event.payload["participants"]
+                ],
+                world_id=envelope["world_id"],
+                tick=envelope["tick"],
+            )
+            if narrated:
+                event.payload["body"] = narrated[:2000]
+                event.payload["narration_kind"] = "llm"
         await append(conn, PRINCIPAL, [event], expected_head=0)
         logger.info(
             "FeedItem 승격 — post_id=%s source=%s score=%.3f",
             event.event_id, envelope["event_id"], score,
         )
         return event.event_id
+
+    def _active_boost(self, envelope: dict[str, Any]) -> float:
+        """이 행동에 걸린 편집 조명 (boost_feed) — 기간이 지났으면 끈다."""
+        lit = self._boosts.get(envelope.get("actor_id") or "")
+        if lit is None:
+            return 0.0
+        boost, until_tick = lit
+        if envelope["tick"] >= until_tick:
+            self._boosts.pop(envelope["actor_id"], None)  # 조명은 영원하지 않다
+            return 0.0
+        return boost
 
     async def _handle(self, msg: Any, conn: AsyncConnection, js: Any) -> None:
         num_delivered = msg.metadata.num_delivered
@@ -154,6 +211,10 @@ class FeedComposer:
             nc = await nats.connect(cfg.nats_url)
             try:
                 js = nc.jetstream()
+                # LLM 내레이션 배선 — 명시 주입(테스트)이 없고 켜져 있을 때만.
+                # rule 프로바이더면 narrate 미지원이라 자동 템플릿 폴백된다.
+                if self._narrator is None and cfg.narrate:
+                    self._narrator = FeedNarrator(nc, cfg.env)
                 # 편집 소스 4종: 액터 행동·목표 완주(LF_ACTOR) + 세계 사건(LF_WORLD)
                 # + 인생 아크 계획(LF_SYS — 장 전환분만 승격)
                 subs = [
@@ -173,10 +234,14 @@ class FeedComposer:
                         f"lf.{cfg.env}.*.{ARC_EVENT_TYPE}",
                         durable=f"{cfg.durable}-arc", stream="LF_SYS",
                     ),
+                    await js.pull_subscribe(
+                        f"lf.{cfg.env}.*.{BOOST_EVENT_TYPE}",
+                        durable=f"{cfg.durable}-boost", stream="LF_SYS",
+                    ),
                 ]
                 logger.info(
                     "feed composer 대기 — durable=%s threshold=%.2f "
-                    "(소스: 행동+세계사건+목표완주+아크전환)",
+                    "(소스: 행동+세계사건+목표완주+아크전환+편집조명)",
                     cfg.durable, cfg.scoring.threshold,
                 )
                 while not stop.is_set():

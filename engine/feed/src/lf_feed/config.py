@@ -24,6 +24,10 @@ class Config:
     #: 이 횟수 이상 재전달된 처리 불가 메시지는 DLQ로 보내고 ack한다 (조용한 유실 금지, ADR-017 §4)
     max_deliver: int = 5
     nak_delay_s: float = 5.0
+    #: LLM 내레이션 (ADR-018 narrate) — 켜면 고드라마 포스트 본문을 서사로 다듬는다.
+    #: rule 프로바이더는 미지원이라 dev 기본 꺼짐 (결정성 유지)
+    narrate: bool = False
+    narrate_threshold: float = 0.6
 
     @classmethod
     def from_env(cls) -> Config:
@@ -38,4 +42,6 @@ class Config:
             env=os.environ.get("LF_ENV", "dev"),
             personas_dir=Path(os.environ.get("LF_PERSONAS_DIR", "agents/personas")),
             scoring=scoring,
+            narrate=os.environ.get("LF_FEED_NARRATE", "0") == "1",
+            narrate_threshold=float(os.environ.get("LF_FEED_NARRATE_THRESHOLD", "0.6")),
         )

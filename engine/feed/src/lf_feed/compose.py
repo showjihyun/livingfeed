@@ -253,13 +253,21 @@ def build_goal_post_event(
 
 
 def evaluate(
-    envelope: dict[str, Any], rarity: RarityTracker, cfg: ScoringConfig
+    envelope: dict[str, Any],
+    rarity: RarityTracker,
+    cfg: ScoringConfig,
+    *,
+    director_boost: float = 0.0,
 ) -> tuple[float, float]:
-    """원본 봉투의 (drama, worthiness)를 계산하고 희소성 창에 관측을 남긴다."""
+    """원본 봉투의 (drama, worthiness)를 계산하고 희소성 창에 관측을 남긴다.
+
+    director_boost는 boost_feed 편집 조명 (ADR-013/014) — Director가 지목한
+    인물의 행동이 조명 기간 동안 worthiness boost 항을 얻는다.
+    """
     payload = envelope["payload"]
     kind = payload["action_kind"]
     drama = drama_score(kind, has_target=payload.get("target_actor_id") is not None, cfg=cfg)
-    score = worthiness(drama, 0.0, rarity.rarity(kind), 0.0, cfg)
+    score = worthiness(drama, 0.0, rarity.rarity(kind), director_boost, cfg)
     rarity.observe(kind)
     return drama, score
 

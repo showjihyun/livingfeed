@@ -29,7 +29,7 @@ ARC_SAMPLE = json.loads(
 )
 
 
-def make_composer(**scoring_kwargs) -> FeedComposer:
+def make_composer(*, narrator=None, **scoring_kwargs) -> FeedComposer:
     cfg = Config(
         pg_dsn="unused",
         nats_url="unused",
@@ -42,7 +42,20 @@ def make_composer(**scoring_kwargs) -> FeedComposer:
         actor_names={
             "a_aria_kim": "김아리", "a_junho_park": "박준호", "a_minji_kim": "김민지",
         },
+        narrator=narrator,
     )
+
+
+class _StubNarrator:
+    """canned 서사 본문을 돌려주는 스텁 — 라이브 모델 없이 narrate 경로를 탄다."""
+
+    def __init__(self, body: str | None) -> None:
+        self._body = body
+        self.calls: list[dict] = []
+
+    async def narrate(self, *, title, body, participants, world_id, tick):
+        self.calls.append({"title": title, "body": body, "participants": participants})
+        return self._body
 
 
 async def test_compose_once_appends_feed_post(conn):
@@ -76,6 +89,97 @@ async def test_compose_once_below_threshold_writes_nothing(conn):
     assert await composer.compose_once(conn, SAMPLE) is None
     post_id = derive_post_id(SAMPLE["event_id"])
     assert await read_stream(conn, SAMPLE["world_id"], "feed", post_id) == []
+
+
+INCIDENT_SAMPLE = json.loads(
+    (
+        Path(__file__).resolve().parents[3]
+        / "packages" / "schemas" / "samples" / "world.incident.occurred.001.json"
+    ).read_text(encoding="utf-8")
+)
+
+
+async def test_high_drama_post_gets_llm_narration(conn):
+    """LLM 내레이션 (ADR-018 narrate) — 고드라마 포스트의 본문이 서사로 다듬어진다.
+
+    승격 판정은 이미 끝난 뒤라 실패해도 템플릿이 그대로 간다 (조용한 강등).
+    """
+    narrator = _StubNarrator("촛불 아래, 피하던 얼굴들이 같은 테이블에 마주 앉았다.")
+    composer = make_composer(narrator=narrator)
+    post_id = await composer.compose_once(conn, INCIDENT_SAMPLE)
+    assert post_id is not None
+    [stored] = await read_stream(conn, INCIDENT_SAMPLE["world_id"], "feed", post_id)
+    assert stored.envelope["payload"]["body"] == narrator._body  # 서사 본문으로 교체
+    assert stored.envelope["payload"]["narration_kind"] == "llm"
+    assert narrator.calls and narrator.calls[0]["title"]  # 원문이 재료로 전달됐다
+
+
+async def test_narration_failure_keeps_template_body(conn):
+    # 내레이터 실패(None) — 템플릿 본문이 그대로 간다 (조용한 강등)
+    narrator = _StubNarrator(None)
+    composer = make_composer(narrator=narrator)
+    post_id = await composer.compose_once(conn, INCIDENT_SAMPLE)
+    [stored] = await read_stream(conn, INCIDENT_SAMPLE["world_id"], "feed", post_id)
+    assert stored.envelope["payload"]["body"] == INCIDENT_SAMPLE["payload"]["description"]
+    assert stored.envelope["payload"]["narration_kind"] == "template"
+
+
+async def test_low_drama_post_skips_narrator(conn):
+    # 임계(0.6) 미만 드라마 — 내레이터를 부르지도 않는다 (비용은 고드라마의 것)
+    narrator = _StubNarrator("불릴 일 없는 서사")
+    composer = make_composer(narrator=narrator)
+    assert await composer.compose_once(conn, SAMPLE) is not None
+    assert narrator.calls == []
+
+
+def boost_envelope(target: str, *, boost: float, until_tick: int, tick: int) -> dict:
+    event_id = ARC_SAMPLE["event_id"][:-2] + "B0"
+    return {
+        "event_id": event_id, "stream": "system",
+        "type": "system.director.feed_boosted", "schema_version": 1,
+        "world_id": SAMPLE["world_id"], "actor_id": None, "tick": tick,
+        "occurred_at": "2026-07-12T08:32:00Z", "causation_id": None,
+        "correlation_id": event_id,
+        "payload": {"target_actor_id": target, "boost": boost, "until_tick": until_tick},
+    }
+
+
+def work_action(event_id: str, tick: int) -> dict:
+    """무대상 work — drama 0.25, 기본 임계(0.35)에 살짝 못 미치는 경계 행동."""
+    envelope = json.loads(json.dumps(SAMPLE))
+    envelope["event_id"] = event_id
+    envelope["correlation_id"] = event_id
+    envelope["tick"] = tick
+    envelope["payload"]["action_kind"] = "work"
+    envelope["payload"]["target_actor_id"] = None
+    envelope["payload"].pop("headline", None)
+    return envelope
+
+
+async def test_boost_lights_actor_actions_until_expiry(conn):
+    """편집 조명 (boost_feed, ADR-013/014) — 조명이 켜지면 경계의 행동이 임계를
+    넘고, 기간이 지나면 꺼진다. 조명 이벤트 자체는 포스트가 아니다 (제어 신호)."""
+    actor = SAMPLE["actor_id"]
+    base = SAMPLE["event_id"][:-2]
+
+    # 조명 없는 경계 행동 — 임계 미달 (0.125 + 희소 0.2 = 0.325 < 0.35)
+    plain = make_composer()
+    assert await plain.compose_once(conn, work_action(base + "C1", tick=50)) is None
+
+    # 조명이 켜진 composer — 같은 행동이 boost 항(0.6×0.1)으로 임계를 넘는다
+    lit = make_composer()
+    assert await lit.compose_once(
+        conn, boost_envelope(actor, boost=0.6, until_tick=100, tick=40)
+    ) is None  # 제어 신호 — 포스트가 아니다
+    post_id = await lit.compose_once(conn, work_action(base + "C2", tick=50))
+    assert post_id is not None
+    [stored] = await read_stream(conn, SAMPLE["world_id"], "feed", post_id)
+    assert stored.envelope["payload"]["worthiness"] >= 0.35
+
+    # 조명은 영원하지 않다 — until_tick부터 꺼진다
+    assert lit._active_boost({"actor_id": actor, "tick": 99}) == 0.6
+    assert lit._active_boost({"actor_id": actor, "tick": 100}) == 0.0
+    assert lit._active_boost({"actor_id": "a_junho_park", "tick": 50}) == 0.0  # 남의 조명 아님
 
 
 def arc_envelope(event_id: str, stage: str) -> dict:
