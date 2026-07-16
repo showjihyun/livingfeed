@@ -56,6 +56,22 @@ def candidate_actor_ids(tension_pairs: list[list[Any]]) -> list[str]:
     return seen
 
 
+def reorder_by_attention(
+    tension_pairs: list[list[Any]], attention: dict[str, int]
+) -> list[list[Any]]:
+    """관심이 쏠린 인물의 긴장 쌍을 앞으로 (Narrative Gravity — 무대는 시선이 있는 곳).
+
+    안정 정렬 — 관심 동률이면 원래(긴장 강도) 순서를 지킨다. 후보 집합은 그대로다:
+    시선은 순서만 바꾼다, 관찰 밖 인물을 무대로 끌어오지 않는다 (hard rule 불변).
+    """
+    if not attention:
+        return tension_pairs
+    return sorted(
+        tension_pairs,
+        key=lambda pair: -(attention.get(pair[0], 0) + attention.get(pair[1], 0)),
+    )
+
+
 def plan_schema(
     incident_kinds: list[str], *, exclude_tool: str | None = None
 ) -> dict[str, Any]:
@@ -210,12 +226,14 @@ def build_plan_user(
     recent_tools: list[str] | None = None,
     recent_kinds: list[str] | None = None,
     excluded_tool: str | None = None,
+    attention_top: list[tuple[str, int]] | None = None,
 ) -> str:
     """개입 선택 프롬프트의 user 섹션 — 신호·긴장 후보·사건 라이브러리를 근거로 제시.
 
     recent_tools/recent_kinds(있으면)로 최근 개입 흐름을 보여 같은 도구·같은 사건
     종류의 연속 반복을 감점한다 — 다양성은 판단 재료다. 단 excluded_tool은 연속
     사용 상한에 걸려 이번엔 스키마에서 빠졌다 — 프롬프트에도 고지한다 (hard rule).
+    attention_top(있으면)은 플레이어 시선의 지도다 (Narrative Gravity, ADR-013).
     """
     lines = [
         "## 상황",
@@ -231,6 +249,13 @@ def build_plan_user(
             lines.append(f"- {frm} → {to} (원한 {resentment})")
     else:
         lines.append("- (뚜렷한 긴장 없음 — 영향권 없이 순수 환경 사건도 가능)")
+    if attention_top:
+        lines += ["", "## 플레이어들의 시선 (Narrative Gravity)"]
+        for actor_id, hits in attention_top:
+            lines.append(f"- {_name(actor_id, names)}: 최근 관심 {hits}건")
+        lines.append(
+            "시선이 있는 곳의 이야기가 더 크게 울린다 — 후보가 겹치면 이쪽을 무대로."
+        )
     lines += ["", "## inject_incident로 놓을 수 있는 사건 종류 (이 목록이 전부다)"]
     for inc in incidents:
         loc = inc.get("location_id") or "장소 무관"

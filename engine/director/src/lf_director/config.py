@@ -24,6 +24,8 @@ class Config:
     personas_dir: Path = Path("agents/personas")
     observe_durable: str = "director-observe"
     sys_durable: str = "director-sys"
+    #: Narrative Gravity — 플레이어 개입(시선의 원천) 구독 (ADR-013 §관찰)
+    gravity_durable: str = "director-gravity"
     batch_size: int = 128
     fetch_timeout_s: float = 2.0
 

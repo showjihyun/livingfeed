@@ -27,6 +27,11 @@ budget:
   window_ticks: 60
   max_interventions: 2
 
+# Narrative Gravity (ADR-013 §관찰) — 플레이어 관심의 롤링 창.
+# 시선이 쏠린 인물의 긴장 쌍이 개입 후보의 앞줄로 온다 (순서만 — 후보 집합 불변)
+gravity:
+  window_ticks: 360   # 세계 하루 — 어제의 시선까지가 오늘의 무대다
+
 # boost_feed — 편집 조명 (ADR-013/014): LLM·규칙은 대상만 고른다, 강도·기간은 노브다
 # (행동 반경 제한 — 조명의 세기를 모델이 정하게 두지 않는다)
 boost:

@@ -1,6 +1,37 @@
-"""서사 신호 순수 로직 검증 — 결정성·침체 감지 (ADR-013 §관찰)."""
+"""서사 신호 순수 로직 검증 — 결정성·침체 감지·시선 추적 (ADR-013 §관찰)."""
 
-from lf_director.signals import DramaWindow, default_params, drama_contribution
+from lf_director.signals import (
+    AttentionTracker,
+    DramaWindow,
+    default_params,
+    drama_contribution,
+)
+
+
+def player_hit(tick: int, target: str, kind: str = "player.dm.sent") -> dict:
+    return {"type": kind, "tick": tick, "payload": {"target_actor_id": target}}
+
+
+def test_attention_tracker_counts_within_window():
+    """Narrative Gravity — 창 안의 플레이어 시선만 센다 (어제까지가 오늘의 무대)."""
+    tracker = AttentionTracker(window_ticks=100)
+    tracker.observe(player_hit(10, "a_minji"))
+    tracker.observe(player_hit(20, "a_minji", "player.reaction.added"))
+    tracker.observe(player_hit(30, "a_seongho", "player.comment.posted"))
+    tracker.observe({"type": "actor.action.performed", "tick": 30,
+                     "payload": {"action_kind": "work"}})  # 시선이 아니다 — 무시
+    assert tracker.scores(50) == {"a_minji": 2, "a_seongho": 1}
+    assert tracker.top(50) == [("a_minji", 2), ("a_seongho", 1)]
+    # 창(100 tick)을 벗어난 시선은 잊힌다 — tick 125에서 10·20은 창 밖, 30은 안
+    assert tracker.scores(125) == {"a_seongho": 1}
+    assert tracker.scores(200) == {}
+
+
+def test_attention_tracker_breaks_ties_deterministically():
+    tracker = AttentionTracker(window_ticks=100)
+    tracker.observe(player_hit(10, "a_b"))
+    tracker.observe(player_hit(10, "a_a"))
+    assert tracker.top(20) == [("a_a", 1), ("a_b", 1)]  # 동률은 id 순 — 리플레이 재현
 
 
 def action(kind: str, target: str | None = None) -> dict:

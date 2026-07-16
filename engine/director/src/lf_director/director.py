@@ -36,6 +36,7 @@ from lf_director.planner import (
     build_season_user,
     intervention_from_plan,
     plan_schema,
+    reorder_by_attention,
     season_from_plan,
     season_schema,
 )
@@ -50,7 +51,7 @@ from lf_director.rules import (
     decide,
     is_fireable,
 )
-from lf_director.signals import DramaWindow, default_params
+from lf_director.signals import AttentionTracker, DramaWindow, default_params
 
 logger = logging.getLogger("lf.director")
 
@@ -84,6 +85,10 @@ class Director:
         self._incidents = base["incidents"]
         self._themes = base.get("season_themes", [])
         self._window = DramaWindow(self._params)
+        #: Narrative Gravity — 플레이어 시선의 롤링 추적 (ADR-013 §관찰)
+        self._gravity = AttentionTracker(
+            window_ticks=int(base.get("gravity", {}).get("window_ticks", 360))
+        )
         self._budget = BudgetState()
         self._seen_audits: set[str] = set()
         #: 개입 선택 LLM 경로 — None이면 규칙 decide만 (dev 기본·replay). run()이 배선한다
@@ -130,6 +135,7 @@ class Director:
                 recent_tools=list(self._recent_tools),
                 recent_kinds=list(self._recent_kinds),
                 excluded_tool=capped,
+                attention_top=self._gravity.top(snapshot.tick),
             )
             output, model = await self._ai.plan_intervention(
                 DIRECTOR_SYSTEM, user, schema,
@@ -207,9 +213,15 @@ class Director:
         tension = (
             await graph.tension_pairs(cfg.world_id) if graph is not None else []
         )
+        # Narrative Gravity — 시선이 쏠린 인물의 긴장 쌍이 무대 앞줄로 (ADR-013 §관찰)
+        attention = self._gravity.scores(snapshot.tick)
+        tension = reorder_by_attention(tension, attention)
         intervention = await self._select(snapshot, tension)
         if intervention is None:
             return False
+        top_attention = self._gravity.top(snapshot.tick)
+        if top_attention:
+            intervention.signals["attention_top"] = [list(a) for a in top_attention]
         # 다양성 메트릭 — 최근 도구 흐름과 연속 사용 횟수(repeat_streak)를 감사에
         # 남긴다. streak 1이 다양, 커질수록 기계적이다 (리플레이 튜닝의 정량 지표)
         streak = 1
@@ -399,6 +411,11 @@ class Director:
                     f"lf.{cfg.env}.{cfg.world_id}.system.>",
                     durable=cfg.sys_durable, stream="LF_SYS",
                 )
+                # Narrative Gravity — 플레이어 개입이 시선의 원천이다 (ADR-013 §관찰)
+                gravity = await js.pull_subscribe(
+                    f"lf.{cfg.env}.{cfg.world_id}.player.>",
+                    durable=cfg.gravity_durable, stream="LF_PLAYER",
+                )
                 logger.info(
                     "director 대기 — world=%s quiet_to_fire=%s 개입선택=%s",
                     cfg.world_id, self._params["observation"]["quiet_ticks_to_fire"],
@@ -406,7 +423,9 @@ class Director:
                 )
                 while not stop.is_set():
                     # 관찰 먼저 비우고 tick 경계를 처리한다 (신호가 경계에 선행)
-                    for psub, handler in ((observe, "observe"), (system, "system")):
+                    for psub, handler in (
+                        (observe, "observe"), (gravity, "gravity"), (system, "system")
+                    ):
                         try:
                             msgs = await psub.fetch(
                                 cfg.batch_size, timeout=cfg.fetch_timeout_s
@@ -418,6 +437,8 @@ class Director:
                                 envelope = json.loads(msg.data)
                                 if handler == "observe":
                                     self._window.observe(envelope)
+                                elif handler == "gravity":
+                                    self._gravity.observe(envelope)
                                 elif envelope["type"] == "system.tick.completed":
                                     snapshot = self._window.close_tick(envelope["tick"])
                                     # 시즌·아크 계획은 저빈도(세계 하루 1회) — 드라마

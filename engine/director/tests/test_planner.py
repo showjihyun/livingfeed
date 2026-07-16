@@ -13,6 +13,7 @@ from lf_director.planner import (
     candidate_actor_ids,
     intervention_from_plan,
     plan_schema,
+    reorder_by_attention,
     season_from_plan,
     season_schema,
 )
@@ -73,6 +74,26 @@ def test_season_schema_lists_themes():
 def test_candidate_actor_ids_are_distinct_in_order():
     assert candidate_actor_ids(TENSION) == ["a_minji", "a_seongho", "a_aria", "a_junho"]
     assert candidate_actor_ids([]) == []
+
+
+def test_reorder_by_attention_moves_watched_pair_first():
+    """Narrative Gravity — 시선이 쏠린 쌍이 앞줄로, 후보 집합은 불변 (순서만)."""
+    reordered = reorder_by_attention(TENSION, {"a_junho": 3})
+    assert reordered[0][:2] == ["a_aria", "a_junho"]  # 시선의 쌍이 무대 앞줄
+    assert sorted(map(tuple, reordered)) == sorted(map(tuple, TENSION))  # 집합 불변
+    # 시선이 없으면 원래(긴장 강도) 순서 그대로 — 안정 정렬
+    assert reorder_by_attention(TENSION, {}) == TENSION
+    assert reorder_by_attention(TENSION, {"a_unknown": 9}) == TENSION
+
+
+def test_build_plan_user_shows_attention():
+    user = build_plan_user(
+        SNAP, TENSION, INCIDENTS, NAMES, attention_top=[("a_minji", 4)],
+    )
+    assert "플레이어들의 시선" in user
+    assert "김민지: 최근 관심 4건" in user
+    plain = build_plan_user(SNAP, TENSION, INCIDENTS, NAMES)
+    assert "플레이어들의 시선" not in plain  # 시선이 없으면 섹션 생략
 
 
 # --- inject_incident 도구 -----------------------------------------------------

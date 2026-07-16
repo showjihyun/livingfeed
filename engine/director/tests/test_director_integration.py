@@ -214,6 +214,35 @@ async def test_llm_promote_spotlights_actor_on_system_stream(conn):
     assert await read_stream(conn, WORLD, "world", "observations") == []
 
 
+async def test_narrative_gravity_moves_watched_pair_to_stage(conn):
+    """Narrative Gravity — 플레이어 시선이 쏠린 인물의 긴장 쌍이 무대 앞줄로 오고,
+    시선이 프롬프트와 감사에 남는다 (ADR-013 §관찰). 후보 집합은 불변 — 순서만."""
+    ai = _StubAiClient(None)  # LLM 무응답 → 규칙 폴백 (재정렬된 앞줄이 대상이 된다)
+    director = make_llm_director(ai)
+    # 긴장은 (민지,성호)가 더 높지만, 시선은 (아리아,준호) 쌍의 준호에게 쏠렸다
+    tension = [
+        ["a_minji_kim", "a_seongho_park", 0.9, 0.2],
+        ["a_aria_kim", "a_junho_park", 0.5, 0.1],
+    ]
+    for tick in (100, 105, 110):
+        director._gravity.observe({
+            "type": "player.dm.sent", "tick": tick,
+            "payload": {"target_actor_id": "a_junho_park"},
+        })
+
+    fired = await director.evaluate(
+        conn, Snapshot(tick=120, drama_ma=0.05, quiet_ticks=30), _StubGraph(tension)
+    )
+    assert fired
+    assert "플레이어들의 시선" in ai.calls[0]["user"]  # LLM에게 시선의 지도가 갔다
+
+    [audit] = [s.envelope for s in await read_stream(conn, WORLD, "system", "director")]
+    signals = audit["payload"]["signals"]
+    assert signals["attention_top"] == [["a_junho_park", 3]]
+    # 재정렬 반영 — 시선의 쌍이 tension_top 앞줄이다 (규칙 대상 선택의 원천)
+    assert signals["tension_top"][0][:2] == ["a_aria_kim", "a_junho_park"]
+
+
 async def test_llm_boost_lights_feed_on_system_stream(conn):
     # 네 번째 도구: boost_feed → system.director.feed_boosted (편집 제어 신호)
     tension = [["a_minji_kim", "a_seongho_park", 0.8, 0.2]]
