@@ -1,4 +1,4 @@
-"""dispatcher 서비스 엔트리포인트 — outbox relay (ADR-017).
+"""dispatcher 서비스 엔트리포인트 — outbox relay + advisory 안전망 (ADR-017).
 
 실행:
     uv run --package lf-dispatcher python -m lf_dispatcher.main
@@ -13,6 +13,7 @@ import logging
 import signal
 import sys
 
+from lf_dispatcher.advisory import run_advisory_watcher
 from lf_dispatcher.config import Config
 from lf_dispatcher.relay import run_relay
 
@@ -24,7 +25,12 @@ async def run() -> None:
         # Windows 로컬 실행 등 add_signal_handler 미지원 환경은 Ctrl+C(KeyboardInterrupt)로 종료
         with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, stop.set)
-    await run_relay(Config.from_env(), stop=stop)
+    cfg = Config.from_env()
+    # relay(발행)와 advisory 안전망(DLQ 재발행)이 나란히 돈다 (ADR-017 §1·§4)
+    await asyncio.gather(
+        run_relay(cfg, stop=stop),
+        run_advisory_watcher(cfg, stop=stop),
+    )
 
 
 def main() -> None:

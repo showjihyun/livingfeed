@@ -1,8 +1,8 @@
 """JetStream 스트림 프로비저닝 (ADR-004 §Stream 구성).
 
 dispatcher가 시작 시 멱등하게 보장한다. 스트림 정의 변경은 ADR-004 개정 사항.
-LF_PLAYER/LF_DLQ는 ADR-004 표의 보완이다 — envelope의 player 스트림과
-DLQ subject(lf.<env>.dlq.>, ADR-017 §4)를 받을 스트림이 필요하다.
+LF_PLAYER/LF_DLQ/LF_ADVISORY는 ADR-004 표의 보완이다 — envelope의 player 스트림,
+DLQ subject(lf-dlq.>, ADR-017 §4), advisory 안전망 소스가 각각 필요하다.
 """
 
 from __future__ import annotations
@@ -16,6 +16,12 @@ from nats.js.errors import NotFoundError
 
 #: 발행 멱등성 창 — relay 재시도 중복을 Nats-Msg-Id로 흡수한다 (ADR-017 §1)
 DUPLICATE_WINDOW = timedelta(minutes=2)
+
+#: 소비자가 max_deliver를 소진하면 JetStream이 발행하는 advisory subject (ADR-017 §4)
+MAX_DELIVERIES_ADVISORY = "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.>"
+
+#: advisory 안전망(advisory.py)이 소비하는 스트림 이름
+ADVISORY_STREAM = "LF_ADVISORY"
 
 _DAY = 86_400
 
@@ -38,6 +44,9 @@ STREAMS: tuple[StreamSpec, ...] = (
     # DLQ: 운영자 도구가 소비 — 재처리/폐기 판단 시간을 벌기 위해 14일 (ADR-017 §4)
     # 프리픽스가 lf-dlq 인 이유는 subjects.dlq_subject docstring 참고 (패턴 중첩 금지)
     StreamSpec("LF_DLQ", ("lf-dlq.>",), 14 * _DAY),
+    # advisory 안전망의 소스 — 코어 구독은 dispatcher가 내려간 동안의 advisory를
+    # 놓친다. 스트림으로 붙잡아야 안전망 자신도 at-least-once다 (ADR-017 §4, advisory.py)
+    StreamSpec(ADVISORY_STREAM, (MAX_DELIVERIES_ADVISORY,), 2 * _DAY),
 )
 
 
