@@ -59,8 +59,11 @@ uv run --package lf-projector python -m lf_projector.main --kind pg --verify [--
   exit 0을 확인하면 사이클이 닫힌다.
 - os(OpenSearch)는 verify가 없다 — `_id=event_id` upsert 멱등이라 의심되면 바로
   `--kind os --rebuild --once`.
-- **재구축의 원천은 JetStream 스트림이다** — 스트림 보존 한도를 넘긴 과거
-  이벤트는 재소비되지 않는다. es(SoT)로부터의 완전 재구축은 후속 조각.
+- 재구축은 두 원천이 있다: `--rebuild --once`는 **JetStream 스트림**을 재소비
+  (보존 한도 내 — 빠른 따라잡기), `--rebuild --from-es`는 **es(SoT)를 직접
+  리플레이**한다 — NATS 불요·보존 한도 무관, 스트림이 유실됐어도 전 역사를
+  되세운다. from-es는 해당 프로젝터 서비스를 멈추고 돌린다 (재기동 시 durable
+  체크포인트부터 이어가고, 겹침은 프로젝션 멱등이 흡수한다).
 - 소비 지연은 배치가 아니라 상시 로그로 본다: 각 프로젝터가
   `projection_lag_seconds max=… avg=… count=…`를 주기 발화한다 (ADR-020 §1, 예산 <2s).
 
