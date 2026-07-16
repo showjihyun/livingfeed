@@ -9,6 +9,9 @@
 
 두 스트림(LF_ACTOR, LF_PLAYER)을 durable 두 개로 나란히 소비한다 —
 대화 히스토리는 양방향(플레이어 발신 + 액터 응답)이 모여야 완성된다.
+
+처리 성공마다 프로젝션 lag(발생→반영)를 기록하고 주기적으로
+projection_lag_seconds 로그를 낸다 — 예산 <2s의 관찰 수단 (ADR-020 §1).
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 import nats
@@ -25,6 +29,7 @@ from nats.js.errors import NotFoundError
 from psycopg import AsyncConnection
 
 from lf_projector.config import Config
+from lf_projector.lag import LagAggregator, lag_seconds
 from lf_projector.pg_read import ReadStore
 
 logger = logging.getLogger("lf.projector.pg")
@@ -42,6 +47,8 @@ SOURCES: tuple[tuple[str, str], ...] = (
 class PgProjector:
     def __init__(self, cfg: Config) -> None:
         self._cfg = cfg
+        #: 프로젝션 lag 계측 — 예산 <2s의 관찰 수단, 세 스트림 공용 (ADR-020 §1)
+        self._lag = LagAggregator()
 
     def _durable(self, stream: str) -> str:
         return f"{self._cfg.pg_durable}-{stream.removeprefix('LF_').lower()}"
@@ -69,7 +76,8 @@ class PgProjector:
     async def _handle(self, msg: Any, store: ReadStore, js: Any) -> None:
         cfg = self._cfg
         try:
-            applied = await store.apply(json.loads(msg.data))
+            envelope = json.loads(msg.data)
+            applied = await store.apply(envelope)
         except (json.JSONDecodeError, KeyError, TypeError) as e:
             # 독약 봉투 — 재전달로 나아질 수 없다 (ADR-017 §4)
             await self._to_dlq(msg, js, reason=repr(e))
@@ -82,7 +90,23 @@ class PgProjector:
         else:
             if applied:
                 logger.debug("반영 — %s", msg.subject)
+            self._observe_lag(envelope)
             await msg.ack()
+
+    def _observe_lag(self, envelope: dict[str, Any]) -> None:
+        """처리 성공 봉투의 발생→반영 지연 기록 (ADR-020 §1) — 실패는 ack를 막지 않는다."""
+        try:
+            now = datetime.now(UTC)
+            summary = self._lag.record(lag_seconds(envelope["occurred_at"], now), now)
+        except (KeyError, TypeError, ValueError):
+            # 계측은 부수 관찰이다 — occurred_at 결손·오형식이 프로젝션을 죽여선 안 된다
+            logger.debug("lag 계측 불가 — occurred_at=%r", envelope.get("occurred_at"))
+            return
+        if summary is not None:
+            logger.info(
+                "projection_lag_seconds max=%.3f avg=%.3f count=%d",
+                summary.max_s, summary.avg_s, summary.count,
+            )
 
     async def _to_dlq(self, msg: Any, js: Any, *, reason: str) -> None:
         subj = dlq_subject(self._cfg.env, msg.subject)
