@@ -39,6 +39,7 @@ from lf_director.planner import (
     season_from_plan,
     season_schema,
 )
+from lf_director.retrospect import season_retrospective
 from lf_director.rules import (
     ARC_TOOL,
     SEASON_TOOL,
@@ -279,6 +280,26 @@ class Director:
         )
         return True
 
+    async def review_season(self, conn: AsyncConnection, day: int) -> dict[str, Any] | None:
+        """지난 시즌-일의 회고 — 구조화 로그로 남긴다 (ADR-013 후속).
+
+        회고는 이벤트의 파생물이라 이벤트로 적재하지 않는다 — 리플레이
+        (season_retrospective)로 언제든 재생성된다. 원본/파생 경계를 지킨다.
+        실패해도 연출은 계속된다 (회고는 눈이지 손이 아니다).
+        """
+        try:
+            report = await season_retrospective(
+                conn, self._cfg.world_id, day,
+                interval_ticks=self._cfg.season_interval_ticks,
+            )
+        except Exception:
+            logger.exception("시즌 회고 실패 — 연출은 계속된다 (day=%d)", day)
+            return None
+        logger.info(
+            "시즌 회고 day=%d: %s", day, json.dumps(report, ensure_ascii=False)
+        )
+        return report
+
     def _restore_budget(self, envelope: dict[str, Any]) -> None:
         """자기 감사 이벤트 재소비 → 예산 복원 (자기가 방금 적재한 것은 중복 방지).
 
@@ -360,7 +381,11 @@ class Director:
                                     # 게이트와 분리된 케이던스로 (ADR-013). 예산도 따로다.
                                     day = envelope["tick"] // cfg.season_interval_ticks
                                     if day > self._last_season_day:
+                                        previous = self._last_season_day
                                         self._last_season_day = day
+                                        if previous >= 0:
+                                            # 지난 날을 돌아보고 새 날을 계획한다
+                                            await self.review_season(conn, previous)
                                         await self.plan_season(conn, snapshot)
                                         await self.plan_arcs(conn, snapshot)
                                     await self.evaluate(conn, snapshot, graph)

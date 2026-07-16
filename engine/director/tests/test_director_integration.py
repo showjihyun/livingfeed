@@ -377,6 +377,27 @@ async def test_plan_arcs_rejects_hallucinated_target(conn):
     assert await read_stream(conn, WORLD, "system", "director") == []
 
 
+async def test_review_season_folds_previous_day_as_log(conn):
+    """시즌 회고 자동화 — 지난 날의 연출을 접어 리포트를 돌려준다 (이벤트가 아니라
+    로그: 파생물은 리플레이로 재생성 가능하니 원본/파생 경계를 지킨다)."""
+    director = make_director()
+    # day 0의 개입 두 건 (tick 10, 130 — 예산 창 분리)
+    assert await director.evaluate(
+        conn, Snapshot(tick=10, drama_ma=0.05, quiet_ticks=30), graph=None
+    )
+    assert await director.evaluate(
+        conn, Snapshot(tick=130, drama_ma=0.05, quiet_ticks=30), graph=None
+    )
+    report = await director.review_season(conn, 0)
+    assert report is not None
+    assert report["tick_range"] == [0, 360]
+    assert report["interventions"]["total"] == 2
+    assert report["interventions"]["by_selector"] == {"rule": 2}
+    # day 1은 조용했다 — 빈 리포트도 리포트다
+    quiet = await director.review_season(conn, 1)
+    assert quiet["interventions"]["total"] == 0
+
+
 def test_apply_season_updates_pacing_params_and_current_theme():
     # 자기 season_set 이벤트 소비 → 개입 빈도 파라미터 + 현재 테마 갱신 (이벤트 소싱)
     director = make_director()
