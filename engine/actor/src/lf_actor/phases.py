@@ -233,6 +233,36 @@ class ActorPhases:
         #: 재기상 정산(catch-up)의 관계 감쇠 발행분 — CONSOLIDATE 관계 적재에 합류
         self._rel_catchup: list[PendingRelEvent] = []
 
+    def refresh_personas(
+        self, personas: list[Persona], *, tick: int
+    ) -> tuple[list[str], list[str]]:
+        """리로드된 명부를 tick 경계에서 반영한다 (페르소나 스튜디오 핫 리로드).
+
+        - 새 액터: 현재 tick 기준 Hot — 등장 직후 첫 decide가 바로 나온다 (데뷔).
+          정체성 선언은 다음 world()의 몫이다 (SETNX가 재선언을 막는다 — 세계당 1회).
+        - 사라진(휴면) 액터: 명부·LOD·진행 중 자료구조에서 제거 — 남는 참조는
+          .get 기반이라 결손 키에 관대하다. 역사·관계는 이벤트에 남는다.
+        - 필드 변경: Persona 객체 교체 — 다음 decide부터 새 결.
+        반환: (추가된 id들, 제거된 id들) — 호출자의 로그 한 줄용.
+        """
+        if not personas:
+            raise ValueError("액터가 없다 — 최소 1명의 페르소나가 필요하다")
+        incoming = {p.id: p for p in personas}
+        added = sorted(set(incoming) - set(self._personas))
+        removed = sorted(set(self._personas) - set(incoming))
+        self._personas = incoming
+        for actor_id in added:
+            self._lods[actor_id] = ActorLod(tier=Tier.HOT, last_interest_tick=tick)
+        for actor_id in removed:
+            self._lods.pop(actor_id, None)
+            self._inbox.pop(actor_id, None)
+            self._seen_posts.pop(actor_id, None)
+            self._last_decay.pop(actor_id, None)
+            self._ledger_dirty.discard(actor_id)
+            # 재등장 시 world()가 Redis SETNX를 다시 확인한다 — 재선언은 없다
+            self._declared.discard(actor_id)
+        return added, removed
+
     async def schedule(self, ctx: TickContext) -> dict[str, int]:
         return scheduled_counts(self._lods, ctx.tick)
 
@@ -274,6 +304,9 @@ class ActorPhases:
                         "archetype": persona.archetype or "unknown",
                         "bio": bio or persona.name,
                         "goals": goals,
+                        # 저자성 — 스튜디오 태생이면 빚은 플레이어, 시스템 태생은 null.
+                        # '당신이 빚은 인물' 데뷔 표식의 원천이다 (페르소나 스튜디오)
+                        "created_by": persona.created_by,
                     },
                 )
             ],

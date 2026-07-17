@@ -139,6 +139,10 @@ class FeedFanout:
             default_params()["social"]["feed_fanout"] if limit is None else limit
         )
 
+    def set_roster(self, roster: Sequence[str]) -> None:
+        """리로드된 명부 반영 — 새 액터도 피드 순환의 독자·이웃이 된다 (핫 리로드)."""
+        self._roster = list(roster)
+
     async def targets(self, envelope: dict[str, Any]) -> list[str]:
         payload = envelope["payload"]
         if payload.get("visibility") != "world":

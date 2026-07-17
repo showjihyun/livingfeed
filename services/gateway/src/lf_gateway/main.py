@@ -34,6 +34,7 @@ from lf_projector.graph_api import GraphQueryClient
 from psycopg import AsyncConnection
 from redis.asyncio import Redis
 
+from lf_gateway.admin import create_admin_router
 from lf_gateway.config import Config
 from lf_gateway.feed_stream import (
     FEED_KINDS,
@@ -98,13 +99,16 @@ def create_app(cfg: Config | None = None, nc: nats.NATS | None = None) -> FastAP
                 await connection.drain()
 
     app = FastAPI(title="lf-gateway", lifespan=lifespan)
-    # 브라우저 EventSource/fetch — 웹 앱(기본 localhost:3000)의 교차 출처 허용
+    # 브라우저 EventSource/fetch — 웹 앱(기본 localhost:3000)의 교차 출처 허용.
+    # PUT은 페르소나 스튜디오(관리 API)의 저장 경로다
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(cfg.cors_origins),
-        allow_methods=["GET"],
+        allow_methods=["GET", "PUT"],
         allow_headers=["*"],
     )
+    # 페르소나 스튜디오 — 파일(SoT) CRUD 중재, es 적재 없음 (admin.py)
+    app.include_router(create_admin_router(cfg))
     if not owned_nc:
         app.state.js = nc.jetstream()
         app.state.graph = GraphQueryClient(nc, cfg.env)

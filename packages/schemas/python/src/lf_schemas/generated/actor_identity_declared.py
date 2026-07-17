@@ -34,3 +34,7 @@ class ActorIdentityDeclared(BaseModel):
     goals: list[Goal] = Field(
         ..., description="공개 목표 (프로필 표시) — 우선순위순은 소비자 몫"
     )
+    created_by: constr(pattern=r"^p_[a-z0-9_]+$") | None = Field(
+        None,
+        description="이 인물을 빚은 플레이어 (페르소나 스튜디오) — 저자성 표식의 원천. 시스템 태생이면 null/생략 (하위 호환)",
+    )

@@ -28,10 +28,10 @@ from lf_actor.ledger import DecayLedger
 from lf_actor.mailbox import Mailbox, run_mailbox_router
 from lf_actor.memory import WorkingMemory
 from lf_actor.outreach import OutreachLedger
-from lf_actor.persona import load_personas
 from lf_actor.phases import ActorPhases
 from lf_actor.reflection import BeliefLedger
 from lf_actor.relationship import RelationshipAdapter
+from lf_actor.reload import PersonaReloader, ReloadingPhases
 from lf_actor.semantic import SemanticMemory
 from lf_actor.social import FeedFanout
 
@@ -53,7 +53,9 @@ async def run() -> None:
     # LLM decide 응답 예산 — reasoning 모델은 더 오래 걸릴 수 있다 (tick 예산 안에서)
     ai_timeout_s = float(os.environ.get("LF_AI_TIMEOUT_S", "10"))
 
-    personas = load_personas(personas_dir)
+    # 핫 리로드 감지기 — 스튜디오가 파일(SoT)을 바꾸면 tick 경계에서 세계에 반영된다
+    reloader = PersonaReloader(personas_dir)
+    personas = reloader.load()
     logger.info("페르소나 %d명 로드: %s", len(personas), ", ".join(p.id for p in personas))
 
     qdrant_url = os.environ.get("LF_QDRANT_URL", "http://localhost:6333")
@@ -86,9 +88,15 @@ async def run() -> None:
         # 액터 소셜 루프 — 피드 포스트를 관계 이웃에게, 액터 댓글을 글 작성자에게
         # (배달 수는 params.yaml social.feed_fanout이 원천)
         fanout = FeedFanout(relationship, [p.id for p in personas])
+        # 리로드는 tick 경계(schedule 직전)에서만 — 새 액터는 Hot 데뷔, 명부는
+        # fanout까지 따라온다. tick 중간 변경 금지 (reload.py)
+        reloading = ReloadingPhases(
+            phases, reloader,
+            on_reload=lambda ps: fanout.set_roster([p.id for p in ps]),
+        )
         # tick 루프와 메일박스 라우터(LF_PLAYER → Redis)가 나란히 돈다 (ADR-012)
         await asyncio.gather(
-            run_tick_loop(cfg, phases, stop=stop),
+            run_tick_loop(cfg, reloading, stop=stop),
             run_mailbox_router(nc, mailbox, env, stop=stop, fanout=fanout),
         )
     finally:

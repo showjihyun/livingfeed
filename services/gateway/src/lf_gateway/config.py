@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,12 @@ class Config:
     #: 롱폴링 최대 대기 (SSE 불가 환경 폴백, ADR-010)
     poll_max_wait_s: float = 25.0
     poll_batch: int = 100
+    #: 페르소나 스튜디오 관리 API의 파일 디렉터리 — 파일이 SoT다 (ADR-001/012).
+    #: 세계 반영은 tick 워커 핫 리로드의 몫 — gateway는 파일만 다룬다
+    personas_dir: Path = field(default_factory=lambda: Path("agents/personas"))
+    #: 관리 API 공유 토큰 — 설정되면 /admin/* 에 Authorization: Bearer 일치를
+    #: 요구한다(403). 미설정(dev)은 열림 — 로컬 밖 노출 전 반드시 설정하라
+    admin_token: str | None = None
 
     @classmethod
     def from_env(cls) -> Config:
@@ -44,4 +51,6 @@ class Config:
             redis_url=os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
             session_token=os.environ.get("LF_SESSION_TOKEN") or None,
             cors_origins=tuple(o.strip() for o in origins.split(",") if o.strip()),
+            personas_dir=Path(os.environ.get("LF_PERSONAS_DIR", "agents/personas")),
+            admin_token=os.environ.get("LF_ADMIN_TOKEN") or None,
         )

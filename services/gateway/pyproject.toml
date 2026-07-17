@@ -8,6 +8,8 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "nats-py>=2.9",
     "redis>=5.0",
+    # 페르소나 스튜디오 관리 API — agents/personas yaml(SoT) 읽기/쓰기
+    "pyyaml>=6",
     "lf-schemas",
     # WS 세션이 player.* 이벤트를 적재한다 (ADR-010/017 — append가 유일한 쓰기 경로)
     "lf-eventstore",
