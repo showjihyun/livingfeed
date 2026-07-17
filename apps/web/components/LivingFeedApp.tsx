@@ -22,6 +22,7 @@ import { HiddenTab } from "./HiddenTab";
 import { Onboarding } from "./Onboarding";
 import { ProfileTab } from "./ProfileTab";
 import { Sidebar } from "./Sidebar";
+import { StudioTab } from "./StudioTab";
 import { Toasts } from "./Toasts";
 
 const ME_COMMENT = { bg: "#EDF3FD", avatarBg: "#D9E2F2" };
@@ -321,6 +322,10 @@ export function LivingFeedApp() {
           />
         )}
         {tab === "hidden" && <HiddenTab items={hidden.items} nameOf={authorName} />}
+        {tab === "studio" && (
+          // 창조자 도구 — 인물을 빚어 세계에 풀어놓는다. 데뷔는 World Feed에서 지켜본다.
+          <StudioTab enabled={screen === "app"} onGoWorldFeed={() => setTab("feed")} />
+        )}
         {tab === "graph" && (
           <GraphTab
             edges={relGraph.edges}

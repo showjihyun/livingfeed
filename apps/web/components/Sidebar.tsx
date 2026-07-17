@@ -139,6 +139,39 @@ export function Sidebar({
         </div>
       )}
 
+      {/* 창조자 도구 — 관전 탭들과 결이 다르다: 세계를 보는 곳이 아니라 빚는 곳 (공방 톤) */}
+      <div
+        style={{
+          margin: "10px 10px 4px",
+          borderTop: "1.5px solid #E2EAF6",
+          paddingTop: 10,
+          fontSize: 11,
+          fontWeight: 800,
+          color: "#A9B2C7",
+          letterSpacing: 0.5,
+        }}
+      >
+        창조자 도구
+      </div>
+      <div
+        onClick={() => onSelectTab("studio")}
+        className={styles.navItem}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "11px 14px",
+          borderRadius: 14,
+          cursor: "pointer",
+          background: tab === "studio" ? "#ffffff" : undefined,
+          color: tab === "studio" ? "#A97E2F" : "#6B7691",
+          boxShadow: tab === "studio" ? "0 4px 12px rgba(176,132,48,0.14)" : "none",
+        }}
+      >
+        <Icon d={ICON.wrench} size={18} />
+        <div style={{ fontSize: 15, fontWeight: 700, flex: 1 }}>스튜디오</div>
+      </div>
+
       <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
         <div
           style={{

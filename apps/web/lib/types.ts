@@ -1,6 +1,6 @@
 export type Screen = "onboarding" | "curating" | "app";
 
-export type Tab = "feed" | "profile" | "dm" | "graph" | "hidden";
+export type Tab = "feed" | "profile" | "dm" | "graph" | "hidden" | "studio";
 
 export type ToastIcon = "check" | "git-branch" | "feather" | "lock-open" | "user-round";
 
