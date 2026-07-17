@@ -1,4 +1,5 @@
 import { TOPIC_LIST } from "@/lib/data";
+import { useWorldClock } from "@/lib/world-clock";
 
 import { Face } from "./Face";
 import styles from "./lf.module.css";
@@ -11,6 +12,8 @@ interface OnboardingProps {
 }
 
 export function Onboarding({ topics, onToggleTopic, worldTime, onEnter }: OnboardingProps) {
+  // 사이드바와 같은 원천 — tick 앵커가 없으면(연결 전이 보통) 기존 prop 시계로 폴백
+  const clock = useWorldClock(worldTime);
   return (
     <div
       style={{
@@ -93,7 +96,7 @@ export function Onboarding({ topics, onToggleTopic, worldTime, onEnter }: Onboar
             }}
           />
           <div style={{ fontSize: 13, color: "#6B7691", fontWeight: 600 }}>
-            지금 세계 시간 {worldTime} · 세계는 당신 없이도 제 갈 길을 가는 중
+            지금 세계 시간 {clock} · 세계는 당신 없이도 제 갈 길을 가는 중
           </div>
         </div>
         <div

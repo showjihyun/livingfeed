@@ -1,5 +1,6 @@
 import { ICON, NAV_DEFS } from "@/lib/data";
 import type { Tab } from "@/lib/types";
+import { useWorldClock } from "@/lib/world-clock";
 
 import { Face } from "./Face";
 import { Icon } from "./Icon";
@@ -22,6 +23,8 @@ export function Sidebar({
   worldTime,
   interventions,
 }: SidebarProps) {
+  // 세계 시간의 진실은 엔진 tick이다 — 앵커 관측 전(연결 전)에는 기존 prop 시계로 폴백
+  const clock = useWorldClock(worldTime);
   return (
     <div
       style={{
@@ -188,7 +191,7 @@ export function Sidebar({
             <Icon d={ICON.clock} size={14} color="#8C97AF" />
             <div style={{ fontSize: 12, fontWeight: 800, color: "#8C97AF" }}>세계 시간</div>
           </div>
-          <div style={{ fontSize: 19, fontWeight: 800 }}>{worldTime}</div>
+          <div style={{ fontSize: 19, fontWeight: 800 }}>{clock}</div>
           <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}>
             현실의 4배속으로 흐르는 중
           </div>

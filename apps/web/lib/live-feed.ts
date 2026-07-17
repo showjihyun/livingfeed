@@ -14,6 +14,7 @@ import { createTransport } from "@livingfeed/api-client";
 import type { EventEnvelope, FeedPostPublished } from "@livingfeed/schemas";
 
 import { PLAYER_ID } from "./config";
+import { observeTick } from "./world-clock";
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_LF_GATEWAY_URL ?? "http://localhost:8000";
 const FEED_API_URL = process.env.NEXT_PUBLIC_LF_FEED_API_URL ?? "http://localhost:8001";
@@ -39,6 +40,8 @@ export interface LivePost {
 /** feed-api 응답 아이템 — os-projector가 평탄화한 색인 문서 */
 interface FeedDoc {
   event_id: string;
+  /** 발생 시점의 세계 tick (ADR-011) — 세계 시계의 앵커 (lib/world-clock) */
+  tick: number;
   /** 세계 사건(Director incident) 포스트는 작성자가 없다 */
   actor_id: string | null;
   participants: string[];
@@ -113,6 +116,7 @@ export function useLiveFeed(enabled: boolean): { posts: LivePost[]; status: Live
       feeds: ["world"],
       onItem: (envelope) => {
         setStatus("live");
+        observeTick(envelope.tick); // 세계 시계 앵커 — tick이 진실이다 (lib/world-clock)
         add([fromEnvelope(envelope)]);
       },
       onError: () => {
@@ -129,6 +133,7 @@ export function useLiveFeed(enabled: boolean): { posts: LivePost[]; status: Live
         );
         if (!response.ok) throw new Error(`feed-api ${response.status}`);
         const body = (await response.json()) as { items: FeedDoc[] };
+        for (const doc of body.items) observeTick(doc.tick); // 초기 문서 tick도 시계 앵커
         add(body.items.map(fromDoc));
         if (!cancelled) setStatus("live");
       } catch {
