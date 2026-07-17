@@ -16,6 +16,7 @@ import { naturalDelayMs, useActorSession } from "@/lib/session";
 import type { DmMessage, FeedComment, Screen, Tab, Toast } from "@/lib/types";
 
 import { Curating } from "./Curating";
+import { Digest } from "./Digest";
 import { DmTab } from "./DmTab";
 import { FeedTab } from "./FeedTab";
 import { GraphTab } from "./GraphTab";
@@ -450,6 +451,9 @@ export function LivingFeedApp() {
           />
         )}
       </div>
+
+      {/* 개인 다이제스트 — 입장 직후 부재가 임계 이상이면 재회 카드 (plan/11 §D7) */}
+      {screen === "app" && <Digest nameOf={authorName} />}
 
       <Toasts toasts={toasts} onClose={closeToast} />
     </div>
