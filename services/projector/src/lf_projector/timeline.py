@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from redis.asyncio import Redis
@@ -61,16 +62,45 @@ _MILESTONE_LABELS: dict[str, str] = {
 }
 
 
+#: note/reason에 실려 오는 내부 표기 → 사람 말 (내레이터 결 — 기계 어휘 비노출)
+_INTERACTION_LABELS: dict[str, str] = {
+    "player.reaction.added": "좋아요",
+    "player.comment.posted": "댓글",
+    "player.dm.sent": "DM",
+}
+
+_MACHINE_TOKEN = re.compile(r"^[a-z_]+(\.[a-z_]+)+")
+
+
+def _humanize_note(note: str) -> str:
+    """엔진 note의 이벤트 타입 토큰을 사람 말로 — 못 옮기는 기계 표기는 버린다.
+
+    숫자가 든 사유("감정 응고: gratitude 0.69")도 통째로 버린다 — 리시트는
+    수치를 노출하지 않는다 (도파민 §붕괴 방어, 조작감 방지). 침묵이 노출보다 낫다.
+    """
+    match = _MACHINE_TOKEN.match(note)
+    if match is not None:
+        label = _INTERACTION_LABELS.get(match.group(0))
+        if label is None:
+            return ""
+        note = label + note[match.end():]
+    if re.search(r"\d", note):
+        return ""
+    return note
+
+
 def _receipt_narration(envelope: dict[str, Any]) -> tuple[str, str] | None:
     """(정성 문장, 엔진이 쓴 사유) — 배달할 만큼의 변화가 아니면 None."""
     p = envelope["payload"]
     if envelope["type"] == "relationship.milestone.reached":
         kind = p["milestone"]
-        return _MILESTONE_LABELS.get(kind, kind), p.get("note", "")
+        return _MILESTONE_LABELS.get(kind, kind), _humanize_note(p.get("note", ""))
     dominant, delta = max(p["deltas"].items(), key=lambda item: abs(item[1]))
     if abs(delta) < RECEIPT_DELTA_FLOOR:
         return None  # 미미한 변화는 리시트가 아니라 스팸이다
-    return _RECEIPT_SENTENCES[(dominant, 1 if delta > 0 else -1)], p.get("reason", "")
+    return _RECEIPT_SENTENCES[(dominant, 1 if delta > 0 else -1)], _humanize_note(
+        p.get("reason", "")
+    )
 
 
 def receipt_doc(envelope: dict[str, Any]) -> dict[str, Any] | None:

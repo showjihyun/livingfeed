@@ -115,11 +115,39 @@ def test_milestone_receipt_labels_known_kind_and_falls_back_on_unknown():
     first_met = receipt_doc(base)
     assert first_met["visibility"] == "private"
     assert "서로를 알게 됐다" in first_met["body"]
-    assert first_met["body"].startswith(base["payload"]["note"])
+    # 샘플 note는 원시 플레이어 id(숫자 포함)를 담고 있다 — 리시트는 수치·원시
+    # id를 노출하지 않으므로 사유가 버려지고 정성 문장만 남는다
+    assert "p_observer" not in first_met["body"]
 
     unknown = dict(base)
     unknown["payload"] = dict(base["payload"], milestone="quantum_entangled", note="")
     assert "quantum_entangled" in receipt_doc(unknown)["body"]
+
+
+def test_receipt_note_translates_machine_tokens_to_human_words():
+    """note의 이벤트 타입 토큰은 사람 말로 — 기계 어휘를 화면 문장에 싣지 않는다
+    (내레이터 결, 2026-07-17 라이브 관측: 'player.reaction.added(으)로 처음 연결됐다')."""
+    base = sample("relationship.milestone.reached")
+
+    liked = dict(base)
+    liked["payload"] = dict(
+        base["payload"], note="player.reaction.added(으)로 처음 연결됐다"
+    )
+    body = receipt_doc(liked)["body"]
+    assert "player.reaction.added" not in body
+    assert body.startswith("좋아요")
+
+    # 옮길 수 없는 미지의 내부 표기는 버린다 — 침묵이 노출보다 낫다
+    alien = dict(base)
+    alien["payload"] = dict(base["payload"], note="system.mystery.pinged 때문에")
+    assert "system.mystery" not in receipt_doc(alien)["body"]
+
+    # 숫자가 든 사유도 통째로 버린다 — 리시트는 수치를 노출하지 않는다
+    numeric = dict(base)
+    numeric["payload"] = dict(base["payload"], note="감정 응고: gratitude 0.69")
+    body = receipt_doc(numeric)["body"]
+    assert "0.69" not in body and "gratitude" not in body
+    assert "서로를 알게 됐다" in body
 
 
 async def test_relationship_event_registers_follower(redis):
