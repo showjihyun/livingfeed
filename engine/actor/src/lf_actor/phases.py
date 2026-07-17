@@ -22,6 +22,7 @@ from lf_tick.lod import (
     due_by_tier,
     is_due,
     maybe_demote,
+    phase_offset,
     promote,
     scheduled_counts,
     touch,
@@ -451,12 +452,6 @@ class ActorPhases:
             persona = self._personas[actor_id]
             if not posting_moment(actor_id, persona.lifestyle, ctx.world_time, rhythm):
                 continue
-            # '기억됨' 선제 DM (plan/02) — 임계를 넘은 관계의 플레이어가 있으면 이
-            # 모먼트를 안부에 쓴다: DM이 포스팅을 대체한다 (둘 다 하지 않는다 —
-            # 자연스러움). AI 실패면 조용히 생략되고 원래 포스팅 경로가 이어진다
-            # (규칙 프로바이더(dev)에선 converse 미지원 → 선제 DM 없음, 결정성 불변)
-            if await self._proactive_dm(ctx, world, actor_id):
-                continue
             payload, _ = await self._llm_action(
                 ctx, world, actor_id, schema, tier=Tier.WARM.value, purpose="post_status"
             )
@@ -468,6 +463,16 @@ class ActorPhases:
             # (packages/schemas) — 리듬 분은 warm에 합산하고 로그로만 구분한다
             decided["warm"] += 1
             logger.info("리듬 결정: %s tick=%d (근황 모먼트 — warm 합산)", actor_id, ctx.tick)
+
+        # '기억됨' 선제 DM (plan/02) — 리듬과 독립된 저빈도 기회 창. 리듬 모먼트에
+        # 묶으면 Hot(리듬 제외)인 액터일수록 — 즉 관계가 활발할수록 — 안부가 영영
+        # 못 나가는 역설이 생긴다 (2026-07-17 라이브 관측). 진짜 빗장은 쿨다운
+        # (세계 하루 1회)이고, 기회 창은 지연 상한일 뿐이다. LOD 불문 검사한다.
+        interval = max(1, int(default_params()["outreach"]["dm_check_ticks"]))
+        for actor_id in sorted(self._personas):
+            if ctx.tick % interval != phase_offset(actor_id, interval):
+                continue
+            await self._proactive_dm(ctx, world, actor_id)
         return decided
 
     async def _reply_to_comment(

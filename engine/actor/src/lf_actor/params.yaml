@@ -1,4 +1,4 @@
-# Actor Runtime 파라미터 — 단일 파일 (emotion/goal params.yaml 선례).
+﻿# Actor Runtime 파라미터 — 단일 파일 (emotion/goal params.yaml 선례).
 # 튜닝 대상 수치는 코드가 아니라 여기에 있다 (하드코딩 금지).
 
 # SNS 포스팅 리듬 (rhythm.posting_moment) — "이 tick이 근황을 남기고 싶은 순간인가"
@@ -34,6 +34,9 @@ outreach:
   dm_threshold: 0.5
   # (액터,플레이어)당 선제 DM 최소 간격 — 세계 하루(360 tick) 1회 이하
   dm_cooldown_ticks: 360
+  # 선제 DM 기회 창 — LOD·리듬과 독립된 액터별 검사 주기 (위상 분산).
+  # 빈도의 빗장은 쿨다운이고, 이 값은 자격이 생긴 뒤의 지연 상한일 뿐이다
+  dm_check_ticks: 30
 
 # 액터 소셜 루프 (social.py / phases.py) — 피드 순환·댓글 예산
 social:

@@ -26,7 +26,7 @@ from lf_eventstore import new_ulid, read_stream
 from lf_relationship import RelationshipState
 from lf_tick.clock import TickClock
 from lf_tick.engine import run_tick
-from lf_tick.lod import ActorLod, Tier, is_due
+from lf_tick.lod import ActorLod, Tier, is_due, phase_offset
 
 WORLD = "w_dopamine"
 CLOCK = TickClock(genesis=datetime(2026, 3, 1, tzinfo=UTC))
@@ -288,16 +288,45 @@ def rhythm_only_tick(actor_id: str, lifestyle: str, *, skip: int = 0) -> int:
     raise AssertionError("포스팅 모먼트 tick을 찾지 못했다 — 파라미터를 확인하라")
 
 
-async def test_rhythm_moment_sends_proactive_dm_and_replaces_posting(conn, redis):
-    """임계를 넘은 관계가 있으면 리듬 모먼트가 선제 DM이 된다 — 포스팅 대체 (plan/02)."""
+def dm_check_tick(actor_id: str, *, skip: int = 0, lifestyle: str | None = None) -> int:
+    """선제 DM 기회 창 tick — LOD·리듬과 독립된 위상 분산 주기 (plan/02).
+
+    lifestyle을 주면 포스팅 모먼트·Cold due와 겹치지 않는 tick을 고른다 —
+    DM 단독 경로를 격리 검증할 때 쓴다.
+    """
+    params = default_params()
+    interval = max(1, int(params["outreach"]["dm_check_ticks"]))
+    offset = phase_offset(actor_id, interval)
+    lod = ActorLod(tier=Tier.COLD, last_interest_tick=0)
+    found = 0
+    for tick in range(1, TICKS_PER_DAY):
+        if tick % interval != offset:
+            continue
+        if lifestyle is not None and (
+            posting_moment(actor_id, lifestyle, CLOCK.world_time_at(tick), params)
+            or is_due(actor_id, lod, tick)
+        ):
+            continue
+        if found == skip:
+            return tick
+        found += 1
+    raise AssertionError("DM 기회 tick을 찾지 못했다 — 파라미터를 확인하라")
+
+
+async def test_dm_window_sends_proactive_dm_independent_of_rhythm(conn, redis):
+    """임계를 넘은 관계가 있으면 기회 창 tick에 선제 DM이 나간다 (plan/02).
+
+    리듬 모먼트와 무관하다 — 모먼트에 묶으면 Hot(리듬 제외) 액터일수록,
+    즉 관계가 활발할수록 안부가 영영 못 나가는 역설이 생긴다 (라이브 관측).
+    """
     persona = make_host()
-    await seed_edge(redis, ACTOR, PLAYER, edge_state(0.4, 0.3))  # 0.7 ≥ 0.5
+    await seed_edge(redis, ACTOR, PLAYER, edge_state(0.4, 0.3))  # 0.7 ≥ 임계
     await WorkingMemory(redis).add(WORLD, ACTOR, f'플레이어 {PLAYER}의 DM: "요즘 잘 지내요?"')
     ai = _ConverseAi("문득 생각나서요. 그때 그 얘기 덕분에 잘 지내요.")
     ledger = OutreachLedger(redis)
     phases = make_phases(redis, ai, outreach=ledger)
     phases._lods[ACTOR] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
-    tick = rhythm_only_tick(ACTOR, persona.lifestyle)
+    tick = dm_check_tick(ACTOR, lifestyle=persona.lifestyle)  # 모먼트·due 아님 — DM 단독
 
     await run_tick(conn, phases, CLOCK, WORLD, tick=tick, head=0)
 
@@ -310,7 +339,7 @@ async def test_rhythm_moment_sends_proactive_dm_and_replaces_posting(conn, redis
     assert dm["causation_id"] is None
     assert dm["payload"]["text"] == "문득 생각나서요. 그때 그 얘기 덕분에 잘 지내요."
 
-    # DM이 포스팅을 대체했다 — 둘 다 하지 않는다 (자연스러움)
+    # 모먼트도 due도 아닌 tick — 행동 없이 안부만 나갔다
     assert [e for e in events if e["type"] == "actor.action.performed"] == []
     assert ai.decide_calls == 0
     # 함께 나눈 기억이 컨텍스트에 곁들여졌다 — 대화 히스토리 + 안부의 결 Task Frame
@@ -323,55 +352,70 @@ async def test_rhythm_moment_sends_proactive_dm_and_replaces_posting(conn, redis
     assert any("먼저 안부를 건넸다" in m for m in recent)
 
 
+async def test_dm_window_fires_even_for_hot_actor(conn, redis):
+    """Hot(매 tick due) 액터도 기회 창에서 안부를 보낸다 — 역설 해소의 회귀 고정.
+
+    행동과 DM이 한 tick에 공존한다: 안부는 행동이 아니라 마음이다.
+    """
+    await seed_edge(redis, ACTOR, PLAYER, edge_state(0.4, 0.3))
+    ai = _ConverseAi("바쁜 와중에 문득 생각나서요.")
+    phases = make_phases(redis, ai, outreach=OutreachLedger(redis))
+    tick = dm_check_tick(ACTOR)
+    phases._lods[ACTOR] = ActorLod(tier=Tier.HOT, last_interest_tick=tick)
+
+    await run_tick(conn, phases, CLOCK, WORLD, tick=tick, head=0)
+
+    events = [s.envelope for s in await read_stream(conn, WORLD, "actor", ACTOR)]
+    [dm] = messages_of(events)
+    assert dm["payload"]["channel"] == "dm"
+    assert [e for e in events if e["type"] == "actor.action.performed"]  # 행동도 그대로
+
+
 async def test_proactive_dm_cooldown_one_per_world_day(conn, redis):
     """같은 (액터,플레이어)에게 세계 하루(360 tick) 안에 두 번 보내지 않는다."""
-    persona = make_host()
     await seed_edge(redis, ACTOR, PLAYER, edge_state(0.4, 0.3))
     ai = _ConverseAi("오늘도 문득 생각나서요.")
     ledger = OutreachLedger(redis)
     phases = make_phases(redis, ai, outreach=ledger)
     phases._lods[ACTOR] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
-    first = rhythm_only_tick(ACTOR, persona.lifestyle)
-    second = rhythm_only_tick(ACTOR, persona.lifestyle, skip=1)
+    first = dm_check_tick(ACTOR)
+    second = dm_check_tick(ACTOR, skip=1)
     assert second - first < 360  # 같은 세계 하루 안이다
 
     head = await run_tick(conn, phases, CLOCK, WORLD, tick=first, head=0)
     await run_tick(conn, phases, CLOCK, WORLD, tick=second, head=head)
 
     events = [s.envelope for s in await read_stream(conn, WORLD, "actor", ACTOR)]
-    assert len(messages_of(events)) == 1  # 첫 모먼트의 DM뿐
-    # 두 번째 모먼트는 원래의 리듬 포스팅 경로로 이어졌다
-    assert ai.decide_calls == 1
-    assert [e for e in events if e["type"] == "actor.action.performed"]
+    assert len(messages_of(events)) == 1  # 첫 기회 창의 DM뿐 — 쿨다운이 빗장이다
+    assert len(ai.converse_bundles) == 1  # 두 번째 창은 시도조차 없다
 
 
-async def test_proactive_dm_below_threshold_keeps_posting(conn, redis):
-    """임계 미만 관계뿐이면 선제 DM은 없다 — 리듬 포스팅은 기존 그대로."""
+async def test_proactive_dm_below_threshold_stays_silent(conn, redis):
+    """임계 미만 관계뿐이면 선제 DM은 없다 — 기회 창은 자격이 아니라 지연 상한이다."""
     persona = make_host()
-    await seed_edge(redis, ACTOR, PLAYER, edge_state(0.2, 0.1))  # 0.3 < 0.5
+    await seed_edge(redis, ACTOR, PLAYER, edge_state(0.05, 0.05))  # 0.1 < 임계
     ai = _ConverseAi("보내지 않아야 할 문장")
     phases = make_phases(redis, ai, outreach=OutreachLedger(redis))
     phases._lods[ACTOR] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
 
-    await run_tick(conn, phases, CLOCK, WORLD, tick=rhythm_only_tick(ACTOR, persona.lifestyle),
-                   head=0)
+    await run_tick(
+        conn, phases, CLOCK, WORLD,
+        tick=dm_check_tick(ACTOR, lifestyle=persona.lifestyle), head=0,
+    )
 
     events = [s.envelope for s in await read_stream(conn, WORLD, "actor", ACTOR)]
     assert messages_of(events) == []
     assert ai.converse_bundles == []  # DM 시도 자체가 없다
-    assert [e for e in events if e["type"] == "actor.action.performed"]  # 포스팅은 그대로
 
 
 async def test_proactive_dm_ai_failure_skips_silently_without_burning_cooldown(conn, redis):
     """AI 실패면 조용히 생략 — 규칙 문장 금지, 쿨다운 미소모 (dev 결정성 불변)."""
-    persona = make_host()
     await seed_edge(redis, ACTOR, PLAYER, edge_state(0.4, 0.3))
     ledger = OutreachLedger(redis)
     phases = make_phases(redis, _SilentAi(), outreach=ledger)
     phases._lods[ACTOR] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
 
-    await run_tick(conn, phases, CLOCK, WORLD, tick=rhythm_only_tick(ACTOR, persona.lifestyle),
-                   head=0)
+    await run_tick(conn, phases, CLOCK, WORLD, tick=dm_check_tick(ACTOR), head=0)
 
     events = [s.envelope for s in await read_stream(conn, WORLD, "actor", ACTOR)]
     assert messages_of(events) == []  # 선제 안부를 규칙 문장으로 보내지 않는다
@@ -386,8 +430,10 @@ async def test_no_outreach_ledger_means_no_proactive_dm(conn, redis):
     phases = make_phases(redis, ai)  # outreach=None
     phases._lods[ACTOR] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
 
-    await run_tick(conn, phases, CLOCK, WORLD, tick=rhythm_only_tick(ACTOR, persona.lifestyle),
-                   head=0)
+    await run_tick(
+        conn, phases, CLOCK, WORLD,
+        tick=dm_check_tick(ACTOR, lifestyle=persona.lifestyle), head=0,
+    )
 
     events = [s.envelope for s in await read_stream(conn, WORLD, "actor", ACTOR)]
     assert messages_of(events) == []
