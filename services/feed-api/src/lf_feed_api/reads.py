@@ -61,6 +61,21 @@ ORDER BY event_id DESC
 LIMIT %s
 """
 
+# 액터별 마지막 메시지 1건 → 최신 대화 순 — 인박스 목록의 좌표계도 event_id(ULID)다.
+# player_id 필터가 액터↔액터 대화(counterpart가 a_*)를 자연히 걸러낸다 (pg_read 참고).
+_THREADS_SQL = """
+SELECT actor_id, sender, channel, text, event_id, occurred_at
+FROM (
+    SELECT DISTINCT ON (actor_id)
+           actor_id, sender, channel, text, event_id, occurred_at
+    FROM read.messages
+    WHERE world_id = %s AND player_id = %s
+    ORDER BY actor_id, event_id DESC
+) AS last_by_actor
+ORDER BY event_id DESC
+LIMIT %s
+"""
+
 
 def _rows_to_dicts(columns: tuple[str, ...], rows: list[tuple]) -> list[dict[str, Any]]:
     return [dict(zip(columns, row, strict=True)) for row in rows]
@@ -131,6 +146,32 @@ class ProfileReads:
             "arc_history": _rows_to_dicts(
                 ("stage", "intention", "planned_at"), arc_history
             ),
+        }
+
+    async def threads(
+        self, world_id: str, player_id: str, *, limit: int
+    ) -> dict[str, Any]:
+        """플레이어의 대화 상대 목록 — 액터별 마지막 메시지 1건, 최신 대화 순.
+
+        선제 DM(액터가 먼저 건 말)도 그저 대화의 첫 마디다 — 특별 취급 없이
+        같은 스레드 집계에 실린다 (다중 대화 인박스의 목록 뷰 데이터).
+        """
+        async with self._pool.connection() as conn:
+            rows = await (await conn.execute(
+                _THREADS_SQL, (world_id, player_id, limit)
+            )).fetchall()
+        return {
+            "threads": [
+                {
+                    "actor_id": actor_id,
+                    "last_text": text,
+                    "last_channel": channel,
+                    "last_at": occurred_at,
+                    "last_event_id": event_id,
+                    "last_from_actor": sender == "actor",
+                }
+                for actor_id, sender, channel, text, event_id, occurred_at in rows
+            ],
         }
 
     async def conversation(

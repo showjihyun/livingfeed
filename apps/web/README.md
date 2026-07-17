@@ -11,9 +11,11 @@ Next.js 웹 클라이언트. 현재 화면은 **디자인 핸드오프 프로토
   엔드포인트 재정의: `NEXT_PUBLIC_LF_GATEWAY_URL`(기본 :8000),
   `NEXT_PUBLIC_LF_FEED_API_URL`(기본 :8001). 3000 외 포트로 dev를 띄우면
   gateway/feed-api에 `LF_CORS_ORIGINS`로 해당 오리진을 허용해야 한다.
-- 그 외 상호작용(민지 답글/DM, 토스트 체인, Hidden Feed 언락)은 프로토타입과 동일한
+- 그 외 상호작용(액터 답글/DM, 토스트 체인, Hidden Feed 언락)은 프로토타입과 동일한
   **클라이언트 시뮬레이션**이다 — 세계 시계(3초당 +4분), 타자기 스트리밍(70ms/자).
-  상호작용 실배선은 WS 세션 단계(ADR-010/012)에서 온다.
+  상호작용 실배선은 WS 세션 단계(ADR-010/012)에서 온다. "받은 것" 탭은 다중 대화
+  인박스다 — 스레드 목록은 feed-api `GET /messages/threads`, 개별 대화는
+  `GET /messages` 실측(`lib/messages.ts`)이며 액터 표시 이름은 디렉터리에서 파생된다.
 - 시뮬레이션 파라미터·시나리오 데이터: `lib/data.ts`
 - 상태 오케스트레이터: `components/LivingFeedApp.tsx` (화면: Onboarding → Curating → app 탭 5개)
 - 블롭 아바타는 `components/Face.tsx`의 프리셋으로 그린다 — 수치는 핸드오프 픽셀 값 그대로.

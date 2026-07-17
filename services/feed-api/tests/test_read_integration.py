@@ -111,3 +111,47 @@ async def test_conversation_merges_both_directions(pg):
         WORLD, "p_stranger", ACTOR, limit=10, cursor=None
     )
     assert other["items"] == []
+
+
+async def test_threads_last_message_per_actor_newest_first(pg):
+    """인박스 집계 — 액터별 마지막 1건, 최신 대화 순 (선제 DM도 그저 첫 마디다)."""
+    store = ReadStore(pg)
+    await store.ensure()
+    player_dm = sample("player.dm.sent")        # …G: 플레이어 → 아리
+    reply = sample("actor.message.sent")        # …K: 아리 → 플레이어 (dm)
+    base_id = reply["event_id"][:-1]
+    # …R: 준호의 선제 DM — in_reply_to 없음, 새 스레드의 첫 마디
+    proactive = dict(
+        reply, event_id=base_id + "R", actor_id="a_junho_park", causation_id=None,
+        payload=dict(reply["payload"], text="문득 생각나서요.", in_reply_to=None),
+    )
+    # …S: 액터↔액터 댓글 — counterpart가 a_*라 플레이어 인박스를 오염시키지 않는다
+    social = dict(
+        reply, event_id=base_id + "S", actor_id="a_junho_park",
+        payload={"channel": "comment", "target_player_id": None,
+                 "target_actor_id": ACTOR, "text": "소셜 루프",
+                 "post_id": base_id + "0", "in_reply_to": None},
+    )
+    for envelope in (player_dm, reply, proactive, social):
+        await store.apply(envelope)
+
+    reads = ProfileReads(OneConnPool(pg))
+    listing = await reads.threads(WORLD, PLAYER, limit=10)
+    # 최신 대화(준호 …R)가 먼저 — 액터↔액터(…S)는 준호 스레드를 덮지 않는다
+    assert [t["actor_id"] for t in listing["threads"]] == ["a_junho_park", ACTOR]
+    junho, aria = listing["threads"]
+    assert junho["last_event_id"] == base_id + "R"
+    assert junho["last_from_actor"] is True
+    assert junho["last_text"] == "문득 생각나서요."
+    # 아리 스레드의 마지막은 답장(…K) — 플레이어 발신(…G)이 아니다
+    assert aria["last_event_id"] == reply["event_id"]
+    assert aria["last_channel"] == "dm"
+    assert aria["last_at"] is not None
+
+    # limit은 스레드 수를 자른다 — 가장 최근 대화부터
+    top = await reads.threads(WORLD, PLAYER, limit=1)
+    assert [t["actor_id"] for t in top["threads"]] == ["a_junho_park"]
+
+    # 다른 플레이어의 인박스는 비어 있다
+    stranger = await reads.threads(WORLD, "p_stranger", limit=10)
+    assert stranger["threads"] == []

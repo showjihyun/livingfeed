@@ -34,6 +34,10 @@ class FakeReads:
         self.calls.append(("conversation", world_id, player_id, actor_id, limit, cursor))
         return {"items": [], "next_cursor": None, "mode": "recent"}
 
+    async def threads(self, world_id, player_id, *, limit):
+        self.calls.append(("threads", world_id, player_id, limit))
+        return {"threads": []}
+
 
 class FakeTimelineRedis:
     """캐시 겸 타임라인 대역 — /feed가 쓰는 get/setex와 zrevrange만 구현한다."""
@@ -121,6 +125,20 @@ def test_profile_and_messages_delegate_with_clamped_limits():
     assert reads.calls[-1] == ("conversation", "w_main", PLAYER, "a_aria_kim", 50, None)
 
 
+def test_threads_delegates_with_clamped_limit():
+    client, reads, _ = make_client()
+    resp = client.get("/messages/threads", params={"player_id": PLAYER, "limit": 500})
+    assert resp.status_code == 200
+    assert resp.json() == {"threads": []}
+    assert reads.calls[-1] == ("threads", "w_main", PLAYER, 100)
+
+
+def test_threads_rejects_bad_player_id():
+    client, _, _ = make_client()
+    assert client.get("/messages/threads", params={"player_id": "a_x"}).status_code == 422
+    assert client.get("/messages/threads").status_code == 422  # player_id는 필수
+
+
 def test_bad_ids_and_cursors_rejected():
     client, _, _ = make_client()
     assert client.get("/actors/notanactor/profile").status_code == 422  # 경로 패턴(a_ 접두)
@@ -139,6 +157,9 @@ def test_reads_unavailable_returns_503_without_killing_feed():
     app.state.reads = None  # lifespan이 PG 실패로 내려놓은 상태를 재현
     client = TestClient(app)
     assert client.get("/actors/a_aria_kim/profile").status_code == 503
+    assert client.get(
+        "/messages/threads", params={"player_id": PLAYER}
+    ).status_code == 503
     # 타임라인 경로는 PG와 무관하게 살아 있다 (장애 격리, ADR-003 계약 5)
     assert client.get(
         "/feed", params={"types": "personal", "player_id": PLAYER}

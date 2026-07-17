@@ -259,6 +259,21 @@ def create_app(
             player_id=player_id, limit=min(limit, cfg.max_limit),
         )
 
+    @app.get("/messages/threads")
+    async def message_threads(
+        player_id: str = Query(pattern=r"^p_[a-z0-9_]+$"),
+        world_id: str = Query("w_main", pattern=r"^w_[a-z0-9_]+$"),
+        limit: int = Query(50, ge=1),
+    ) -> dict:
+        """플레이어의 대화 상대 목록 — 액터별 마지막 메시지 1건, 최신 대화 순.
+
+        다중 대화 인박스의 목록 뷰 데이터다 (선제 DM 포함 — 액터가 먼저 건
+        말도 여기 실린다). PG 미가용이면 이 경로만 503 (격리 규약, /messages와 동일).
+        """
+        return await _reads().threads(
+            world_id, player_id, limit=min(limit, cfg.max_limit)
+        )
+
     @app.get("/messages")
     async def conversation(
         player_id: str = Query(pattern=r"^p_[a-z0-9_]+$"),

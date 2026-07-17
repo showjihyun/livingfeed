@@ -9,7 +9,8 @@ import { useRelationshipGraph } from "@/lib/graph";
 import { useHiddenFeed } from "@/lib/hidden";
 import type { LivePost } from "@/lib/live-feed";
 import { useLiveFeed } from "@/lib/live-feed";
-import { fetchDmHistory } from "@/lib/messages";
+import type { DmThread } from "@/lib/messages";
+import { fetchDmHistory, fetchDmThreads } from "@/lib/messages";
 import { useActorProfile } from "@/lib/profile";
 import { naturalDelayMs, useActorSession } from "@/lib/session";
 import type { DmMessage, FeedComment, Screen, Tab, Toast } from "@/lib/types";
@@ -35,11 +36,19 @@ export function LivingFeedApp() {
   const [worldMin, setWorldMin] = useState(WORLD_MIN_START);
   const [curateStep, setCurateStep] = useState(0);
 
-  const [dmMsgs, setDmMsgs] = useState<DmMessage[]>([]);
+  // 다중 대화 인박스 — 스레드 목록(threads API 실측) + 액터별 대화 상태.
+  // 특정 액터 고정 없음: 어떤 액터가 먼저 말을 걸어와도(선제 DM) 스레드가 된다.
+  const [dmThreads, setDmThreads] = useState<DmThread[]>([]);
+  // 열린 스레드의 상대 — null이면 목록 뷰
+  const [openDmActor, setOpenDmActor] = useState<string | null>(null);
+  const [dmMsgsByActor, setDmMsgsByActor] = useState<Record<string, DmMessage[]>>({});
   const [dmDraft, setDmDraft] = useState("");
-  const [dmTyping, setDmTyping] = useState(false);
-  // 더 과거 대화로 가는 커서 (read.messages) — null이면 끝이거나 히스토리 미연결
-  const [dmCursor, setDmCursor] = useState<string | null>(null);
+  // 입력 중(답장 준비)인 액터들 — 열린 스레드에선 말풍선, 목록에선 '입력 중...'
+  const [dmTypingActors, setDmTypingActors] = useState<ReadonlySet<string>>(new Set());
+  // 아직 열어보지 않은 새 DM이 있는 스레드들 — 목록·사이드바 배지의 근거
+  const [dmUnread, setDmUnread] = useState<ReadonlySet<string>>(new Set());
+  // 더 과거 대화로 가는 커서 (액터별, read.messages) — 키 없음=미로드, null=끝/미가용
+  const [dmCursorByActor, setDmCursorByActor] = useState<Record<string, string | null>>({});
   const [dmLoadingOlder, setDmLoadingOlder] = useState(false);
 
   // 라이브 포스트별 댓글 — 댓글은 특정 데모 카드가 아니라 실제 포스트에 붙는다
@@ -54,6 +63,12 @@ export function LivingFeedApp() {
 
   const toastSeq = useRef(0);
   const timers = useRef<number[]>([]);
+
+  // 지연 콜백(타이핑 연출 뒤 도착)이 '지금 보고 있는 화면'을 판단할 때 쓰는 최신값 창
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  const openDmActorRef = useRef(openDmActor);
+  openDmActorRef.current = openDmActor;
 
   const after = useCallback((ms: number, fn: () => void) => {
     timers.current.push(window.setTimeout(fn, ms));
@@ -91,7 +106,6 @@ export function LivingFeedApp() {
 
   // 액터 명단(read.actors) — 표시 이름을 여기서 읽는다 (하드코딩 금지, ADR-012)
   const { byId } = useActorDirectory(screen === "app");
-  const focusName = byId.get(FOCUS_ACTOR_ID)?.name ?? "상대";
   const authorName = useCallback(
     // 식별자는 사람 이름이 아니다 — 이름을 모르는 인물은 '누군가'로 둔다 (내레이터와 같은 결)
     (actorId: string) => byId.get(actorId)?.name ?? "누군가",
@@ -102,39 +116,79 @@ export function LivingFeedApp() {
   // 액터의 내면 실측 (pg-projector 신념·에피소드, ADR-003/008) — 미가용이면 데모 서사
   const focusProfile = useActorProfile(FOCUS_ACTOR_ID, screen === "app");
 
-  // 지난 대화 이어받기 (read.messages) — 사용자가 아직 아무 말도 안 했을 때만 채운다
+  // 인박스 목록 이어받기 (threads API) — 액터별 마지막 메시지 1건, 최신 대화 순.
+  // 로컬에서 이미 대화가 시작됐으면 덮지 않는다 (히스토리와 같은 '빈 곳만 채우기' 규약).
   useEffect(() => {
     if (screen !== "app") return;
     let cancelled = false;
-    void fetchDmHistory(FOCUS_ACTOR_ID).then((page) => {
-      if (cancelled || !page) return;
-      setDmCursor(page.nextCursor);
-      if (page.messages.length === 0) return;
-      setDmMsgs((current) => (current.length === 0 ? page.messages : current));
+    void fetchDmThreads().then((threads) => {
+      if (cancelled || !threads || threads.length === 0) return;
+      setDmThreads((current) => (current.length === 0 ? threads : current));
     });
     return () => {
       cancelled = true;
     };
   }, [screen]);
 
+  // 지난 대화 이어받기 (read.messages) — 스레드를 연 순간, 아직 아무 말도 안 한 스레드만 채운다
+  useEffect(() => {
+    if (screen !== "app" || openDmActor === null) return;
+    if (openDmActor in dmCursorByActor) return; // 이미 이어받은 스레드
+    const actorId = openDmActor;
+    let cancelled = false;
+    void fetchDmHistory(actorId).then((page) => {
+      if (cancelled || !page) return;
+      setDmCursorByActor((prev) => ({ ...prev, [actorId]: page.nextCursor }));
+      if (page.messages.length === 0) return;
+      setDmMsgsByActor((prev) =>
+        (prev[actorId] ?? []).length === 0 ? { ...prev, [actorId]: page.messages } : prev,
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [screen, openDmActor, dmCursorByActor]);
+
   // 이전 대화 더 보기 — 과거 페이지를 받아 목록 위에 이어 붙인다 (event id 중복 제거)
   const loadOlderDms = useCallback(() => {
-    if (!dmCursor || dmLoadingOlder) return;
+    const actorId = openDmActor;
+    if (!actorId) return;
+    const cursor = dmCursorByActor[actorId];
+    if (!cursor || dmLoadingOlder) return;
     setDmLoadingOlder(true);
-    void fetchDmHistory(FOCUS_ACTOR_ID, dmCursor).then((page) => {
+    void fetchDmHistory(actorId, cursor).then((page) => {
       setDmLoadingOlder(false);
       // 미가용 — 커서를 남겨 다음 클릭에 재시도 (조용한 강등)
       if (!page) return;
-      setDmCursor(page.nextCursor);
+      setDmCursorByActor((prev) => ({ ...prev, [actorId]: page.nextCursor }));
       if (page.messages.length === 0) return;
-      setDmMsgs((current) => {
+      setDmMsgsByActor((prev) => {
+        const current = prev[actorId] ?? [];
         const seen = new Set(current.map((m) => m.eventId).filter(Boolean));
         const older = page.messages.filter((m) => !m.eventId || !seen.has(m.eventId));
         // 페이지는 시간 오름차순 — 앞에 붙이면 전체 시간순이 유지된다
-        return [...older, ...current];
+        return { ...prev, [actorId]: [...older, ...current] };
       });
     });
-  }, [dmCursor, dmLoadingOlder]);
+  }, [openDmActor, dmCursorByActor, dmLoadingOlder]);
+
+  // 스레드에 새 마지막 한 줄 반영 — 목록 맨 위로 (없던 상대면 새 스레드가 된다)
+  const touchThread = useCallback((actorId: string, text: string, fromActor: boolean) => {
+    setDmThreads((prev) => [
+      {
+        actorId,
+        lastText: text,
+        lastChannel: "dm",
+        lastAt: new Date().toISOString(),
+        lastFromActor: fromActor,
+      },
+      ...prev.filter((t) => t.actorId !== actorId),
+    ]);
+  }, []);
+
+  const appendDm = useCallback((actorId: string, msg: DmMessage) => {
+    setDmMsgsByActor((prev) => ({ ...prev, [actorId]: [...(prev[actorId] ?? []), msg] }));
+  }, []);
 
   // 상호작용 세션 (WS) — DM/댓글/좋아요를 실세계에 꽂는다. 미가용이면 데모 폴백.
   const session = useActorSession({
@@ -142,10 +196,22 @@ export function LivingFeedApp() {
     onReply: (reply) => {
       // 도착 즉시 렌더하지 않는다 — 1~3초 '타이핑'을 거쳐야 사람 같다
       if (reply.channel === "dm") {
-        setDmTyping(true);
+        const actorId = reply.actorId;
+        if (!actorId) return; // 발신 액터 미상 — 어느 스레드에도 꽂을 수 없다
+        setDmTypingActors((prev) => new Set(prev).add(actorId));
         after(naturalDelayMs(), () => {
-          setDmTyping(false);
-          setDmMsgs((list) => [...list, { from: "actor", text: reply.text }]);
+          setDmTypingActors((prev) => {
+            const next = new Set(prev);
+            next.delete(actorId);
+            return next;
+          });
+          appendDm(actorId, { from: "actor", text: reply.text });
+          // 선제 DM 포함 — 없던 상대면 여기서 새 스레드가 태어난다
+          touchThread(actorId, reply.text, true);
+          // 지금 그 스레드를 보고 있지 않으면 미읽음 (목록·사이드바 배지)
+          if (!(tabRef.current === "dm" && openDmActorRef.current === actorId)) {
+            setDmUnread((prev) => new Set(prev).add(actorId));
+          }
         });
       } else if (reply.channel === "comment" && reply.postId) {
         const postId = reply.postId;
@@ -228,22 +294,61 @@ export function LivingFeedApp() {
   }, [after]);
 
   const sendDm = useCallback(() => {
+    const actorId = openDmActor;
+    if (!actorId) return;
     const text = dmDraft.trim();
-    if (!text || dmTyping) return;
-    setDmMsgs((list) => [...list, { from: "me", text }]);
+    if (!text || dmTypingActors.has(actorId)) return;
+    appendDm(actorId, { from: "me", text });
+    touchThread(actorId, text, false);
     setDmDraft("");
     setInterventions((n) => n + 1);
     // 실세계 경로 — player.dm.sent 적재, 액터의 응답은 다음 tick에 push로 온다.
     // 오프라인이면 답장은 오지 않는다 (세계가 살아있을 때만 반응이 있다).
-    if (session.sendDm(FOCUS_ACTOR_ID, text)) setDmTyping(true);
-  }, [dmDraft, dmTyping, session]);
+    if (session.sendDm(actorId, text)) {
+      setDmTypingActors((prev) => new Set(prev).add(actorId));
+    }
+  }, [openDmActor, dmDraft, dmTypingActors, appendDm, touchThread, session]);
 
   const closeToast = useCallback((id: number) => {
     setToasts((list) => list.filter((x) => x.id !== id));
   }, []);
 
+  // 스레드 열기 — 대화 뷰로 전환, 미읽음 해제 (히스토리 로드는 위 effect가 이어받는다)
+  const openThread = useCallback((actorId: string) => {
+    setOpenDmActor(actorId);
+    setDmDraft("");
+    setDmUnread((prev) => {
+      if (!prev.has(actorId)) return prev;
+      const next = new Set(prev);
+      next.delete(actorId);
+      return next;
+    });
+  }, []);
+
+  // 열린 스레드로 돌아오면 미읽음 해제 — 다른 탭에 가 있는 동안 도착한 DM의 배지 정리
+  useEffect(() => {
+    if (tab !== "dm" || openDmActor === null) return;
+    setDmUnread((prev) => {
+      if (!prev.has(openDmActor)) return prev;
+      const next = new Set(prev);
+      next.delete(openDmActor);
+      return next;
+    });
+  }, [tab, openDmActor, dmUnread]);
+
   const worldTime = formatWorldTime(worldMin);
-  const goDm = useCallback(() => setTab("dm"), []);
+  // 프로필의 "메시지 보내기" — 보고 있던 액터와의 스레드를 바로 연다
+  const goDm = useCallback(() => {
+    setTab("dm");
+    openThread(FOCUS_ACTOR_ID);
+  }, [openThread]);
+
+  // 실측 스레드가 하나도 없을 때의 시작점 — 기존 데모 인트로 경험 보존:
+  // 포커스 액터에게 먼저 말을 걸 수 있는 스레드 하나를 남긴다 (이름은 디렉터리 파생)
+  const displayThreads: DmThread[] =
+    dmThreads.length > 0
+      ? dmThreads
+      : [{ actorId: FOCUS_ACTOR_ID, lastText: "", lastChannel: "dm", lastAt: "", lastFromActor: false }];
 
   return (
     <div style={{ height: "100vh", display: "flex", overflow: "hidden", position: "relative" }}>
@@ -260,7 +365,7 @@ export function LivingFeedApp() {
       <Sidebar
         tab={tab}
         onSelectTab={setTab}
-        dmBadge={dmTyping ? "1" : ""}
+        dmBadge={dmUnread.size > 0 ? String(dmUnread.size) : ""}
         hiddenUnlocked={hiddenUnlocked}
         worldTime={worldTime}
         interventions={interventions}
@@ -310,15 +415,23 @@ export function LivingFeedApp() {
         {tab === "dm" && (
           <DmTab
             worldTime={worldTime}
-            partnerName={focusName}
-            messages={dmMsgs}
-            typing={dmTyping}
+            threads={displayThreads}
+            emptyInbox={dmThreads.length === 0}
+            nameOf={authorName}
+            unread={dmUnread}
+            typingActors={dmTypingActors}
+            openActorId={openDmActor}
+            messages={openDmActor ? (dmMsgsByActor[openDmActor] ?? []) : []}
             draft={dmDraft}
             onDraftChange={setDmDraft}
             onSend={sendDm}
-            canLoadOlder={dmCursor !== null}
+            canLoadOlder={
+              openDmActor !== null && (dmCursorByActor[openDmActor] ?? null) !== null
+            }
             loadingOlder={dmLoadingOlder}
             onLoadOlder={loadOlderDms}
+            onOpenThread={openThread}
+            onBack={() => setOpenDmActor(null)}
           />
         )}
         {tab === "hidden" && <HiddenTab items={hidden.items} nameOf={authorName} />}

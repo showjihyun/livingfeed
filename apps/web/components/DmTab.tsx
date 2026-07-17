@@ -1,18 +1,37 @@
 import type { KeyboardEvent } from "react";
 
 import { ICON } from "@/lib/data";
+import { relativeTime } from "@/lib/live-feed";
+import type { DmThread } from "@/lib/messages";
 import type { DmMessage } from "@/lib/types";
 
 import { Face } from "./Face";
 import { Icon } from "./Icon";
 import styles from "./lf.module.css";
 
+const AVATAR_COLORS = ["#AFC8F5", "#F2B8CF", "#BFE3CF", "#E8D5A8", "#CBBDE8", "#A8D8E8"];
+
+function avatarColor(seed: string): string {
+  let hash = 0;
+  for (const ch of seed) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
+
 interface DmTabProps {
   worldTime: string;
-  /** 대화 상대 표시 이름 — 라이브 identity에서 온다 (하드코딩 금지) */
-  partnerName: string;
+  /** 인박스 스레드 목록 (최신 대화 순) — 표시 이름은 nameOf로 푼다 (하드코딩 금지) */
+  threads: DmThread[];
+  /** 실측 스레드가 하나도 없는가 — 빈 인박스 안내(데모 인트로 규약)를 띄우는 근거 */
+  emptyInbox: boolean;
+  /** actor_id → 표시 이름 (라이브 디렉터리, 모르면 '누군가' 폴백) */
+  nameOf: (actorId: string) => string;
+  /** 아직 열어보지 않은 새 DM이 있는 스레드들 */
+  unread: ReadonlySet<string>;
+  /** 지금 입력 중인 액터들 — 목록에서는 '입력 중...', 열린 스레드에선 말풍선 */
+  typingActors: ReadonlySet<string>;
+  /** 열린 스레드의 상대 — null이면 목록 뷰 */
+  openActorId: string | null;
   messages: DmMessage[];
-  typing: boolean;
   draft: string;
   onDraftChange: (value: string) => void;
   onSend: () => void;
@@ -20,20 +39,181 @@ interface DmTabProps {
   canLoadOlder: boolean;
   loadingOlder: boolean;
   onLoadOlder: () => void;
+  onOpenThread: (actorId: string) => void;
+  onBack: () => void;
 }
 
-export function DmTab({
+export function DmTab(props: DmTabProps) {
+  return props.openActorId === null ? (
+    <InboxList {...props} />
+  ) : (
+    <Conversation {...props} openActorId={props.openActorId} />
+  );
+}
+
+/** 목록 뷰 — 대화 상대별 스레드 카드 (마지막 한 줄·상대 발신이면 결 구분) */
+function InboxList({
+  threads,
+  emptyInbox,
+  nameOf,
+  unread,
+  typingActors,
+  onOpenThread,
+}: DmTabProps) {
+  return (
+    <>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "18px 28px",
+          borderBottom: "1.5px solid #EEF3FB",
+        }}
+      >
+        <div style={{ fontSize: 20, fontWeight: 800 }}>받은 것</div>
+        <div style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600 }}>
+          {/* 빈 인박스의 시작점 카드(데모 인트로)는 아직 대화가 아니다 */}
+          대화 {emptyInbox ? 0 : threads.length}개
+        </div>
+      </div>
+
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: "18px 20px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+        }}
+      >
+        {emptyInbox && (
+          // 빈 인박스 — 세계가 먼저 말을 걸어올 때까지의 우아한 공백 (데모 인트로 규약)
+          <div
+            style={{
+              border: "1.5px dashed #D5DEEE",
+              borderRadius: 18,
+              padding: "26px 22px",
+              textAlign: "center",
+              color: "#8C97AF",
+              fontSize: 13,
+              fontWeight: 600,
+              lineHeight: 1.7,
+              background: "#FBFCFE",
+              marginBottom: 6,
+            }}
+          >
+            아직 받은 메시지가 없어요.
+            <br />
+            먼저 말을 걸어보세요 — 당신을 기억한 액터가 먼저 연락해오기도 합니다.
+          </div>
+        )}
+
+        {threads.map((thread) => {
+          const typing = typingActors.has(thread.actorId);
+          const isUnread = unread.has(thread.actorId);
+          // 상대 발신(선제 DM·답장)은 결이 다르다 — 받은 말은 짙게, 내 말은 옅게
+          const fromActor = thread.lastFromActor;
+          const preview = typing
+            ? "입력 중..."
+            : thread.lastText || "아직 나눈 말이 없어요 — 먼저 말을 걸어보세요";
+          return (
+            <div
+              key={thread.actorId}
+              onClick={() => onOpenThread(thread.actorId)}
+              className={styles.press95}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "13px 14px",
+                borderRadius: 16,
+                cursor: "pointer",
+                background: isUnread ? "#F4F8FE" : "#fff",
+                border: `1.5px solid ${isUnread ? "#D9E5F9" : "#EEF3FB"}`,
+              }}
+            >
+              <div
+                style={{
+                  width: 42,
+                  height: 42,
+                  borderRadius: "50%",
+                  background: avatarColor(thread.actorId),
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 16,
+                  fontWeight: 800,
+                  color: "#3A4256",
+                  flexShrink: 0,
+                }}
+              >
+                {nameOf(thread.actorId).slice(0, 1)}
+              </div>
+              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#3A4256" }}>
+                    {nameOf(thread.actorId)}
+                  </div>
+                  {thread.lastAt && (
+                    <div style={{ fontSize: 11, color: "#A9B2C7", fontWeight: 600 }}>
+                      {relativeTime(thread.lastAt)}
+                    </div>
+                  )}
+                </div>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: fromActor || typing ? 600 : 500,
+                    color: typing ? "#5F7EC9" : fromActor ? "#3A4256" : "#8C97AF",
+                    fontStyle: typing ? "italic" : undefined,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {!typing && !fromActor && thread.lastText ? "나: " : ""}
+                  {preview}
+                </div>
+              </div>
+              {isUnread && (
+                <div
+                  style={{
+                    width: 9,
+                    height: 9,
+                    borderRadius: "50%",
+                    background: "#6D8DD6",
+                    flexShrink: 0,
+                  }}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+/** 대화 뷰 — 기존 1:1 대화 경험 그대로, 상대만 파라미터화 (뒤로가기로 목록 복귀) */
+function Conversation({
   worldTime,
-  partnerName,
+  nameOf,
+  typingActors,
+  openActorId,
   messages,
-  typing,
   draft,
   onDraftChange,
   onSend,
   canLoadOlder,
   loadingOlder,
   onLoadOlder,
-}: DmTabProps) {
+  onBack,
+}: DmTabProps & { openActorId: string }) {
+  const partnerName = nameOf(openActorId);
+  const typing = typingActors.has(openActorId);
+  const partnerBg = avatarColor(openActorId);
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") onSend();
   };
@@ -49,7 +229,24 @@ export function DmTab({
           borderBottom: "1.5px solid #EEF3FB",
         }}
       >
-        <Face preset="dmHeader38" />
+        <div
+          onClick={onBack}
+          className={styles.press92}
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: "50%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            background: "#F2F6FC",
+            flexShrink: 0,
+          }}
+        >
+          <Icon d={ICON.arrowLeft} size={16} color="#5F7EC9" />
+        </div>
+        <Face preset="dmHeader38" bg={partnerBg} />
         <div style={{ display: "flex", flexDirection: "column" }}>
           <div style={{ fontSize: 15, fontWeight: 800 }}>{partnerName}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -121,7 +318,7 @@ export function DmTab({
                 justifyContent: mine ? "flex-end" : "flex-start",
               }}
             >
-              {showAvatar && <Face preset="dm30" />}
+              {showAvatar && <Face preset="dm30" bg={partnerBg} />}
               <div
                 style={{
                   maxWidth: 440,
