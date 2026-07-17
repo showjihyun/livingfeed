@@ -61,6 +61,17 @@ services:
       timeout: 3s
       retries: 12
 
+  nats-test:
+    # 테스트 전용 JetStream — 파괴적 픽스처(LF_* 스트림 삭제)의 유일한 표적.
+    # 상주 세계의 nats(4222)와 분리한다 (2026-07-17 스트림 전소 사고의 격리).
+    # 저장 볼륨 없음 — 내용은 소모품이고, 재기동이 곧 초기화다.
+    image: nats:2.10-alpine
+    profiles: [core, full]
+    restart: unless-stopped
+    command: ["-js"]
+    ports:
+      - "4223:4222"
+
   qdrant:
     image: qdrant/qdrant:v1.12.1
     profiles: [core, full]

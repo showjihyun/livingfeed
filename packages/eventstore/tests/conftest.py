@@ -1,10 +1,9 @@
 import asyncio
-import os
 import sys
 
-import psycopg
 import pytest
 from lf_eventstore.migrate import migrate
+from lf_eventstore.testing import SKIP_DB, assert_test_database, test_database_url
 from psycopg import AsyncConnection
 
 # psycopg async는 Windows ProactorEventLoop에서 동작하지 않는다 (로컬 개발 전용 —
@@ -12,25 +11,23 @@ from psycopg import AsyncConnection
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-DSN = os.environ.get(
-    "LF_TEST_DATABASE_URL",
-    "postgresql://livingfeed:livingfeed@localhost:5432/livingfeed",
-)
+# 파괴적 픽스처는 명시된 전용 인프라만 겨눈다 — 미설정은 skip, 규약 위반은 실패
+# (lf_eventstore.testing, 2026-07-17 사고 2건의 가드)
+DSN = test_database_url()
 
 
 @pytest.fixture
 async def conn():
     """마이그레이션이 적용된 깨끗한 es 스키마를 가진 연결.
 
-    PostgreSQL이 없으면 skip — 로컬은 compose core 프로파일, CI는 서비스 컨테이너.
-    autocommit=True: append가 자체 트랜잭션을 열기 때문 (README 참고).
+    LF_TEST_DATABASE_URL(_test 접미 DB)이 명시될 때만 돈다 — 로컬은 compose core
+    프로파일 + livingfeed_test, CI는 서비스 컨테이너. autocommit=True: append가
+    자체 트랜잭션을 열기 때문 (README 참고).
     """
-    try:
-        connection = await AsyncConnection.connect(DSN, connect_timeout=3, autocommit=True)
-    except psycopg.OperationalError:
-        if "LF_TEST_DATABASE_URL" in os.environ:
-            raise  # 명시적으로 지정된 DB(CI 등)에 접속 불가 — 환경 오류이므로 fail
-        pytest.skip(f"PostgreSQL 미가용 ({DSN}) — infra/compose에서 postgres를 켜라")
+    if DSN is None:
+        pytest.skip(SKIP_DB)
+    assert_test_database(DSN)
+    connection = await AsyncConnection.connect(DSN, connect_timeout=3, autocommit=True)
     async with connection:
         await connection.execute("DROP SCHEMA IF EXISTS es CASCADE")
         await migrate(connection)

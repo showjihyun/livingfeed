@@ -30,6 +30,30 @@ docker compose down -v                       # 데이터까지 완전 삭제
 | feed-api | 8001 | `full` 프로파일만 |
 | dispatcher | (포트 없음) | `full` 프로파일만 — outbox relay 워커 (ADR-017). 시작 시 es 마이그레이션 적용 |
 
+## 테스트 인프라 (파괴적 픽스처 격리)
+
+통합 테스트의 픽스처는 **파괴적**이다(es/read 스키마 드롭, LF_* 스트림 삭제,
+flushdb). 상주 세계를 지키기 위해 두 겹의 가드가 있다 (`lf_eventstore.testing`,
+2026-07-17 사고 2건의 교훈):
+
+1. LF_TEST_* env가 없으면 해당 픽스처는 **skip**이다 — 기본값으로 로컬 인프라를
+   겨누지 않는다.
+2. env가 있어도 표적을 검증한다: PG는 DB 이름 `_test` 접미 강제, NATS는 마커
+   스트림(LF_* 스트림이 전무한 서버에만 자동 생성)이 있는 서버만 허용.
+   위반은 skip이 아니라 실패다.
+
+```powershell
+# 전용 테스트 표적 — 상주 세계(4222·livingfeed DB)와 완전 분리
+$env:LF_TEST_DATABASE_URL='postgresql://livingfeed:livingfeed@localhost:5433/livingfeed_test'
+$env:LF_TEST_REDIS_URL='redis://localhost:6380/15'
+$env:LF_TEST_NATS_URL='nats://localhost:4223'   # compose nats-test
+$env:LF_TEST_QDRANT_URL='http://localhost:6333'
+uv run pytest   # 세계가 돌고 있어도 전체 스위트가 안전하다
+```
+
+- `livingfeed_test` DB가 없으면: `docker exec livingfeed-postgres-1 psql -U livingfeed -d postgres -c "CREATE DATABASE livingfeed_test;"`
+- `nats-test`(4223)는 core 프로파일에 포함 — 볼륨 없는 소모품이라 재기동이 곧 초기화다.
+
 ## 주간 프로젝션 무결성 배치 (verify 3종)
 
 프로젝션은 소모품이다 (ADR-003 계약 3): 원천(`es.events`) 대비 어긋남은

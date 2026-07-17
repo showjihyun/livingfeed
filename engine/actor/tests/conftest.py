@@ -1,11 +1,17 @@
 import asyncio
-import os
 import sys
 from pathlib import Path
 
-import psycopg
 import pytest
 from lf_eventstore.migrate import migrate
+from lf_eventstore.testing import (
+    SKIP_DB,
+    SKIP_REDIS,
+    assert_test_database,
+    test_database_url,
+    test_nats_url,
+    test_redis_url,
+)
 from psycopg import AsyncConnection
 from redis.asyncio import Redis
 
@@ -16,23 +22,20 @@ if sys.platform == "win32":
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PERSONAS_DIR = REPO_ROOT / "agents" / "personas"
 
-PG_DSN = os.environ.get(
-    "LF_TEST_DATABASE_URL",
-    "postgresql://livingfeed:livingfeed@localhost:5432/livingfeed",
-)
-REDIS_URL = os.environ.get("LF_TEST_REDIS_URL", "redis://localhost:6379/15")
-NATS_URL = os.environ.get("LF_TEST_NATS_URL", "nats://localhost:4222")
+# 파괴적 픽스처는 명시된 전용 인프라만 겨눈다 — 미설정은 skip, 규약 위반은 실패
+# (lf_eventstore.testing, 2026-07-17 사고 2건의 가드)
+PG_DSN = test_database_url()
+REDIS_URL = test_redis_url()
+NATS_URL = test_nats_url()
 
 
 @pytest.fixture
 async def conn():
     """마이그레이션 적용된 깨끗한 es 스키마 연결 (lf-eventstore conftest와 동일 규약)."""
-    try:
-        connection = await AsyncConnection.connect(PG_DSN, connect_timeout=3, autocommit=True)
-    except psycopg.OperationalError:
-        if "LF_TEST_DATABASE_URL" in os.environ:
-            raise
-        pytest.skip(f"PostgreSQL 미가용 ({PG_DSN}) — infra/compose에서 postgres를 켜라")
+    if PG_DSN is None:
+        pytest.skip(SKIP_DB)
+    assert_test_database(PG_DSN)
+    connection = await AsyncConnection.connect(PG_DSN, connect_timeout=3, autocommit=True)
     async with connection:
         await connection.execute("DROP SCHEMA IF EXISTS es CASCADE")
         await migrate(connection)
@@ -41,15 +44,11 @@ async def conn():
 
 @pytest.fixture
 async def redis():
-    """깨끗한 테스트 전용 DB(기본 15)의 Redis 연결."""
+    """깨끗한 테스트 전용 DB의 Redis 연결 — flushdb는 명시된 표적에만."""
+    if REDIS_URL is None:
+        pytest.skip(SKIP_REDIS)
     client = Redis.from_url(REDIS_URL)
-    try:
-        await client.ping()
-    except Exception:
-        if "LF_TEST_REDIS_URL" in os.environ:
-            raise
-        await client.aclose()
-        pytest.skip(f"Redis 미가용 ({REDIS_URL}) — infra/compose에서 redis를 켜라")
+    await client.ping()
     await client.flushdb()
     try:
         yield client

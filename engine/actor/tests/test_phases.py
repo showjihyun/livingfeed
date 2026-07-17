@@ -1,4 +1,4 @@
-"""ActorPhases 통합 검증 — 실제 PG+Redis(+NATS의 AI Runtime) 대상.
+﻿"""ActorPhases 통합 검증 — 실제 PG+Redis(+NATS의 AI Runtime) 대상.
 
 아리아가 tick 파이프라인을 타고 actor.action.performed를 남기는지 확인한다.
 """
@@ -34,12 +34,9 @@ CLOCK = TickClock(genesis=datetime(2026, 3, 1, tzinfo=UTC))
 
 @pytest.fixture
 async def nc():
-    try:
-        client = await asyncio.wait_for(nats.connect(NATS_URL, connect_timeout=3), timeout=5)
-    except Exception:
-        if "LF_TEST_NATS_URL" in os.environ:
-            raise
-        pytest.skip(f"NATS 미가용 ({NATS_URL}) — infra/compose에서 nats를 켜라")
+    if NATS_URL is None:
+        pytest.skip("LF_TEST_NATS_URL 미설정 — 전용 테스트 NATS(4223)를 명시하라")
+    client = await asyncio.wait_for(nats.connect(NATS_URL, connect_timeout=3), timeout=5)
     try:
         yield client
     finally:
