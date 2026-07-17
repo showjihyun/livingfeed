@@ -2,6 +2,7 @@
 id: a_somi_han
 name: 한소미
 archetype: caring_teacher
+lifestyle: teacher
 
 big_five:
   openness: 0.60

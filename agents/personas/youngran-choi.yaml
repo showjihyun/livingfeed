@@ -2,6 +2,7 @@
 id: a_youngran_choi
 name: 최영란
 archetype: steady_leader
+lifestyle: office_worker
 
 big_five:
   openness: 0.58

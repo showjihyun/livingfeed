@@ -2,6 +2,7 @@
 id: a_yujin_jung
 name: 정유진
 archetype: driven_newcomer
+lifestyle: office_worker
 
 big_five:
   openness: 0.72

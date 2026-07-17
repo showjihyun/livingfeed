@@ -3,6 +3,7 @@
 id: a_minji_kim
 name: 김민지
 archetype: quiet_builder
+lifestyle: office_worker
 
 big_five:              # → baseline PAD 파생 (ADR-015)
   openness: 0.66

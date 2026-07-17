@@ -3,6 +3,7 @@
 id: a_aria_kim
 name: 김아리
 archetype: ambitious_journalist
+lifestyle: flexible
 
 big_five:              # → baseline PAD 파생 (ADR-015)
   openness: 0.82

@@ -2,6 +2,7 @@
 id: a_mansu_kang
 name: 강만수
 archetype: retired_tycoon
+lifestyle: flexible
 
 big_five:
   openness: 0.52

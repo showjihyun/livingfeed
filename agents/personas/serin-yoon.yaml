@@ -2,6 +2,7 @@
 id: a_serin_yoon
 name: 윤세린
 archetype: dreaming_teen
+lifestyle: student
 
 big_five:
   openness: 0.85
