@@ -62,6 +62,26 @@ def test_no_tension_means_incident_only():
         budget.record(100 + i * 200, None)
 
 
+def test_incident_without_tension_still_lands_on_someone():
+    """긴장이 없어도 사건은 '누군가'에게 일어난다 — 빈 영향권은 아무도
+    지각하지 못하는 유령 사건이다 (2026-07-17 라이브 관측: 정전이 세계를 못 흔듦)."""
+    names = {"a_one_kim": "김하나", "a_two_lee": "이두리", "a_three_park": "박세인"}
+    first = decide(quiet_snapshot(tick=100), BudgetState(), [], names=names)
+    assert first.tool == "inject_incident"
+    affected = first.payload["affected_actor_ids"]
+    assert len(affected) == 2 and len(set(affected)) == 2  # 무대엔 둘 — 마주침이 생긴다
+    assert set(affected) <= set(names)
+    # 결정적 — 같은 입력이면 같은 무대
+    again = decide(quiet_snapshot(tick=100), BudgetState(), [], names=names)
+    assert again.payload["affected_actor_ids"] == affected
+
+
+def test_incident_without_tension_or_roster_stays_empty():
+    # 로스터조차 없으면 빈 영향권 그대로 — 우아한 축소 (지어내지 않는다)
+    intervention = decide(quiet_snapshot(tick=100), BudgetState(), [])
+    assert intervention.payload["affected_actor_ids"] == []
+
+
 def test_rule_nudge_grounds_observation_with_name():
     # 관측 템플릿이 상대 이름으로 그라운딩된다 — id가 노출되지 않는다
     tension = [["a_junho_park", "a_aria_kim", 0.42, -0.1]]

@@ -101,6 +101,22 @@ def is_fireable(
     return budget.remaining(snapshot.tick, params) > 0
 
 
+def fallback_affected(names: dict[str, str], salt: int) -> list[str]:
+    """긴장 후보가 없을 때 로스터에서 결정적으로 고르는 사건 영향권 2명.
+
+    빈 영향권은 아무도 지각하지 못하는 유령 사건이다 — 카페의 정전은
+    '누군가'에게는 일어난다. 무대 배치일 뿐 반응은 액터의 몫 (ADR-013).
+    """
+    roster = sorted(names)
+    if not roster:
+        return []
+    start = zlib.crc32(f"affected:{salt}".encode()) % len(roster)
+    picked = [roster[start]]
+    if len(roster) > 1:
+        picked.append(roster[(start + 1) % len(roster)])
+    return picked
+
+
 #: 규칙 nudge의 관측 템플릿 — {name}은 긴장 상대 (규칙 폴백도 결이 하나가 아니다)
 _NUDGE_OBSERVATIONS = (
     "{name}과(와)의 사이가 요즘 어딘가 어긋나 있다는 걸 문득 깨달았다",
@@ -198,7 +214,11 @@ def decide(
 
     # 갈등 후보(그래프 tension 질의)가 있으면 그 쌍을 사건의 영향권에 놓는다 —
     # 조종이 아니라 무대 배치다: 반응은 액터의 몫 (ADR-013 간접 개입)
-    affected = [tension_pairs[0][0], tension_pairs[0][1]] if tension_pairs else []
+    affected = (
+        [tension_pairs[0][0], tension_pairs[0][1]]
+        if tension_pairs
+        else fallback_affected(names or {}, budget.interventions_total)
+    )
 
     return Intervention(
         tool=INCIDENT_TOOL,

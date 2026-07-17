@@ -42,6 +42,7 @@ from lf_director.rules import (
     SYSTEM_STREAM,
     WORLD_STREAM,
     Intervention,
+    fallback_affected,
 )
 from lf_director.signals import Snapshot
 
@@ -341,7 +342,9 @@ def intervention_from_plan(
     rationale = (plan.get("rationale") or "").strip()[:300] or "LLM 개입 선택"
     tool = plan.get("tool")
     if tool == INCIDENT_TOOL:
-        return _incident_intervention(plan, tension_pairs, incidents, rationale, signals)
+        return _incident_intervention(
+            plan, tension_pairs, incidents, names, snapshot, rationale, signals
+        )
     if tool == NUDGE_TOOL:
         return _nudge_intervention(plan, tension_pairs, rationale, signals)
     if tool == PROMOTE_TOOL:
@@ -444,18 +447,23 @@ def arc_from_plan(
 
 def _incident_intervention(
     plan: dict[str, Any], tension_pairs: list[list[Any]],
-    incidents: list[dict[str, Any]], rationale: str, signals: dict[str, Any],
+    incidents: list[dict[str, Any]], names: dict[str, str], snapshot: Snapshot,
+    rationale: str, signals: dict[str, Any],
 ) -> Intervention | None:
     library = {inc["kind"]: inc for inc in incidents}
     inc = library.get(plan.get("incident_kind"))
     if inc is None:
         return None  # 라이브러리 밖 사건 — 존재하지 않는다
 
-    # 영향권은 관찰된 후보 안에서만 (환각 id 제거). 비었고 긴장이 있으면 상위 쌍으로.
-    candidates = set(candidate_actor_ids(tension_pairs))
+    # 영향권은 긴장 후보 ∪ 로스터 안에서만 (환각 id 제거 — 실존 인물은 환각이 아니다).
+    # 비었으면 긴장 상위 쌍, 그것도 없으면 로스터에서 결정적으로 무대를 채운다:
+    # 빈 영향권은 아무도 지각하지 못하는 유령 사건이다 (규칙 폴백과 같은 원칙)
+    candidates = set(candidate_actor_ids(tension_pairs)) | set(names)
     affected = [a for a in plan.get("affected_actor_ids", []) if a in candidates]
     if not affected and tension_pairs:
         affected = [tension_pairs[0][0], tension_pairs[0][1]]
+    if not affected:
+        affected = fallback_affected(names, snapshot.tick)
 
     description = (plan.get("description") or "").strip()[:300] or inc["description"]
     intensity = _clamp(plan.get("intensity"), 0.0, 1.0, float(inc["intensity"]))

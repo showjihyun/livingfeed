@@ -123,6 +123,37 @@ def test_valid_incident_keeps_llm_framing_and_records_selector():
     assert result.signals["model"] == "qwen3:8b"
 
 
+def test_incident_plan_roster_actor_survives_scrub_without_tension():
+    # 로스터의 실존 인물은 환각이 아니다 — 긴장 후보가 없어도 영향권에 남는다
+    plan = {
+        "tool": "inject_incident",
+        "incident_kind": "chance_encounter",
+        "affected_actor_ids": ["a_minji", "a_ghost_x"],  # 유령만 걸러진다
+        "rationale": "조용한 세계에 우연을",
+    }
+    result = intervention_from_plan(plan, SNAP, [], INCIDENTS, NAMES)
+    assert result is not None
+    assert result.payload["affected_actor_ids"] == ["a_minji"]
+
+
+def test_incident_plan_without_tension_falls_back_to_roster_stage():
+    """LLM이 영향권을 비워 보내고 긴장도 없으면 로스터에서 결정적으로 무대를 채운다
+    — 빈 영향권은 유령 사건이다 (규칙 폴백과 동일한 원칙)."""
+    plan = {
+        "tool": "inject_incident",
+        "incident_kind": "chance_encounter",
+        "affected_actor_ids": [],
+        "rationale": "조용한 세계에 우연을",
+    }
+    result = intervention_from_plan(plan, SNAP, [], INCIDENTS, NAMES)
+    assert result is not None
+    affected = result.payload["affected_actor_ids"]
+    assert len(affected) == 2 and set(affected) <= set(NAMES)
+    # 결정적
+    again = intervention_from_plan(plan, SNAP, [], INCIDENTS, NAMES)
+    assert again.payload["affected_actor_ids"] == affected
+
+
 def test_unknown_tool_returns_none_for_fallback():
     plan = {"tool": "mind_control", "rationale": "x"}  # 화이트리스트 밖 도구
     assert intervention_from_plan(plan, SNAP, TENSION, INCIDENTS, NAMES) is None
@@ -200,18 +231,20 @@ def test_empty_description_falls_back_to_library():
     assert result.payload["description"] == "카페 정전"  # 라이브러리 서술로 폴백
 
 
-def test_no_tension_yields_pure_environmental_incident():
+def test_pure_environmental_incident_only_without_roster():
+    """순수 환경 사건(빈 영향권)은 로스터조차 없을 때만 — 로스터가 있으면
+    반드시 누군가의 사건이다 (유령 사건 방지, 2026-07-17 라이브 관측)."""
     plan = {
         "tool": "inject_incident",
         "incident_kind": "chance_encounter",
-        "affected_actor_ids": ["a_minji"],  # 후보 없음 → 전부 버려진다
+        "affected_actor_ids": ["a_ghost_x"],  # 로스터 밖 유령 — 버려진다
         "description": "정전",
         "intensity": 0.6,
         "rationale": "x",
     }
-    result = intervention_from_plan(plan, SNAP, [], INCIDENTS, NAMES)
+    result = intervention_from_plan(plan, SNAP, [], INCIDENTS, {})
     assert result is not None
-    assert result.payload["affected_actor_ids"] == []  # 영향권 없는 순수 환경 사건도 유효
+    assert result.payload["affected_actor_ids"] == []  # 지어낼 로스터가 없다
 
 
 # --- nudge_perception 도구 ----------------------------------------------------
