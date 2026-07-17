@@ -8,7 +8,7 @@
 5. 격리 — 다른 프로젝터와 consumer 독립
 
 소스 넷이 곧 팬아웃 파이프라인이다:
-- relationship.*        → 팔로워 인덱스 stand-in (누가 누구의 소식을 받는가)
+- relationship.*        → 팔로워 인덱스 stand-in + 변화 리시트 (액터→플레이어 Private)
 - player.follow.changed → 명시 팔로우/철회 (진짜 팔로우 모델 — 철회가 이긴다)
 - feed.post.published   → 팔로워 타임라인으로 fan-out-on-write
 - actor.message.sent    → 수신 플레이어 타임라인 (Private 단독 배달)
@@ -62,6 +62,8 @@ class RedisProjector:
             pair = follower_pair(envelope["payload"])
             if pair is not None:
                 await store.register_follower(envelope["world_id"], *pair)
+            # 변화 리시트 — 액터→플레이어 마음의 변화를 Private로 가시화 (도파민 §붕괴 방어)
+            await store.push_receipt(envelope)
         return apply
 
     def _apply_follow(self, store: TimelineStore):

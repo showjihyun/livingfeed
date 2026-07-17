@@ -13,6 +13,10 @@
 - lf:tlflw:{world}:{actor}   SET — 이 액터의 소식을 받을 플레이어들.
 - lf:tlunfl:{world}:{actor}  SET — 명시적으로 언팔로우한 플레이어들 (거부 마커).
 
+관계 이벤트는 인덱스 재료이면서 동시에 "변화 리시트"다 (도파민 §붕괴 방어
+"영향력이 안 보임"): 액터→플레이어 마음의 변화를 수치 없는 정성 문장으로
+그 플레이어의 Private 타임라인에 싣는다 — receipt_doc / push_receipt.
+
 한계(수용): 같은 tick에서 first_met과 포스트가 함께 나오면 포스트가 인덱스보다
 먼저 도착할 수 있다 — 그 포스트는 실리지 않고 다음 포스트부터 실린다 (최종 일관성).
 """
@@ -28,6 +32,86 @@ from lf_projector.os_index import envelope_to_doc
 
 #: 플레이어당 타임라인 상한 — 초과분은 fan-out-on-read(OpenSearch)로 폴백 (ADR-014)
 TIMELINE_CAP = 500
+
+#: 변화 리시트 생략 임계 — 모든 |delta|가 이보다 작으면 소음으로 보고 배달하지 않는다
+#: (도파민 §붕괴 방어 "영향력이 안 보임"의 가시화 vs 스팸 방지의 균형점)
+RECEIPT_DELTA_FLOOR = 0.03
+
+#: 지배 차원(|delta| 최대)의 정성 서사 — 수치 노출은 조작감을 만든다 (도파민 §붕괴 방어)
+_RECEIPT_SENTENCES: dict[tuple[str, int], str] = {
+    ("trust", +1): "신뢰가 조금 자랐다",
+    ("trust", -1): "신뢰에 금이 갔다",
+    ("intimacy", +1): "마음의 거리가 가까워졌다",
+    ("intimacy", -1): "마음의 거리가 멀어졌다",
+    ("respect", +1): "존중이 깊어졌다",
+    ("respect", -1): "존중이 옅어졌다",
+    ("attraction", +1): "설렘이 피어났다",
+    ("attraction", -1): "설렘이 사그라들었다",
+    ("resentment", +1): "마음 한켠에 앙금이 남았다",
+    ("resentment", -1): "앙금이 조금 풀렸다",
+}
+
+
+#: 마일스톤 kind별 서사 라벨 — 모르는 kind는 원문 폴백 (전방 호환)
+_MILESTONE_LABELS: dict[str, str] = {
+    "first_met": "서로를 알게 됐다",
+    "stage_transition": "관계가 새로운 국면으로 넘어갔다",
+    "betrayal": "믿음이 배신으로 무너졌다",
+    "confession_declined": "고백은 조심스럽게 접혔다",
+}
+
+
+def _receipt_narration(envelope: dict[str, Any]) -> tuple[str, str] | None:
+    """(정성 문장, 엔진이 쓴 사유) — 배달할 만큼의 변화가 아니면 None."""
+    p = envelope["payload"]
+    if envelope["type"] == "relationship.milestone.reached":
+        kind = p["milestone"]
+        return _MILESTONE_LABELS.get(kind, kind), p.get("note", "")
+    dominant, delta = max(p["deltas"].items(), key=lambda item: abs(item[1]))
+    if abs(delta) < RECEIPT_DELTA_FLOOR:
+        return None  # 미미한 변화는 리시트가 아니라 스팸이다
+    return _RECEIPT_SENTENCES[(dominant, 1 if delta > 0 else -1)], p.get("reason", "")
+
+
+def receipt_doc(envelope: dict[str, Any]) -> dict[str, Any] | None:
+    """relationship.* 봉투 → 플레이어 private 리시트 doc. 배달할 게 없으면 None.
+
+    "당신과 관련된 마음의 변화가 세계에 기록됐다"의 가시화 (도파민 §붕괴 방어).
+    포스트·답장과 같은 doc 모양이라 FE가 한 렌더러로 그린다 (ADR-014).
+    """
+    p = envelope["payload"]
+    # 액터→플레이어 방향만 — 액터의 마음이 변한 것이 소식이다.
+    # 플레이어 자신의 마음(from=플레이어)은 자명하고, 액터↔액터는 세계의 일상이다.
+    if p["from_id"].startswith("p_") or not p["to_id"].startswith("p_"):
+        return None
+    narration = _receipt_narration(envelope)
+    if narration is None:
+        return None
+    sentence, reason = narration
+    actor = p["from_id"]
+    return {
+        "event_id": envelope["event_id"],
+        "world_id": envelope["world_id"],
+        "actor_id": actor,
+        "tick": envelope["tick"],
+        "occurred_at": envelope["occurred_at"],
+        "causation_id": envelope["causation_id"],
+        "correlation_id": envelope["correlation_id"],
+        "visibility": "private",
+        # 제목에 이름을 넣지 않는다 — 카드 헤더가 디렉터리로 실명을 해석하고,
+        # 원시 id는 사람에게 노출하지 않는다 (내레이터 결, 54번 표준)
+        "title": "당신과의 사이",
+        "body": f"{reason} — {sentence}." if reason else f"{sentence}.",
+        "narration_kind": "template",
+        "participants": [actor],
+        "community_id": None,
+        "location_id": None,
+        "drama_score": 0.0,
+        "worthiness": 0.0,
+        "source_event_type": envelope["type"],
+        "tags": ["relationship", p["stage"]],
+        "media": [],
+    }
 
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _DECODE = {c: i for i, c in enumerate(_CROCKFORD)}
@@ -150,6 +234,16 @@ class TimelineStore:
         if not target:
             return
         await self.push(envelope["world_id"], target, reply_to_doc(envelope))
+
+    async def push_receipt(self, envelope: dict[str, Any]) -> None:
+        """관계 변화 리시트 — to=플레이어 단독 배달 (Private, 도파민 §붕괴 방어).
+
+        배달 대상이 아니거나(방향·미미한 변화) 문장이 없으면 조용히 통과한다.
+        """
+        doc = receipt_doc(envelope)
+        if doc is None:
+            return
+        await self.push(envelope["world_id"], envelope["payload"]["to_id"], doc)
 
     async def drop_all(self) -> None:
         """재구축용 파괴 (ADR-003 계약 3) — 타임라인·팔로워 인덱스·거부 마커 전부."""
