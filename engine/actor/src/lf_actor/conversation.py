@@ -18,6 +18,10 @@ _DM_IN = re.compile(r'^플레이어 (?P<pid>\S+)의 DM: "(?P<text>.*)"$', re.S)
 _COMMENT_IN = re.compile(r'^플레이어 (?P<pid>\S+)가 내 글에 댓글을 남겼다: "(?P<text>.*)"$', re.S)
 #: phases.resolve가 남기는 자기 응답 메모 (앞에 "tick N: "가 붙는다)
 _REPLY_OUT = re.compile(r'나는 플레이어 (?P<pid>\S+)에게 답했다 — "(?P<text>.*)"$', re.S)
+#: phases.resolve가 남기는 선제 DM 메모 — 답장이 아니라 먼저 건넨 안부 (plan/02)
+_OUTREACH_OUT = re.compile(
+    r'나는 플레이어 (?P<pid>\S+)에게 먼저 안부를 건넸다 — "(?P<text>.*)"$', re.S
+)
 
 #: speaker 상수 — 화면 라벨이 아니라 역할 (프롬프트 조립이 라벨을 붙인다)
 PLAYER = "player"
@@ -38,6 +42,7 @@ def conversation_turns(
             (_DM_IN, PLAYER, True),
             (_COMMENT_IN, PLAYER, True),
             (_REPLY_OUT, SELF, False),
+            (_OUTREACH_OUT, SELF, False),
         ):
             match = pattern.match(line) if anchored else pattern.search(line)
             if match and match.group("pid") == player_id:

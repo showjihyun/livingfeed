@@ -48,6 +48,7 @@ from lf_actor.goal import GoalAdapter, PendingGoalEvent
 from lf_actor.ledger import DecayLedger
 from lf_actor.mailbox import Mailbox
 from lf_actor.memory import WorkingMemory
+from lf_actor.outreach import OutreachLedger, pick_dm_target
 from lf_actor.persona import Persona
 from lf_actor.reflection import (
     Belief,
@@ -61,7 +62,7 @@ from lf_actor.reflection import (
 from lf_actor.relationship import PRINCIPAL as REL_PRINCIPAL
 from lf_actor.relationship import PendingRelEvent, RelationshipAdapter
 from lf_actor.rhythm import default_params, posting_moment
-from lf_actor.rules import fallback_action, fallback_reply, routine_action
+from lf_actor.rules import fallback_action, fallback_greeting, fallback_reply, routine_action
 from lf_actor.semantic import SemanticMemory
 from lf_actor.social import extract_comment, with_comment_path
 
@@ -83,6 +84,10 @@ _BIO_MAX = 500
 
 #: 응답 의무가 있는 상호작용 (반응(like)은 지각·감정 입력일 뿐 응답하지 않는다)
 _REPLYABLE = {"player.dm.sent": "dm", "player.comment.posted": "comment"}
+
+#: 플레이어의 반응(좋아요) — 응답 의무는 없지만, 엣지 없는 플레이어의 '첫' 좋아요만은
+#: 가벼운 인사 댓글을 받는다 (plan/03 §첫 개입 — 무반응으로 끝나면 루프는 시작도 못 한다)
+REACTION_TYPE = "player.reaction.added"
 
 #: Director의 사적 지목 (nudge_perception) — 반응을 기대하는 관측이다 (ADR-013)
 OBSERVATION_TYPE = "world.observation.surfaced"
@@ -166,6 +171,7 @@ class ActorPhases:
         arc: ArcStore | None = None,
         decay_ledger: DecayLedger | None = None,
         promote_intensity: float = HIGH_INTENSITY,
+        outreach: OutreachLedger | None = None,
     ) -> None:
         if not personas:
             raise ValueError("액터가 없다 — 최소 1명의 페르소나가 필요하다")
@@ -194,6 +200,13 @@ class ActorPhases:
         self._intents: list[tuple[str, str, dict[str, Any]]] = []  # (actor_id, tier, payload)
         #: 이번 tick에 응답할 상호작용: (actor_id, 원인 봉투, 답장 텍스트)
         self._replies: list[tuple[str, dict[str, Any], str]] = []
+        #: 선제 DM 빈도 장부 — 없으면 선제 DM 경로 자체가 없다 (후방 호환)
+        self._outreach = outreach
+        #: perceive가 찾은 첫 접촉 좋아요: (actor_id, reaction 봉투) — decide가 인사한다.
+        #: 엣지 존재는 perceive 시점(이번 tick의 관계 응고 이전) 기준이다 (plan/03)
+        self._pending_greetings: list[tuple[str, dict[str, Any]]] = []
+        #: 이번 tick의 선제 DM: (actor_id, player_id, 텍스트) — RESOLVE 적재 (plan/02)
+        self._proactive_dms: list[tuple[str, str, str]] = []
         #: perceive가 채우는 tick당 수신함
         self._inbox: dict[str, list[dict[str, Any]]] = {}
         #: 피드에서 본 이웃의 글 — 다음 LLM decide까지 들고 간다 (액터 소셜 루프).
@@ -275,6 +288,7 @@ class ActorPhases:
         """
         self._inbox = {}
         self._shifts = []
+        self._pending_greetings = []
         if not self._ledger_loaded:
             await self._hydrate_ledger(ctx.world_id)
         for actor_id in self._personas:
@@ -311,6 +325,11 @@ class ActorPhases:
                 await self._memory.add(
                     ctx.world_id, actor_id, describe_interaction(envelope, names)
                 )
+            # 첫 접촉 판정 — 엣지 없는 플레이어의 첫 좋아요만 인사 대기열에 (plan/03).
+            # 이번 tick의 관계 응고(CONSOLIDATE가 reaction으로 엣지를 만든다) 이전의
+            # perceive 시점 상태가 기준이다 — 어댑터 없으면 판정 자체가 불가능해 침묵
+            if self._relationship is not None:
+                await self._note_first_reactions(ctx.world_id, actor_id, items)
             # 본 글은 다음 LLM decide까지 들고 간다 — 자발 댓글의 재료 (소셜 루프)
             if (feed_items := [e for e in items if e["type"] == FEED_TYPE]):
                 seen = self._seen_posts.setdefault(actor_id, [])
@@ -333,10 +352,32 @@ class ActorPhases:
                     )
             logger.info("지각: %s 에게 플레이어 개입 %d건", actor_id, len(items))
 
+    async def _note_first_reactions(
+        self, world_id: str, actor_id: str, items: list[dict[str, Any]]
+    ) -> None:
+        """엣지 없는 플레이어의 첫 좋아요 → 인사 대기열 (액터당 tick당 상한, plan/03).
+
+        이후 좋아요(엣지 있음)는 기존 그대로다 — 내부 감정·관계 입력일 뿐 무반응.
+        상한 초과분도 침묵하지만 CONSOLIDATE가 엣지는 만든다 (첫 접촉은 한 번뿐이다).
+        """
+        assert self._relationship is not None
+        cap = int(default_params()["outreach"]["greeting_max_per_tick"])
+        greeted: set[str] = set()
+        for envelope in items:
+            if envelope["type"] != REACTION_TYPE or len(greeted) >= cap:
+                continue
+            player_id = envelope["payload"]["player_id"]
+            if player_id in greeted:
+                continue
+            if await self._relationship.load(world_id, actor_id, player_id) is None:
+                self._pending_greetings.append((actor_id, envelope))
+                greeted.add(player_id)
+
     async def decide(self, ctx: TickContext) -> dict[str, int]:
         self._intents = []
         self._replies = []
         self._pending_comments = []
+        self._proactive_dms = []
         decided = {"hot": 0, "warm": 0, "cold": 0}
         due = due_by_tier(self._lods, ctx.tick)
         world = WorldContext(world_id=ctx.world_id, tick=ctx.tick, world_time=ctx.world_time)
@@ -385,6 +426,11 @@ class ActorPhases:
                     text = fallback_reply(persona, envelope["payload"]["text"])
                 self._replies.append((actor_id, envelope, text))
 
+        # 첫 접촉 인사 — 엣지 없는 플레이어의 첫 좋아요가 무반응으로 끝나지 않게
+        # (plan/03 §첫 개입). 표현은 LLM(converse), 보증은 규칙 템플릿 풀이다.
+        for actor_id, envelope in self._pending_greetings:
+            await self._greet_first_reaction(ctx, world, actor_id, envelope)
+
         # Cold 티어 — 통계 일괄 처리(ADR-012): LLM 없이 일과 행동만, due일 때만(100 tick
         # 케이던스). 잠든 기간의 생활 요약이라 스팸 없이 삶이 이어진다 — 비용 near-zero.
         for actor_id in due[Tier.COLD]:
@@ -404,6 +450,12 @@ class ActorPhases:
         for actor_id in sorted(set(self._personas) - already):
             persona = self._personas[actor_id]
             if not posting_moment(actor_id, persona.lifestyle, ctx.world_time, rhythm):
+                continue
+            # '기억됨' 선제 DM (plan/02) — 임계를 넘은 관계의 플레이어가 있으면 이
+            # 모먼트를 안부에 쓴다: DM이 포스팅을 대체한다 (둘 다 하지 않는다 —
+            # 자연스러움). AI 실패면 조용히 생략되고 원래 포스팅 경로가 이어진다
+            # (규칙 프로바이더(dev)에선 converse 미지원 → 선제 DM 없음, 결정성 불변)
+            if await self._proactive_dm(ctx, world, actor_id):
                 continue
             payload, _ = await self._llm_action(
                 ctx, world, actor_id, schema, tier=Tier.WARM.value, purpose="post_status"
@@ -439,6 +491,71 @@ class ActorPhases:
         if text is None:
             text = fallback_reply(persona, envelope["payload"]["text"])
         self._replies.append((actor_id, envelope, text))
+
+    async def _greet_first_reaction(
+        self, ctx: TickContext, world: WorldContext, actor_id: str, envelope: dict[str, Any]
+    ) -> None:
+        """첫 접촉 좋아요에 가벼운 인사 한 줄 — 그 포스트의 댓글로 (plan/03 §첫 개입).
+
+        표현은 LLM(converse, 가벼운 첫 인사 결의 Task Frame), 실패 시 결정적 규칙
+        템플릿 풀 — 첫 개입의 가시적 반응은 보증이다 (응답 의무와 같은 급).
+        """
+        persona = self._personas[actor_id]
+        working = await self._memory.recent(ctx.world_id, actor_id)
+        bundle = build(
+            persona, working, world, purpose="greet_reaction",
+            relationships=await self._relationship_summary(ctx.world_id, actor_id),
+        )
+        text = await self._ai.converse(bundle, tier="warm", actor_id=actor_id, tick=ctx.tick)
+        if text is None:
+            text = fallback_greeting(persona, envelope["payload"]["player_id"])
+        self._replies.append((actor_id, envelope, text))
+        logger.info(
+            "첫 접촉 인사: %s → %s tick=%d (plan/03 첫 개입)",
+            actor_id, envelope["payload"]["player_id"], ctx.tick,
+        )
+
+    async def _proactive_dm(
+        self, ctx: TickContext, world: WorldContext, actor_id: str
+    ) -> bool:
+        """'기억됨' 선제 DM — 임계를 넘은 최고 관계 플레이어 1명에게 먼저 안부 (plan/02).
+
+        보수적이다: 자기 리듬 모먼트에만, (액터,플레이어)당 세계 하루(360 tick)
+        1회 이하(Redis 장부 — 재시작에 견고). 표현이 목적이라 AI 실패는 조용히
+        생략한다(False — 규칙 문장으로 선제 안부를 보내지 않고, 호출자의 리듬
+        포스팅 경로가 이어진다). True면 DM이 이 모먼트의 포스팅을 대체한다.
+        """
+        if self._relationship is None or self._outreach is None:
+            return False
+        knobs = default_params()["outreach"]
+        edges = {}
+        for other in await self._relationship.counterparts(ctx.world_id, actor_id):
+            state = await self._relationship.load(ctx.world_id, actor_id, other)
+            if state is not None:
+                edges[other] = state
+        target = pick_dm_target(edges, threshold=float(knobs["dm_threshold"]))
+        if target is None:
+            return False
+        last = await self._outreach.last_sent_tick(ctx.world_id, actor_id, target)
+        if last is not None and ctx.tick - last < int(knobs["dm_cooldown_ticks"]):
+            return False
+        # 함께 나눈 기억을 곁들인다 — 회상·작업기억·이 사람과의 대화 흐름 (ADR-008/009)
+        persona = self._personas[actor_id]
+        working = await self._memory.recent(ctx.world_id, actor_id)
+        bundle = build(
+            persona, working, world, purpose="proactive_dm",
+            episodes=await self._recall(ctx.world_id, actor_id, working),
+            conversation=conversation_turns(working, target),
+            arc=await self._arc_of(ctx.world_id, actor_id),
+            relationships=await self._relationship_summary(ctx.world_id, actor_id),
+        )
+        text = await self._ai.converse(bundle, tier="warm", actor_id=actor_id, tick=ctx.tick)
+        if text is None:
+            return False  # 조용히 생략 — 쿨다운도 소모하지 않는다 (다음 모먼트에 다시)
+        await self._outreach.mark(ctx.world_id, actor_id, target, ctx.tick)
+        self._proactive_dms.append((actor_id, target, text))
+        logger.info("선제 DM: %s → %s tick=%d ('기억됨', plan/02)", actor_id, target, ctx.tick)
+        return True
 
     async def _llm_action(
         self,
@@ -629,6 +746,28 @@ class ActorPhases:
                     "in_reply_to": source["event_id"],
                 },
             )
+        if source["type"] == REACTION_TYPE:
+            # 첫 접촉 인사 — 좋아요가 달린 그 포스트의 댓글로 (plan/03 §첫 개입).
+            # in_reply_to는 reaction event_id(= causation) — post_id와 달라 라우터의
+            # 순환 기준에서 벗어나고, 수신자도 플레이어라 액터 배달은 없다 (깊이 0 종결)
+            return NewEvent(
+                world_id=ctx.world_id,
+                stream="actor",
+                stream_key=actor_id,
+                type=MESSAGE_TYPE,
+                tick=ctx.tick,
+                actor_id=actor_id,
+                causation_id=source["event_id"],
+                # 첫 좋아요가 시작한 사슬을 잇는다 — '당신이 시작한 이야기' (ADR-013)
+                correlation_id=source["correlation_id"],
+                payload={
+                    "channel": "comment",
+                    "target_player_id": source["payload"]["player_id"],
+                    "text": text[:1000],
+                    "post_id": source["payload"]["post_id"],
+                    "in_reply_to": source["event_id"],
+                },
+            )
         channel = _REPLYABLE[source["type"]]
         return NewEvent(
             world_id=ctx.world_id,
@@ -700,6 +839,31 @@ class ActorPhases:
                 player = envelope["payload"]["player_id"]
                 memo = f"tick {ctx.tick}: 나는 플레이어 {player}에게 답했다 — \"{text}\""
             memos.setdefault(actor_id, []).append(memo)
+
+        # 선제 DM ('기억됨', plan/02) — 원인 플레이어 이벤트가 없는 자발 발화라
+        # causation 없음·in_reply_to null (스키마가 허용, 사슬의 시작이 된다)
+        for actor_id, player_id, text in self._proactive_dms:
+            events_by_actor.setdefault(actor_id, []).append(
+                NewEvent(
+                    world_id=ctx.world_id,
+                    stream="actor",
+                    stream_key=actor_id,
+                    type=MESSAGE_TYPE,
+                    tick=ctx.tick,
+                    actor_id=actor_id,
+                    payload={
+                        "channel": "dm",
+                        "target_player_id": player_id,
+                        "text": text[:1000],
+                        "post_id": None,
+                        "in_reply_to": None,
+                    },
+                )
+            )
+            memos.setdefault(actor_id, []).append(
+                f"tick {ctx.tick}: 나는 플레이어 {player_id}에게 먼저 안부를 건넸다"
+                f" — \"{text}\""
+            )
 
         # 자발 댓글 (액터 소셜 루프) — 응답 뒤·행동 앞: 사회적 반응이 일과보다 앞선다
         for actor_id, post, text in self._pending_comments:
@@ -785,6 +949,7 @@ class ActorPhases:
 
         self._intents = []
         self._pending_comments = []
+        self._proactive_dms = []
         self._resolved_replies = list(self._replies)  # 기억 응고용 스냅샷 (ADR-008)
         self._replies = []
         self._resolved_shifts = list(self._shifts)  # 관계 응고용 스냅샷 (ADR-016 규칙 2)

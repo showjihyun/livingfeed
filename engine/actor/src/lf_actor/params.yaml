@@ -26,6 +26,15 @@ rhythm:
       busy: null
       daily_posts: { weekday: 4, weekend: 5 }
 
+# 도파민 포인트 (plan/02·03) — 관계가 보상이 되는 순간들 (outreach.py / phases.py)
+outreach:
+  # 첫 접촉 인사 — 엣지 없는 플레이어의 첫 좋아요에 남기는 인사 댓글, 액터당 tick당 상한
+  greeting_max_per_tick: 1
+  # 선제 DM 관계 임계 — 플레이어 엣지의 trust+intimacy 합이 이 이상일 때만 (plan/02 '기억됨')
+  dm_threshold: 0.5
+  # (액터,플레이어)당 선제 DM 최소 간격 — 세계 하루(360 tick) 1회 이하
+  dm_cooldown_ticks: 360
+
 # 액터 소셜 루프 (social.py / phases.py) — 피드 순환·댓글 예산
 social:
   # 포스트 하나가 배달되는 이웃 수 — 관계 salience 상위 N (관계 전무 시 결정적 해시 N)

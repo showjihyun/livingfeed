@@ -24,7 +24,7 @@ export interface ActorMessageSent {
    */
   post_id: string | null;
   /**
-   * 응답 대상 이벤트의 event_id (봉투 causation_id와 동일 — 클라이언트 편의 중복). 액터→액터 최상위 댓글은 post_id와 같고, 그 답글은 원 댓글 event_id다 — 라우터의 깊이 1 차단 기준
+   * 응답 대상 이벤트의 event_id (봉투 causation_id와 동일 — 클라이언트 편의 중복). 액터→액터 최상위 댓글은 post_id와 같고, 그 답글은 원 댓글 event_id다 — 라우터의 깊이 1 차단 기준. 선제 DM(액터가 먼저 건네는 안부, plan/02 '기억됨')은 원인 이벤트가 없어 null
    */
-  in_reply_to: string;
+  in_reply_to: string | null;
 }

@@ -1,0 +1,19 @@
+{
+  "event_id": "01JZK7Q3W0000000000000000P",
+  "stream": "actor",
+  "type": "actor.message.sent",
+  "schema_version": 1,
+  "world_id": "w_main",
+  "actor_id": "a_aria_kim",
+  "tick": 412,
+  "occurred_at": "2026-07-12T10:15:00Z",
+  "causation_id": null,
+  "correlation_id": "01JZK7Q3W0000000000000000P",
+  "payload": {
+    "channel": "dm",
+    "target_player_id": "p_observer_0417",
+    "text": "문득 생각나서요. 그때 얘기 들어줘서 고마웠어요 — 요즘은 좀 어때요?",
+    "post_id": null,
+    "in_reply_to": null
+  }
+}

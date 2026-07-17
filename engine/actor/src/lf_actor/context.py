@@ -124,17 +124,20 @@ def _episodes_section(episodes: list[str]) -> str:
     return "## 떠오르는 기억 (관련 회상)\n" + "\n".join(f"- {e}" for e in kept)
 
 
-def _conversation_section(turns: list[tuple[str, str]], *, player_label: str = "관찰자") -> str:
-    """이 사람과의 대화를 시간순으로 (reply_to_player 전용, ADR-009).
+def _conversation_section(
+    turns: list[tuple[str, str]], *, player_label: str = "관찰자", mark_last: bool = True
+) -> str:
+    """이 사람과의 대화를 시간순으로 (reply_to_player·proactive_dm, ADR-009).
 
     working이 최신순으로 뒤섞여 들어가면 LLM이 대화를 흐름으로 못 읽는다 —
-    여기서 오래된→최근 순으로 펴 주고, 마지막 상대 발화에 답할 지점을 찍는다.
+    여기서 오래된→최근 순으로 펴 주고, 답장(reply_to_player)이면 마지막 상대
+    발화에 답할 지점을 찍는다. 선제 DM은 답할 발화가 없다 — 표식 없이 흐름만.
     """
     if not turns:
         return ""
     last_player = max(
         (i for i, (who, _) in enumerate(turns) if who == "player"), default=-1
-    )
+    ) if mark_last else -1
     lines: list[str] = []
     for i, (who, text) in enumerate(turns):
         label = "나" if who == "me" else player_label
@@ -225,6 +228,23 @@ _TASK_FRAMES = {
         "- 말투를 유지한다 — 평소 반말이면 반말, 존댓말이면 존댓말.\n"
         '- 출력은 {"text": "..."} JSON 하나뿐이다. JSON 외 텍스트 금지.'
     ),
+    "greet_reaction": (
+        "## 임무\n"
+        "처음 보는 사람이 방금 당신 글에 좋아요를 남겼다 — 작업 기억 최신 항목에 있다.\n"
+        "낯선 사람의 작은 호의를 알아차린 첫 인사를 그 글의 댓글로 남겨라.\n"
+        "- 한두 문장, 과하지 않게 — 가벼운 고마움과 반가움 정도. 부담 주는 친밀함 금지.\n"
+        "- 상대를 아는 척하지 마라 — 처음 마주친 사이다. 이 인물답게, 지금 감정의 결대로.\n"
+        '- 출력은 {"text": "..."} JSON 하나뿐이다. JSON 외 텍스트 금지.'
+    ),
+    "proactive_dm": (
+        "## 임무\n"
+        "문득 이 사람이 생각났다 — 오랜만에 당신이 먼저 안부를 건네는 순간이다.\n"
+        "위 '이 사람과 나눈 대화'와 떠오르는 기억이 함께 나눈 시간이다.\n"
+        "그중 한 조각을 자연스럽게 언급하며 안부를 물어라.\n"
+        "- 한두 문장, 부담 주지 않게 — 답을 요구하는 질문 공세 금지, 잔잔한 안부의 결.\n"
+        "- 말투를 유지한다 — 평소 반말이면 반말, 존댓말이면 존댓말.\n"
+        '- 출력은 {"text": "..."} JSON 하나뿐이다. JSON 외 텍스트 금지.'
+    ),
     "reflect": (
         "## 임무\n"
         "위 기억들을 곱씹어, 지금 당신 안에 굳어진 생각 하나를 명제로 만들어라 —\n"
@@ -272,7 +292,9 @@ def build(
         sections.append(rel_text)
     sections.append(_episodes_section(episodes or []))
     if conversation:
-        sections.append(_conversation_section(conversation))
+        sections.append(
+            _conversation_section(conversation, mark_last=purpose == "reply_to_player")
+        )
     sections.append(_working_section(working))
     if (posts_text := _seen_posts_section(seen_posts or [])):
         sections.append(posts_text)

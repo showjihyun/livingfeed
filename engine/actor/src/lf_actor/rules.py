@@ -59,6 +59,28 @@ def fallback_reply(persona: Persona, incoming_text: str) -> str:
     return tones[zlib.crc32(f"{persona.id}:{incoming_text}".encode()) % len(tones)]
 
 
+#: 첫 접촉 인사 템플릿 풀 — 낯선 호의에 건네는 가벼운 한 줄 (plan/03 §첫 개입).
+#: 페르소나 이름·기계 표기(id) 비노출 — 누구의 입에서도 자연스러운 문장만.
+_GREETING_POOL = (
+    "어, 좋아요 남겨주셨네요. 처음 뵙는 분인 것 같은데 — 고마워요, 반가워요.",
+    "지나가다 눌러준 좋아요 하나가 오늘은 꽤 오래 마음에 남네요. 고마워요.",
+    "제 글에 마음 남겨주셔서 고마워요. 이렇게 또 한 분을 알게 되네요.",
+    "누가 봐주고 있다는 게 이런 기분이군요. 잘 받았어요, 고마워요.",
+)
+
+
+def fallback_greeting(persona: Persona, player_id: str) -> str:
+    """첫 접촉 인사 규칙 폴백 — LLM 없이도 첫 개입이 무반응으로 끝나지 않는다.
+
+    결정적 회전: 같은 (페르소나, 플레이어) → 같은 인사 (crc32, fallback_reply 선례).
+    표현 품질은 LLM(converse)의 몫이고, 이것은 '첫 호의는 반드시 알아차려진다'는
+    보증이다 (plan/03 — 첫 개입이 무반응으로 끝나면 루프는 시작도 못 한다).
+    """
+    return _GREETING_POOL[
+        zlib.crc32(f"{persona.id}:{player_id}".encode()) % len(_GREETING_POOL)
+    ]
+
+
 def fallback_action(persona: Persona, tick: int, trace_id: str) -> dict[str, Any]:
     """actor.action.performed payload 형태의 결정적 규칙 행동."""
     if persona.needs_bias:
