@@ -12,6 +12,8 @@ import { useEffect, useState, type KeyboardEvent } from "react";
 import { ICON } from "@/lib/data";
 import type { LivePost, LiveStatus } from "@/lib/live-feed";
 import { relativeTime } from "@/lib/live-feed";
+import type { StoryTimeline } from "@/lib/story";
+import { useStory } from "@/lib/story";
 import type { FeedComment } from "@/lib/types";
 
 import { Icon } from "./Icon";
@@ -53,6 +55,102 @@ function Avatar({ seed, label, size }: { seed: string; label: string; size: numb
       }}
     >
       {label.slice(0, 1).toUpperCase()}
+    </div>
+  );
+}
+
+/** 이야기 사슬 팔레트 — 인생의 장 배지(파스텔 #EFE9FB/#7B62C9)와 구분되는 짙은 보라 */
+const STORY_VIOLET = "#8A63D2";
+
+/**
+ * 인과의 실 — 내 개입에서 시작된 사건 연쇄를 시작점부터 시간순으로 보여준다
+ * (plan/03 §단계 3→4 "이 이야기의 시작점", Event Sourcing correlation 사슬).
+ * 항목의 이름·문장은 전부 BE 실측(es + read.actors) — 하드코딩 서사 없음.
+ */
+function StoryThread({ story }: { story: StoryTimeline }) {
+  return (
+    <div
+      style={{
+        background: "#FBFAFE",
+        border: "1.5px solid #E9E1F8",
+        borderRadius: 14,
+        padding: "14px 16px",
+        display: "flex",
+        flexDirection: "column",
+        animation: "lf-pop 0.35s ease-out",
+      }}
+    >
+      {story.items.map((item, i) => {
+        const isOrigin = i === 0;
+        const isLast = i === story.items.length - 1;
+        return (
+          <div key={item.eventId} style={{ display: "flex", gap: 10 }}>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                width: 12,
+                flexShrink: 0,
+              }}
+            >
+              <div
+                style={{
+                  width: isOrigin ? 10 : 7,
+                  height: isOrigin ? 10 : 7,
+                  borderRadius: "50%",
+                  background: isOrigin ? STORY_VIOLET : "#CBBDE8",
+                  marginTop: 4,
+                  flexShrink: 0,
+                }}
+              />
+              {!isLast && <div style={{ width: 2, flex: 1, background: "#E4DBF6", minHeight: 10 }} />}
+            </div>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 2,
+                paddingBottom: isLast ? 0 : 12,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 800,
+                  color: isOrigin ? STORY_VIOLET : "#6B7691",
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                }}
+              >
+                {item.actor}
+                {isOrigin && (
+                  <span
+                    style={{
+                      padding: "1px 8px",
+                      background: STORY_VIOLET,
+                      color: "#fff",
+                      borderRadius: 9999,
+                      fontSize: 10,
+                      fontWeight: 800,
+                    }}
+                  >
+                    시작점
+                  </span>
+                )}
+                <span style={{ color: "#B0A6CC", fontWeight: 600 }}>
+                  {relativeTime(item.occurredAt)}
+                </span>
+              </div>
+              <div style={{ fontSize: 13.5, lineHeight: 1.55, fontWeight: 500, color: "#3A4256" }}>
+                {item.summary}
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -124,6 +222,12 @@ function LivePostCard({
   // 인생의 장이 넘어간 순간 (ADR-014/plan-08) — 일반 포스트와 결이 다른 서사 마디
   const isArcTransition = post.tags.includes("arc_transition");
 
+  // 이야기 사슬 실측 (plan/03 §단계 3→4) — 미가용이면 null, 어포던스·배지 숨김
+  const story = useStory(post.correlationId || undefined);
+  const [storyOpen, setStoryOpen] = useState(false);
+  // 사슬이 1건뿐이면 따라갈 이야기가 없다 — 어포던스를 만들지 않는다
+  const canFollowStory = story !== null && story.items.length > 1;
+
   const submit = () => {
     const text = draft.trim();
     if (!text) return;
@@ -164,6 +268,21 @@ function LivePostCard({
                 }}
               >
                 인생의 장
+              </div>
+            )}
+            {story?.startedByYou && (
+              // 저자성 배지 — "이 드라마의 원작자가 나" (plan/03 §단계 3→4)
+              <div
+                style={{
+                  padding: "2px 10px",
+                  background: STORY_VIOLET,
+                  color: "#fff",
+                  borderRadius: 9999,
+                  fontSize: 11,
+                  fontWeight: 800,
+                }}
+              >
+                당신이 시작한 이야기
               </div>
             )}
           </div>
@@ -210,7 +329,30 @@ function LivePostCard({
             <Icon d={ICON.messageCircle} size={14} /> {comments.length}
           </div>
         )}
+        {canFollowStory && (
+          <div
+            onClick={() => setStoryOpen((open) => !open)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "6px 13px",
+              background: storyOpen ? STORY_VIOLET : "#F4EFFC",
+              color: storyOpen ? "#fff" : STORY_VIOLET,
+              borderRadius: 9999,
+              fontSize: 13,
+              fontWeight: 800,
+              cursor: "pointer",
+              userSelect: "none",
+            }}
+          >
+            <Icon d={ICON.gitBranch} size={14} />{" "}
+            {storyOpen ? "이야기 접기" : "이야기 따라가기"}
+          </div>
+        )}
       </div>
+
+      {storyOpen && story && <StoryThread story={story} />}
 
       {comments.map((cm, i) => (
         <div

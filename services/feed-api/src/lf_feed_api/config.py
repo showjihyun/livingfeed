@@ -25,6 +25,8 @@ class Config:
     cache_ttl_s: int = 30
     default_limit: int = 20
     max_limit: int = 100
+    #: /story 사슬 이벤트 기본 상한 — 한 correlation을 얼마나 길게 따라가는가
+    story_limit: int = 50
     #: 랭킹 계수 (ADR-014): score = w_drama·drama + w_proximity·관계근접 + w_recency·시간감쇠
     #: 다양성 보정(w_diversity)은 correlation_id collapse(같은 서사 사슬 도배 방지)로 집행된다.
     #: 관계 근접도는 Relationship Engine(ADR-016) 부재로 아직 질의에 반영되지 않는다.

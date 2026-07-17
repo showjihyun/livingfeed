@@ -29,6 +29,7 @@ from redis.asyncio import Redis
 from lf_feed_api.config import Config
 from lf_feed_api.reads import ProfileReads
 from lf_feed_api.search import FeedSearch
+from lf_feed_api.story import StoryReads
 from lf_feed_api.timeline import TIMELINE_KINDS, read_timeline
 
 logger = logging.getLogger("lf.feed_api.main")
@@ -49,14 +50,16 @@ def create_app(
     cache: Redis | None = None,
     graph: GraphQueryClient | None = None,
     reads: ProfileReads | None = None,
+    story: StoryReads | None = None,
 ) -> FastAPI:
-    """앱 팩토리 — 테스트는 search/cache/graph/reads 주입, 미주입분은 lifespan이 만든다."""
+    """앱 팩토리 — 테스트는 search/cache/graph/reads/story 주입, 미주입분은 lifespan이 만든다."""
     cfg = cfg or Config.from_env()
 
     owned_search = search is None
     owned_cache = cache is None
     owned_graph = graph is None
     owned_reads = reads is None
+    owned_story = story is None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -74,18 +77,21 @@ def create_app(
             except Exception as e:
                 logger.warning("graph query 미가용(근접도 항 비활성): %s", e)
                 app.state.graph = None
-        if owned_reads:
-            # PG 미가용이 /feed를 죽이면 안 된다 — 프로필/대화 경로만 503으로 격리
+        if owned_reads or owned_story:
+            # PG 미가용이 /feed를 죽이면 안 된다 — 프로필/대화·이야기 경로만 503으로 격리
             try:
                 pool = AsyncConnectionPool(
                     cfg.database_url, min_size=1, max_size=4, open=False
                 )
                 await pool.open(wait=True, timeout=5)
-                app.state.reads = ProfileReads(pool)
             except Exception as e:
-                logger.warning("PG read 미가용(프로필/대화 503): %s", e)
+                logger.warning("PG 미가용(프로필/대화·이야기 503): %s", e)
                 pool = None
-                app.state.reads = None
+            if owned_reads:
+                app.state.reads = ProfileReads(pool) if pool is not None else None
+            if owned_story:
+                # 같은 PG의 es 스키마를 읽는다 — read-only, story.py 머리말의 예외 근거
+                app.state.story = StoryReads(pool) if pool is not None else None
         try:
             yield
         finally:
@@ -115,6 +121,8 @@ def create_app(
         app.state.graph = graph
     if not owned_reads:
         app.state.reads = reads
+    if not owned_story:
+        app.state.story = story
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
@@ -224,6 +232,31 @@ def create_app(
             world_id, actor_id,
             episode_limit=min(episode_limit, cfg.max_limit),
             episode_cursor=_validate_cursor(episode_cursor),
+        )
+
+    @app.get("/story/{correlation_id}")
+    async def story_timeline(
+        correlation_id: str = Path(
+            pattern=ULID_RE.pattern, description="서사 사슬 뿌리 (봉투 correlation_id, ULID)"
+        ),
+        world_id: str = Query("w_main", pattern=r"^w_[a-z0-9_]+$"),
+        player_id: str | None = Query(
+            None, pattern=r"^p_[a-z0-9_]+$",
+            description="요청자 — '당신' 치환과 started_by_you 판정의 기준",
+        ),
+        limit: int = Query(cfg.story_limit, ge=1, description="사슬 이벤트 상한 노브"),
+    ) -> dict:
+        """내 개입에서 시작된 사건 연쇄 — "이 이야기의 시작점" (plan/03 §단계 3→4).
+
+        es(SoT)를 읽는 유일한 읽기 경로다 — 인과 사슬은 원본이 곧 정본
+        (예외 근거는 story.py 머리말). PG 미가용이면 이 경로만 503 (격리 규약).
+        """
+        story = getattr(app.state, "story", None)
+        if story is None:
+            raise HTTPException(503, "이야기 사슬 미가용 — PG(es)와 마이그레이션을 확인하라")
+        return await story.timeline(
+            world_id, correlation_id,
+            player_id=player_id, limit=min(limit, cfg.max_limit),
         )
 
     @app.get("/messages")

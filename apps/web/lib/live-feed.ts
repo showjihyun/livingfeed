@@ -30,6 +30,8 @@ export interface LivePost {
   occurredAt: string;
   dramaScore: number;
   tags: string[];
+  /** 서사 사슬 뿌리 (봉투 correlation_id) — "이야기 따라가기"의 조회 키 (plan/03) */
+  correlationId: string;
 }
 
 /** feed-api 응답 아이템 — os-projector가 평탄화한 색인 문서 */
@@ -43,6 +45,7 @@ interface FeedDoc {
   body: string;
   drama_score: number;
   tags: string[];
+  correlation_id: string;
 }
 
 function fromDoc(doc: FeedDoc): LivePost {
@@ -55,6 +58,7 @@ function fromDoc(doc: FeedDoc): LivePost {
     occurredAt: doc.occurred_at,
     dramaScore: doc.drama_score,
     tags: doc.tags,
+    correlationId: doc.correlation_id,
   };
 }
 
@@ -68,6 +72,7 @@ function fromEnvelope(envelope: EventEnvelope): LivePost {
     occurredAt: envelope.occurred_at,
     dramaScore: p.drama_score,
     tags: p.tags,
+    correlationId: envelope.correlation_id,
   };
 }
 
