@@ -43,6 +43,7 @@ from lf_gateway.feed_stream import (
     parse_feed_event,
     sse_frames,
 )
+from lf_gateway.push import create_push_router, run_push_worker
 from lf_gateway.session import (
     PLAYER_RE,
     handle_command,
@@ -80,38 +81,60 @@ def _parse_filter(world_id: str, types: str, cursor: str | None) -> FeedFilter:
     return FeedFilter(world_id=world_id, kinds=kinds, cursor=cursor)
 
 
-def create_app(cfg: Config | None = None, nc: nats.NATS | None = None) -> FastAPI:
-    """앱 팩토리 — 테스트는 nc(NATS 연결)를 주입한다. 미주입이면 lifespan이 만들고 닫는다."""
+def create_app(
+    cfg: Config | None = None, nc: nats.NATS | None = None, redis: Redis | None = None
+) -> FastAPI:
+    """앱 팩토리 — 테스트는 nc(NATS)·redis 연결을 주입한다. 미주입이면 lifespan이 만들고 닫는다."""
     cfg = cfg or Config.from_env()
     owned_nc = nc is None
+    owned_redis = redis is None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         connection = nc if nc is not None else await nats.connect(cfg.nats_url)
         app.state.js = connection.jetstream()
         app.state.graph = GraphQueryClient(connection, cfg.env)
-        app.state.redis = Redis.from_url(cfg.redis_url)
+        app.state.redis = redis if redis is not None else Redis.from_url(cfg.redis_url)
+        # 서사 푸시 발송 워커 (push.py, plan/11 §D1) — VAPID 키가 서야만 켠다
+        push_task: asyncio.Task | None = None
+        if cfg.vapid_public_key and cfg.vapid_private_key:
+            push_task = asyncio.create_task(
+                run_push_worker(app.state.js, app.state.redis, cfg)
+            )
+        else:
+            logger.info(
+                "서사 푸시 꺼짐 — LF_VAPID_PUBLIC_KEY/LF_VAPID_PRIVATE_KEY 미설정 (dev 기본)"
+            )
         try:
             yield
         finally:
-            await app.state.redis.aclose()
+            if push_task is not None:
+                push_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await push_task
+            if owned_redis:
+                await app.state.redis.aclose()
             if owned_nc:
                 await connection.drain()
 
     app = FastAPI(title="lf-gateway", lifespan=lifespan)
     # 브라우저 EventSource/fetch — 웹 앱(기본 localhost:3000)의 교차 출처 허용.
-    # PUT은 페르소나 스튜디오(관리 API)의 저장 경로다
+    # PUT은 페르소나 스튜디오(관리 API), POST/DELETE는 푸시 구독(push.py)의 경로다
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(cfg.cors_origins),
-        allow_methods=["GET", "PUT"],
+        allow_methods=["GET", "PUT", "POST", "DELETE"],
         allow_headers=["*"],
     )
     # 페르소나 스튜디오 — 파일(SoT) CRUD 중재, es 적재 없음 (admin.py)
     app.include_router(create_admin_router(cfg))
+    # 서사 푸시 구독 저장/해지 — 구독은 상태가 아니라 전달 채널, es 적재 없음 (push.py)
+    app.include_router(create_push_router(cfg))
     if not owned_nc:
         app.state.js = nc.jetstream()
         app.state.graph = GraphQueryClient(nc, cfg.env)
+    if not owned_redis:
+        app.state.redis = redis
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:

@@ -38,6 +38,16 @@ class Config:
     #: 관리 API 공유 토큰 — 설정되면 /admin/* 에 Authorization: Bearer 일치를
     #: 요구한다(403). 미설정(dev)은 열림 — 로컬 밖 노출 전 반드시 설정하라
     admin_token: str | None = None
+    #: 서사 푸시(Web Push, plan/11 §D1) — 두 키가 모두 있어야 발송 워커가 켜진다
+    #: (dev 기본 꺼짐). 키 생성(1회, 실키 커밋 금지 — env로만 주입하라):
+    #:   uv run --package lf-gateway vapid --gen            # private/public_key.pem
+    #:   uv run --package lf-gateway vapid --applicationServerKey  # 공개키(base64url)
+    vapid_public_key: str | None = None  # FE 구독용 applicationServerKey (base64url)
+    vapid_private_key: str | None = None  # private_key.pem 경로 또는 raw base64url 키
+    #: 푸시 서비스에 보내는 연락처 (RFC 8292 — mailto: 필수)
+    vapid_subject: str = "mailto:ops@livingfeed.local"
+    #: 발송 워커 durable — 인스턴스가 여럿이어도 플레이어에게 알림은 한 번이다
+    push_durable: str = "gateway-push"
 
     @classmethod
     def from_env(cls) -> Config:
@@ -53,4 +63,7 @@ class Config:
             cors_origins=tuple(o.strip() for o in origins.split(",") if o.strip()),
             personas_dir=Path(os.environ.get("LF_PERSONAS_DIR", "agents/personas")),
             admin_token=os.environ.get("LF_ADMIN_TOKEN") or None,
+            vapid_public_key=os.environ.get("LF_VAPID_PUBLIC_KEY") or None,
+            vapid_private_key=os.environ.get("LF_VAPID_PRIVATE_KEY") or None,
+            vapid_subject=os.environ.get("LF_VAPID_SUBJECT", "mailto:ops@livingfeed.local"),
         )

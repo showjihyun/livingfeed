@@ -1,8 +1,13 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import type { KeyboardEvent } from "react";
 
 import { ICON } from "@/lib/data";
 import { relativeTime } from "@/lib/live-feed";
 import type { DmThread } from "@/lib/messages";
+import { disablePush, enablePush, getPushState } from "@/lib/push";
+import type { PushState } from "@/lib/push";
 import type { DmMessage } from "@/lib/types";
 
 import { Face } from "./Face";
@@ -43,6 +48,68 @@ interface DmTabProps {
   onBack: () => void;
 }
 
+/**
+ * 서사 푸시 벨 — 자리를 비운 사이의 답장·안부를 브라우저 알림으로 (plan/11 §D1).
+ * 구독 중이면 채워진 벨, 아니면 빈 벨. 권한이 거부됐으면 비활성 + 안내 툴팁.
+ * 미지원·게이트웨이 미가용이면 아예 그리지 않는다 (조용한 강등 — 다크 패턴 금지).
+ */
+function PushBell() {
+  const [state, setState] = useState<PushState>("unsupported");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    getPushState().then((s) => {
+      if (alive) setState(s);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (state === "unsupported") return null;
+  const on = state === "on";
+  const denied = state === "denied";
+  const title = denied
+    ? "브라우저 설정에서 알림 권한이 꺼져 있어요"
+    : on
+      ? "새 답장 알림 끄기"
+      : "자리를 비운 사이 도착한 답장을 알림으로 받기";
+  const toggle = async () => {
+    if (busy || denied) return;
+    setBusy(true);
+    try {
+      setState(on ? await disablePush() : await enablePush());
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div
+      onClick={toggle}
+      title={title}
+      className={denied ? undefined : styles.press92}
+      style={{
+        width: 30,
+        height: 30,
+        borderRadius: "50%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: denied ? "default" : "pointer",
+        background: on ? "#EDF3FD" : "#F2F6FC",
+        opacity: denied ? 0.45 : busy ? 0.6 : 1,
+      }}
+    >
+      <Icon
+        d={ICON.bell}
+        size={15}
+        color={on ? "#5F7EC9" : "#8C97AF"}
+        style={on ? { fill: "currentColor" } : undefined}
+      />
+    </div>
+  );
+}
+
 export function DmTab(props: DmTabProps) {
   return props.openActorId === null ? (
     <InboxList {...props} />
@@ -72,9 +139,12 @@ function InboxList({
         }}
       >
         <div style={{ fontSize: 20, fontWeight: 800 }}>받은 것</div>
-        <div style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600 }}>
-          {/* 빈 인박스의 시작점 카드(데모 인트로)는 아직 대화가 아니다 */}
-          대화 {emptyInbox ? 0 : threads.length}개
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600 }}>
+            {/* 빈 인박스의 시작점 카드(데모 인트로)는 아직 대화가 아니다 */}
+            대화 {emptyInbox ? 0 : threads.length}개
+          </div>
+          <PushBell />
         </div>
       </div>
 

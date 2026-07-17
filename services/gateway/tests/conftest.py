@@ -5,12 +5,15 @@ import pytest
 from lf_eventstore.testing import (
     SKIP_DB,
     SKIP_NATS,
+    SKIP_REDIS,
     assert_test_database,
     assert_test_nats,
     test_database_url,
     test_nats_url,
+    test_redis_url,
 )
 from psycopg import AsyncConnection
+from redis.asyncio import Redis
 
 # psycopg 계열 규약과 동일 — Windows 로컬 개발 배려 (Selector 이벤트 루프)
 if sys.platform == "win32":
@@ -20,6 +23,21 @@ if sys.platform == "win32":
 # (lf_eventstore.testing, 2026-07-17 사고 2건의 가드)
 NATS_URL = test_nats_url()
 PG_DSN = test_database_url()
+REDIS_URL = test_redis_url()
+
+
+@pytest.fixture
+async def redis():
+    """깨끗한 테스트 전용 DB의 Redis 연결 — flushdb는 명시된 표적에만 (actor conftest 규약)."""
+    if REDIS_URL is None:
+        pytest.skip(SKIP_REDIS)
+    client = Redis.from_url(REDIS_URL)
+    await client.ping()
+    await client.flushdb()
+    try:
+        yield client
+    finally:
+        await client.aclose()
 
 
 @pytest.fixture
