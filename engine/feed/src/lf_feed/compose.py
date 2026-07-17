@@ -211,6 +211,56 @@ def build_arc_post_event(
     )
 
 
+#: 새 인물의 등장 — 세계가 한 명을 받아들이는 순간 (페르소나 스튜디오의 방생)
+DEBUT_DRAMA = 0.7
+
+
+def evaluate_debut(cfg: ScoringConfig) -> tuple[float, float]:
+    """데뷔의 (drama, worthiness) — 희소한 마디 + 편집 부스트로 항상 승격."""
+    score = worthiness(DEBUT_DRAMA, 0.0, 1.0, 1.0, cfg)
+    return DEBUT_DRAMA, score
+
+
+def build_debut_post_event(
+    envelope: dict[str, Any], *, drama: float, score: float
+) -> NewEvent:
+    """actor.identity.declared → feed.post.published — 데뷔는 세계의 사건이다.
+
+    정체성은 세계당 1회 선언이라 도배가 없다. created_by(스튜디오 창조자)가
+    있으면 포스트로 승계된다 — '당신이 빚은 인물' 저자성 표식의 원천 (plan/03).
+    이름·소개는 선언 payload가 원천이라 명부 해석이 필요 없다.
+    """
+    payload = envelope["payload"]
+    author_id = envelope["actor_id"]
+    post_id = derive_post_id(envelope["event_id"])
+    return NewEvent(
+        world_id=envelope["world_id"],
+        stream="feed",
+        stream_key=post_id,
+        type=FEED_POST_TYPE,
+        tick=envelope["tick"],
+        actor_id=author_id,
+        causation_id=envelope["event_id"],
+        correlation_id=envelope["correlation_id"],
+        event_id=post_id,
+        payload={
+            "visibility": "world",
+            "title": f"{payload['name']}, 세계에 첫발을 딛다"[:200],
+            "body": payload["bio"][:2000],
+            "narration_kind": "template",
+            "participants": [author_id],
+            "community_id": None,
+            "location_id": None,
+            "drama_score": round(drama, 4),
+            "worthiness": round(score, 4),
+            "source_event_type": envelope["type"],
+            "tags": ["debut", payload["archetype"]],
+            "created_by": payload.get("created_by"),
+            "media": [],
+        },
+    )
+
+
 def evaluate_goal_achievement(
     envelope: dict[str, Any], cfg: ScoringConfig
 ) -> tuple[float, float]:

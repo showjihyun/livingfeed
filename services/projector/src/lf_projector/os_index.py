@@ -67,6 +67,8 @@ def envelope_to_doc(envelope: dict[str, Any]) -> dict[str, Any]:
         "worthiness": p["worthiness"],
         "source_event_type": p["source_event_type"],
         "tags": p["tags"],
+        # 데뷔 포스트의 창조자 (페르소나 스튜디오) — '당신이 빚은 인물' 표식 원천
+        "created_by": p.get("created_by"),
         "media": p["media"],
     }
 

@@ -9,6 +9,7 @@
 
 import { useEffect, useState, type KeyboardEvent } from "react";
 
+import { PLAYER_ID } from "@/lib/config";
 import { ICON } from "@/lib/data";
 import type { LivePost, LiveStatus } from "@/lib/live-feed";
 import { relativeTime } from "@/lib/live-feed";
@@ -221,6 +222,10 @@ function LivePostCard({
   const commentable = isCommentable(post);
   // 인생의 장이 넘어간 순간 (ADR-014/plan-08) — 일반 포스트와 결이 다른 서사 마디
   const isArcTransition = post.tags.includes("arc_transition");
+  // 새 인물의 데뷔 (페르소나 스튜디오의 방생) — 세계가 한 명을 받아들인 순간
+  const isDebut = post.tags.includes("debut");
+  // 내가 빚은 인물의 데뷔 — 저자성 표식 (plan/03: 실세의 보상은 저자성이다)
+  const isYourCreation = isDebut && post.createdBy === PLAYER_ID;
 
   // 이야기 사슬 실측 (plan/03 §단계 3→4) — 미가용이면 null, 어포던스·배지 숨김
   const story = useStory(post.correlationId || undefined);
@@ -241,8 +246,12 @@ function LivePostCard({
   return (
     <div
       style={{
-        border: isArcTransition ? "1.5px solid #D8CCF2" : "1.5px solid #E2EAF6",
-        background: isArcTransition ? "#FBFAFE" : undefined,
+        border: isDebut
+          ? "1.5px solid #C7E6D2"
+          : isArcTransition
+            ? "1.5px solid #D8CCF2"
+            : "1.5px solid #E2EAF6",
+        background: isDebut ? "#FAFEFB" : isArcTransition ? "#FBFAFE" : undefined,
         borderRadius: 20,
         padding: "18px 24px",
         display: "flex",
@@ -270,7 +279,36 @@ function LivePostCard({
                 인생의 장
               </div>
             )}
-            {story?.startedByYou && (
+            {isDebut && (
+              <div
+                style={{
+                  padding: "2px 10px",
+                  background: "#E7F6EC",
+                  color: "#2F8F55",
+                  borderRadius: 9999,
+                  fontSize: 11,
+                  fontWeight: 800,
+                }}
+              >
+                새 얼굴
+              </div>
+            )}
+            {isYourCreation && (
+              // 창조의 저자성 — "내가 빚은 사람이 저기서 살아간다" (plan/03)
+              <div
+                style={{
+                  padding: "2px 10px",
+                  background: STORY_VIOLET,
+                  color: "#fff",
+                  borderRadius: 9999,
+                  fontSize: 11,
+                  fontWeight: 800,
+                }}
+              >
+                당신이 빚은 인물
+              </div>
+            )}
+            {story?.startedByYou && !isYourCreation && (
               // 저자성 배지 — "이 드라마의 원작자가 나" (plan/03 §단계 3→4)
               <div
                 style={{

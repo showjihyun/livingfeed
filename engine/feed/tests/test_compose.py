@@ -7,11 +7,13 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 from lf_feed.compose import (
     build_arc_post_event,
+    build_debut_post_event,
     build_goal_post_event,
     build_post_event,
     derive_post_id,
     evaluate,
     evaluate_arc_transition,
+    evaluate_debut,
     evaluate_goal_achievement,
 )
 from lf_feed.scoring import RarityTracker, ScoringConfig
@@ -171,6 +173,59 @@ def test_first_arc_opens_the_story():
     )
     assert "이야기의 첫 장이 열리다" in event.payload["title"]
     assert "정착·방황기" in event.payload["body"]
+
+
+IDENTITY = {
+    "event_id": "01JZK7Q3W0000000000000000D",
+    "world_id": "w_main",
+    "stream": "actor",
+    "type": "actor.identity.declared",
+    "schema_version": 1,
+    "actor_id": "a_saebyeok_jung",
+    "tick": 300,
+    "occurred_at": "2026-07-17T12:00:00Z",
+    "causation_id": None,
+    "correlation_id": "01JZK7Q3W0000000000000000D",
+    "payload": {
+        "name": "정새벽",
+        "archetype": "quiet_dreamer",
+        "bio": "28세 새벽 배송 기사. 남들이 잠든 시간에 도시를 돌며 소설의 문장을 줍는다.",
+        "goals": [{"description": "첫 단편을 완성한다", "priority": 0.8}],
+        "created_by": "p_observer_0417",
+    },
+}
+
+
+def test_debut_post_marks_worlds_newest_resident():
+    """정체성 선언 → 데뷔 포스트 — 방생은 세계의 사건이다 (페르소나 스튜디오).
+
+    세계당 1회 선언이라 도배가 없고, created_by가 승계돼 '당신이 빚은 인물'
+    저자성 표식의 원천이 된다 (plan/03 저자성).
+    """
+    cfg = ScoringConfig()
+    drama, score = evaluate_debut(cfg)
+    assert score >= cfg.threshold  # 데뷔는 언제나 피드에 닿는다
+
+    event = build_debut_post_event(IDENTITY, drama=drama, score=score)
+    schema = registry.payload_schema("feed.post.published")
+    assert list(Draft202012Validator(schema).iter_errors(event.payload)) == []
+    assert event.payload["title"] == "정새벽, 세계에 첫발을 딛다"
+    assert event.payload["visibility"] == "world"
+    assert IDENTITY["payload"]["bio"] in event.payload["body"]
+    assert event.payload["tags"] == ["debut", "quiet_dreamer"]
+    assert event.payload["created_by"] == "p_observer_0417"
+    assert event.actor_id == "a_saebyeok_jung"
+    assert event.causation_id == IDENTITY["event_id"]
+    assert event.event_id == event.stream_key == derive_post_id(IDENTITY["event_id"])
+
+
+def test_debut_post_without_creator_is_system_born():
+    # 시스템 태생(기존 8·16인)의 선언에는 created_by가 없다 — null로 정직하게
+    payload = {k: v for k, v in IDENTITY["payload"].items() if k != "created_by"}
+    event = build_debut_post_event(
+        {**IDENTITY, "payload": payload}, drama=0.7, score=0.5
+    )
+    assert event.payload["created_by"] is None
 
 
 def test_evaluate_passes_interpersonal_speak_but_filters_spam():

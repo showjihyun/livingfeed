@@ -1,4 +1,4 @@
-"""Redis 타임라인 — fan-out-on-write 개인 피드 (ADR-014 §2단, ADR-003).
+﻿"""Redis 타임라인 — fan-out-on-write 개인 피드 (ADR-014 §2단, ADR-003).
 
 팔로우의 두 원천이 공존한다:
 - 명시 팔로우 (player.follow.changed — 진짜 팔로우 모델): 플레이어의 선언.
@@ -140,6 +140,7 @@ def receipt_doc(envelope: dict[str, Any]) -> dict[str, Any] | None:
         "worthiness": 0.0,
         "source_event_type": envelope["type"],
         "tags": ["relationship", p["stage"]],
+        "created_by": None,
         "media": [],
     }
 
@@ -182,6 +183,7 @@ def reply_to_doc(envelope: dict[str, Any]) -> dict[str, Any]:
         "worthiness": 0.0,
         "source_event_type": envelope["type"],
         "tags": [p["channel"]],
+        "created_by": None,
         "media": [],
     }
 

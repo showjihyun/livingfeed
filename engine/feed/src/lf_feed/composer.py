@@ -22,11 +22,13 @@ from psycopg import AsyncConnection
 from lf_feed.compose import (
     PRINCIPAL,
     build_arc_post_event,
+    build_debut_post_event,
     build_goal_post_event,
     build_incident_post_event,
     build_post_event,
     evaluate,
     evaluate_arc_transition,
+    evaluate_debut,
     evaluate_goal_achievement,
     evaluate_incident,
     load_actor_names,
@@ -42,6 +44,7 @@ INCIDENT_EVENT_TYPE = "world.incident.occurred"
 GOAL_ACHIEVED_TYPE = "actor.goal.achieved"
 ARC_EVENT_TYPE = "system.director.arc_planned"
 BOOST_EVENT_TYPE = "system.director.feed_boosted"
+DEBUT_EVENT_TYPE = "actor.identity.declared"
 
 
 async def previous_arc_stage(
@@ -122,6 +125,11 @@ class FeedComposer:
             event = build_goal_post_event(
                 envelope, drama=drama, score=score, actor_names=self._names
             )
+        elif envelope["type"] == DEBUT_EVENT_TYPE:
+            # 데뷔 — 세계가 새 인물을 받아들이는 순간 (페르소나 스튜디오의 방생).
+            # 정체성은 세계당 1회 선언이라 도배가 없다 (plan/03 저자성)
+            drama, score = evaluate_debut(self._cfg.scoring)
+            event = build_debut_post_event(envelope, drama=drama, score=score)
         else:
             drama, score = evaluate(
                 envelope, self._rarity, self._cfg.scoring,
@@ -218,8 +226,8 @@ class FeedComposer:
                 # rule 프로바이더면 narrate 미지원이라 자동 템플릿 폴백된다.
                 if self._narrator is None and cfg.narrate:
                     self._narrator = FeedNarrator(nc, cfg.env)
-                # 편집 소스 4종: 액터 행동·목표 완주(LF_ACTOR) + 세계 사건(LF_WORLD)
-                # + 인생 아크 계획(LF_SYS — 장 전환분만 승격)
+                # 편집 소스 5종: 액터 행동·목표 완주·데뷔(LF_ACTOR) + 세계 사건
+                # (LF_WORLD) + 인생 아크 계획(LF_SYS — 장 전환분만 승격)
                 subs = [
                     await js.pull_subscribe(
                         f"lf.{cfg.env}.*.{SOURCE_EVENT_TYPE}",
@@ -241,10 +249,14 @@ class FeedComposer:
                         f"lf.{cfg.env}.*.{BOOST_EVENT_TYPE}",
                         durable=f"{cfg.durable}-boost", stream="LF_SYS",
                     ),
+                    await js.pull_subscribe(
+                        f"lf.{cfg.env}.*.{DEBUT_EVENT_TYPE}",
+                        durable=f"{cfg.durable}-debut", stream=cfg.source_stream,
+                    ),
                 ]
                 logger.info(
                     "feed composer 대기 — durable=%s threshold=%.2f "
-                    "(소스: 행동+세계사건+목표완주+아크전환+편집조명)",
+                    "(소스: 행동+세계사건+목표완주+아크전환+편집조명+데뷔)",
                     cfg.durable, cfg.scoring.threshold,
                 )
                 while not stop.is_set():

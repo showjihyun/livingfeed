@@ -75,6 +75,10 @@ class FeedPostPublished(BaseModel):
     tags: list[constr(pattern=r"^[a-z_]+$")] = Field(
         ..., description="필터·검색용 태그 (action_kind 등)"
     )
+    created_by: constr(pattern=r"^p_[a-z0-9_]+$") | None = Field(
+        None,
+        description="포스트 주인공을 빚은 플레이어 (데뷔 포스트, 페르소나 스튜디오) — '당신이 빚은 인물' 저자성 표식의 원천. 해당 없으면 null/생략 (하위 호환)",
+    )
     media: list[dict[str, Any]] = Field(
         ..., description="미디어 슬롯 (ADR-014) — MVP는 빈 배열"
     )
