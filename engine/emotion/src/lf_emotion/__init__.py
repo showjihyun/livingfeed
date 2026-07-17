@@ -18,6 +18,9 @@ from lf_emotion.engine import (
     appraise_interaction as appraise_interaction,
 )
 from lf_emotion.engine import (
+    appraise_post as appraise_post,
+)
+from lf_emotion.engine import (
     decay as decay,
 )
 from lf_emotion.engine import (

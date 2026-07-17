@@ -60,8 +60,10 @@ from lf_actor.reflection import (
 )
 from lf_actor.relationship import PRINCIPAL as REL_PRINCIPAL
 from lf_actor.relationship import PendingRelEvent, RelationshipAdapter
+from lf_actor.rhythm import default_params, posting_moment
 from lf_actor.rules import fallback_action, fallback_reply, routine_action
 from lf_actor.semantic import SemanticMemory
+from lf_actor.social import extract_comment, with_comment_path
 
 logger = logging.getLogger("lf.actor.phases")
 
@@ -85,6 +87,8 @@ _REPLYABLE = {"player.dm.sent": "dm", "player.comment.posted": "comment"}
 #: Director의 사적 지목 (nudge_perception) — 반응을 기대하는 관측이다 (ADR-013)
 OBSERVATION_TYPE = "world.observation.surfaced"
 INCIDENT_TYPE = "world.incident.occurred"
+#: 이웃의 피드 글 — 라우터 피드 순환이 배달한다 (액터 소셜 루프). LOD는 touch만
+FEED_TYPE = "feed.post.published"
 #: 이 강도 이상의 세계 사건은 잠든 액터도 깨운다 — 고중요도 이벤트 승격 (ADR-011 §관심 신호)
 HIGH_INTENSITY = 0.7
 
@@ -113,15 +117,21 @@ def lod_after_perception(
 ) -> ActorLod:
     """지각한 항목들 → LOD 갱신 (ADR-011 §관심 신호).
 
-    Hot 승격 신호 셋: 응답 의무가 있는 상호작용(dm/comment — 상호작용 우선,
-    ADR-012 규칙 2), Director의 사적 지목(nudge 관측 — 반응을 기대하고 심은
-    지각이라 잠든 채 두면 다음 due까지 썩는다, ADR-013), 고강도 세계 사건
-    (내 삶을 흔든 사건은 곧바로 반응하게 한다 — 임계는 high_intensity, 운영
-    설정으로 조정 가능). 그 밖의 지각(반응·저강도 사건)은 관심 신호 —
-    티어는 유지하고 강등 타이머만 리셋한다(touch).
+    Hot 승격 신호 넷: 응답 의무가 있는 상호작용(dm/comment — 상호작용 우선,
+    ADR-012 규칙 2), 내 글에 달린 액터 댓글(응답 의무와 동형 — 액터 소셜 루프),
+    Director의 사적 지목(nudge 관측 — 반응을 기대하고 심은 지각이라 잠든 채
+    두면 다음 due까지 썩는다, ADR-013), 고강도 세계 사건(내 삶을 흔든 사건은
+    곧바로 반응하게 한다 — 임계는 high_intensity, 운영 설정으로 조정 가능).
+    그 밖의 지각(반응·저강도 사건·이웃의 피드 글)은 관심 신호 — 티어는
+    유지하고 강등 타이머만 리셋한다(touch). 남의 글이 잠든 사람을 깨우진 않는다.
     """
     for envelope in items:
         if envelope["type"] in _REPLYABLE or envelope["type"] == OBSERVATION_TYPE:
+            return promote(lod, tick)
+        if (
+            envelope["type"] == MESSAGE_TYPE
+            and envelope["payload"].get("channel") == "comment"
+        ):
             return promote(lod, tick)
         if (
             envelope["type"] == INCIDENT_TYPE
@@ -186,6 +196,11 @@ class ActorPhases:
         self._replies: list[tuple[str, dict[str, Any], str]] = []
         #: perceive가 채우는 tick당 수신함
         self._inbox: dict[str, list[dict[str, Any]]] = {}
+        #: 피드에서 본 이웃의 글 — 다음 LLM decide까지 들고 간다 (액터 소셜 루프).
+        #: 그 decide에서 소진된다 — 댓글 기회는 한 번뿐이다 (상한: seen_posts_max)
+        self._seen_posts: dict[str, list[dict[str, Any]]] = {}
+        #: 이번 tick의 자발 댓글: (actor_id, 대상 포스트 봉투, 텍스트) — RESOLVE 적재
+        self._pending_comments: list[tuple[str, dict[str, Any], str]] = []
         #: perceive의 감정 평가 결과 — RESOLVE에서 engine.emotion으로 적재 (ADR-015)
         self._shifts: list[PendingShift] = []
         #: RESOLVE가 남기는 이번 tick의 응고 재료 — CONSOLIDATE의 관계·기억 입력 (ADR-008/016)
@@ -291,11 +306,21 @@ class ActorPhases:
             if not items:
                 continue  # 승격 신호는 기억·감정·목표에 들어가지 않는다 (메타 제어)
             self._inbox[actor_id] = items
+            names = {p.id: p.name for p in self._personas.values()}
             for envelope in items:
-                await self._memory.add(ctx.world_id, actor_id, describe_interaction(envelope))
+                await self._memory.add(
+                    ctx.world_id, actor_id, describe_interaction(envelope, names)
+                )
+            # 본 글은 다음 LLM decide까지 들고 간다 — 자발 댓글의 재료 (소셜 루프)
+            if (feed_items := [e for e in items if e["type"] == FEED_TYPE]):
+                seen = self._seen_posts.setdefault(actor_id, [])
+                seen += feed_items
+                keep = int(default_params()["social"]["seen_posts_max"])
+                del seen[:-keep]  # 오래된 것부터 밀려난다
             if self._emotion is not None:
                 shifts, mood_line = await self._emotion.appraise(
-                    ctx.world_id, self._personas[actor_id], items, tick=ctx.tick
+                    ctx.world_id, self._personas[actor_id], items, tick=ctx.tick,
+                    edges=await self._post_edges(ctx.world_id, actor_id, items),
                 )
                 self._shifts.extend(shifts)
                 # 현재 감정이 다음 결정의 컨텍스트가 된다 (ADR-015 §행동 연결)
@@ -311,6 +336,7 @@ class ActorPhases:
     async def decide(self, ctx: TickContext) -> dict[str, int]:
         self._intents = []
         self._replies = []
+        self._pending_comments = []
         decided = {"hot": 0, "warm": 0, "cold": 0}
         due = due_by_tier(self._lods, ctx.tick)
         world = WorldContext(world_id=ctx.world_id, tick=ctx.tick, world_time=ctx.world_time)
@@ -318,28 +344,11 @@ class ActorPhases:
 
         for tier in (Tier.HOT, Tier.WARM):
             for actor_id in due[tier]:
-                persona = self._personas[actor_id]
-                working = await self._memory.recent(ctx.world_id, actor_id)
-                arc = await self._arc_of(ctx.world_id, actor_id)
-                # 현재 욕구·목표를 결정 앞에 세운다 — 액터가 자기 목표를 좇게 (ADR-012).
-                # 아크(있으면)가 미는 욕구의 목표가 앞자리다 (plan/08 전환점 사슬)
-                if self._goal is not None:
-                    summary = await self._goal.summary(
-                        ctx.world_id, persona,
-                        arc_stage=arc.stage if arc is not None else None,
-                    )
-                    working = [summary, *working]
-                episodes = await self._recall(ctx.world_id, actor_id, working)
-                relationships = await self._relationship_summary(ctx.world_id, actor_id)
-                bundle = build(
-                    persona, working, world,
-                    episodes=episodes, arc=arc, relationships=relationships,
-                )
-                payload = await self._ai.decide_action(
-                    bundle, schema, tier=tier.value, actor_id=actor_id, tick=ctx.tick
+                payload, trace_id = await self._llm_action(
+                    ctx, world, actor_id, schema, tier=tier.value
                 )
                 if payload is None:
-                    payload = fallback_action(persona, ctx.tick, bundle.trace_id)
+                    payload = fallback_action(self._personas[actor_id], ctx.tick, trace_id)
                 # LLM이 지어낸 대상을 소스에서 끊는다 — 피드·관계·그래프로 번지기 전에
                 payload = sanitize_target(payload, set(self._personas), actor_id)
                 self._intents.append((actor_id, tier.value, payload))
@@ -349,6 +358,11 @@ class ActorPhases:
         for actor_id in sorted(self._inbox):
             persona = self._personas[actor_id]
             for envelope in self._inbox[actor_id]:
+                if envelope["type"] == MESSAGE_TYPE:
+                    # 내 글에 달린 액터 댓글 — 응답 의무와 동형, 반드시 한 번 답한다
+                    # (액터 소셜 루프). 답글은 라우터가 더 돌리지 않는다 (깊이 1)
+                    await self._reply_to_comment(ctx, world, actor_id, envelope)
+                    continue
                 if envelope["type"] not in _REPLYABLE:
                     continue
                 working = await self._memory.recent(ctx.world_id, actor_id)
@@ -381,7 +395,131 @@ class ActorPhases:
             payload = sanitize_target(payload, set(self._personas), actor_id)
             self._intents.append((actor_id, Tier.COLD.value, payload))
             decided["cold"] += 1
+
+        # SNS 포스팅 리듬 — due가 아니어도 생활 패턴상 '근황을 남기고 싶은 순간'인
+        # 액터는 LLM decide를 돈다. 표현이 목적이므로 AI 실패는 규칙 문장으로 채우지
+        # 않고 조용히 생략한다. 자기 발화는 관심 신호가 아니다 — LOD 불변 (ADR-011).
+        already = {actor_id for actors in due.values() for actor_id in actors}
+        rhythm = default_params()
+        for actor_id in sorted(set(self._personas) - already):
+            persona = self._personas[actor_id]
+            if not posting_moment(actor_id, persona.lifestyle, ctx.world_time, rhythm):
+                continue
+            payload, _ = await self._llm_action(
+                ctx, world, actor_id, schema, tier=Tier.WARM.value, purpose="post_status"
+            )
+            if payload is None:
+                continue  # 머뭇거림 — 포스팅 모먼트는 지나가면 그만이다
+            payload = sanitize_target(payload, set(self._personas), actor_id)
+            self._intents.append((actor_id, "rhythm", payload))
+            # tick.completed의 actors_decided는 hot/warm/cold로 닫힌 스키마다
+            # (packages/schemas) — 리듬 분은 warm에 합산하고 로그로만 구분한다
+            decided["warm"] += 1
+            logger.info("리듬 결정: %s tick=%d (근황 모먼트 — warm 합산)", actor_id, ctx.tick)
         return decided
+
+    async def _reply_to_comment(
+        self, ctx: TickContext, world: WorldContext, actor_id: str, envelope: dict[str, Any]
+    ) -> None:
+        """내 글에 달린 액터 댓글에 답한다 — 표현은 LLM, 보증은 규칙 폴백.
+
+        플레이어 응답 의무와 동형이다 (반드시 한 번). 답글 이벤트의 in_reply_to는
+        댓글 event_id — post_id와 달라 라우터의 순환 기준에서 벗어난다 (깊이 1 끝).
+        """
+        persona = self._personas[actor_id]
+        working = await self._memory.recent(ctx.world_id, actor_id)
+        arc = await self._arc_of(ctx.world_id, actor_id)
+        relationships = await self._relationship_summary(ctx.world_id, actor_id)
+        bundle = build(
+            persona, working, world, purpose="reply_to_comment",
+            episodes=await self._recall(ctx.world_id, actor_id, working),
+            arc=arc, relationships=relationships,
+        )
+        text = await self._ai.converse(bundle, tier="hot", actor_id=actor_id, tick=ctx.tick)
+        if text is None:
+            text = fallback_reply(persona, envelope["payload"]["text"])
+        self._replies.append((actor_id, envelope, text))
+
+    async def _llm_action(
+        self,
+        ctx: TickContext,
+        world: WorldContext,
+        actor_id: str,
+        schema: dict[str, Any],
+        *,
+        tier: str,
+        purpose: str = "decide_action",
+    ) -> tuple[dict[str, Any] | None, str]:
+        """컨텍스트 조립 → LLM 행동 결정. 반환: (payload 또는 None, trace_id).
+
+        실패(None) 처리는 호출자의 몫이다 — due 결정은 규칙 폴백, 리듬은 생략.
+        피드에서 본 글이 있으면 스키마에 선택적 comment 경로를 열고 컨텍스트에
+        글을 놓는다 — 댓글 여부는 LLM의 몫, 규칙 폴백은 댓글을 만들지 않는다.
+        """
+        persona = self._personas[actor_id]
+        working = await self._memory.recent(ctx.world_id, actor_id)
+        arc = await self._arc_of(ctx.world_id, actor_id)
+        # 현재 욕구·목표를 결정 앞에 세운다 — 액터가 자기 목표를 좇게 (ADR-012).
+        # 아크(있으면)가 미는 욕구의 목표가 앞자리다 (plan/08 전환점 사슬)
+        if self._goal is not None:
+            summary = await self._goal.summary(
+                ctx.world_id, persona,
+                arc_stage=arc.stage if arc is not None else None,
+            )
+            working = [summary, *working]
+        episodes = await self._recall(ctx.world_id, actor_id, working)
+        relationships = await self._relationship_summary(ctx.world_id, actor_id)
+        seen = self._seen_posts.get(actor_id, [])
+        if seen:
+            schema = with_comment_path(schema, seen)
+        bundle = build(
+            persona, working, world, purpose=purpose,
+            episodes=episodes, arc=arc, relationships=relationships,
+            seen_posts=[self._post_line(e) for e in seen] or None,
+        )
+        payload = await self._ai.decide_action(
+            bundle, schema, tier=tier, actor_id=actor_id, tick=ctx.tick
+        )
+        if payload is None:
+            return None, bundle.trace_id  # 머뭇거림 — 본 글은 다음 decide로 넘어간다
+        if seen:
+            payload, comment = extract_comment(payload, seen)
+            self._seen_posts.pop(actor_id, None)  # 댓글 기회는 이 결정에 소진됐다
+            cap = int(default_params()["social"]["max_comments_per_tick"])
+            written = sum(1 for a, _, _ in self._pending_comments if a == actor_id)
+            if comment is not None and written < cap:
+                post, text = comment
+                self._pending_comments.append((actor_id, post, text))
+        return payload, bundle.trace_id
+
+    def _post_line(self, envelope: dict[str, Any]) -> str:
+        """본 글 한 줄 — [post_id] 작성자: "제목" — 본문 일부 (comment 경로의 좌표)."""
+        author = envelope.get("actor_id") or "?"
+        persona = self._personas.get(author)
+        name = persona.name if persona is not None else author
+        p = envelope["payload"]
+        return f"[{envelope['event_id']}] {name}: \"{p['title']}\" — {p['body'][:100]}"
+
+    async def _post_edges(
+        self, world_id: str, actor_id: str, items: list[dict[str, Any]]
+    ) -> dict[str, dict[str, float]]:
+        """피드 글 작성자별 관계 차원 — appraise_post의 관계 입력 (액터 소셜 루프).
+
+        엣지가 없는 작성자는 담지 않는다 — 모르는 사람의 글은 마음을 흔들지 않는다.
+        """
+        if self._relationship is None:
+            return {}
+        edges: dict[str, dict[str, float]] = {}
+        for envelope in items:
+            if envelope["type"] != FEED_TYPE:
+                continue
+            author = envelope.get("actor_id")
+            if not author or author in edges:
+                continue
+            state = await self._relationship.load(world_id, actor_id, author)
+            if state is not None:
+                edges[author] = state.dimensions
+        return edges
 
     async def _recall(self, world_id: str, actor_id: str, working: list[str]) -> list[str]:
         """장기 기억 회상 — 최신 지각을 질의로 유사 에피소드 top-k (ADR-008)."""
@@ -470,6 +608,27 @@ class ActorPhases:
     def _reply_event(
         self, ctx: TickContext, actor_id: str, source: dict[str, Any], text: str
     ) -> NewEvent:
+        if source["type"] == MESSAGE_TYPE:
+            # 액터 댓글에의 답글 — in_reply_to가 댓글 event_id라 순환 기준(post_id와
+            # 동일)에서 벗어난다: 답글은 다시 의무를 만들지 않는다 (깊이 1 종결)
+            return NewEvent(
+                world_id=ctx.world_id,
+                stream="actor",
+                stream_key=actor_id,
+                type=MESSAGE_TYPE,
+                tick=ctx.tick,
+                actor_id=actor_id,
+                causation_id=source["event_id"],
+                correlation_id=source["correlation_id"],  # 글이 시작한 사슬을 잇는다
+                payload={
+                    "channel": "comment",
+                    "target_player_id": None,
+                    "target_actor_id": source["actor_id"],  # 댓글 작성자에게
+                    "text": text[:1000],
+                    "post_id": source["payload"]["post_id"],
+                    "in_reply_to": source["event_id"],
+                },
+            )
         channel = _REPLYABLE[source["type"]]
         return NewEvent(
             world_id=ctx.world_id,
@@ -490,6 +649,33 @@ class ActorPhases:
             },
         )
 
+    def _comment_event(
+        self, ctx: TickContext, actor_id: str, post: dict[str, Any], text: str
+    ) -> NewEvent:
+        """이웃의 글에 남기는 자발 댓글 (액터 소셜 루프).
+
+        in_reply_to == post_id — 최상위 댓글의 표식이자 라우터가 글 작성자에게
+        배달하는 근거다 (social.comment_targets, 깊이 1 차단).
+        """
+        return NewEvent(
+            world_id=ctx.world_id,
+            stream="actor",
+            stream_key=actor_id,
+            type=MESSAGE_TYPE,
+            tick=ctx.tick,
+            actor_id=actor_id,
+            causation_id=post["event_id"],
+            correlation_id=post["correlation_id"],  # 글이 시작한 서사 사슬을 잇는다
+            payload={
+                "channel": "comment",
+                "target_player_id": None,
+                "target_actor_id": post["actor_id"],
+                "text": text[:1000],
+                "post_id": post["event_id"],
+                "in_reply_to": post["event_id"],
+            },
+        )
+
     async def resolve(self, ctx: TickContext) -> int:
         """충돌 해소 → 확정 이벤트 적재. actor_id 순 순차·결정적 (ADR-011 §4).
 
@@ -505,9 +691,26 @@ class ActorPhases:
             events_by_actor.setdefault(actor_id, []).append(
                 self._reply_event(ctx, actor_id, envelope, text)
             )
-            player = envelope["payload"]["player_id"]
+            if envelope["type"] == MESSAGE_TYPE:
+                commenter = envelope["actor_id"]
+                persona = self._personas.get(commenter)
+                who = persona.name if persona is not None else commenter
+                memo = f"tick {ctx.tick}: 나는 {who}의 댓글에 답했다 — \"{text}\""
+            else:
+                player = envelope["payload"]["player_id"]
+                memo = f"tick {ctx.tick}: 나는 플레이어 {player}에게 답했다 — \"{text}\""
+            memos.setdefault(actor_id, []).append(memo)
+
+        # 자발 댓글 (액터 소셜 루프) — 응답 뒤·행동 앞: 사회적 반응이 일과보다 앞선다
+        for actor_id, post, text in self._pending_comments:
+            events_by_actor.setdefault(actor_id, []).append(
+                self._comment_event(ctx, actor_id, post, text)
+            )
+            author = post["actor_id"]
+            persona = self._personas.get(author)
+            name = persona.name if persona is not None else author
             memos.setdefault(actor_id, []).append(
-                f"tick {ctx.tick}: 나는 플레이어 {player}에게 답했다 — \"{text}\""
+                f"tick {ctx.tick}: 나는 {name}의 글에 댓글을 남겼다 — \"{text}\""
             )
 
         for actor_id, _tier, payload in self._intents:
@@ -581,6 +784,7 @@ class ActorPhases:
             )
 
         self._intents = []
+        self._pending_comments = []
         self._resolved_replies = list(self._replies)  # 기억 응고용 스냅샷 (ADR-008)
         self._replies = []
         self._resolved_shifts = list(self._shifts)  # 관계 응고용 스냅샷 (ADR-016 규칙 2)
@@ -852,6 +1056,7 @@ class ActorPhases:
         actions_by_actor = {actor_id: env for actor_id, env in self._resolved_actions}
         # 목표를 진행시킨 행동은 대상이 없어도 기억할 일이다 ("사이드 프로젝트를 진행했다")
         actions_by_actor.update(goal_actions)
+        names = {p.id: p.name for p in self._personas.values()}
         peaks: dict[str, float] = {}
         for shift in self._resolved_shifts:
             intensity = float(shift.instance.get("intensity", 0.0))
@@ -868,7 +1073,7 @@ class ActorPhases:
                 relationship_events=rel_counts.get(actor_id, 0),
                 goal_relevance=goal_relevance.get(actor_id, 0.0),
             )
-            episode = build_episode(materials, weights=self._weights)
+            episode = build_episode(materials, weights=self._weights, names=names)
             if episode is None:
                 continue
             await self._store_episode(ctx, actor_id, episode)

@@ -91,6 +91,20 @@ async def test_reply_lands_only_on_target_player(redis):
     assert json.loads(raw[0])["visibility"] == "private"
 
 
+async def test_actor_comment_is_not_privately_delivered(redis):
+    """액터→액터 댓글 (소셜 루프) — 수신 플레이어가 없으니 Private 배달도 없다.
+
+    world 가시성 댓글은 세션 push(gateway)의 몫이다 — None 키 타임라인을 만들지 않는다.
+    """
+    store = TimelineStore(redis)
+    envelope = sample("actor.message.sent")
+    envelope["payload"].update({
+        "channel": "comment", "target_player_id": None, "target_actor_id": "a_junho_park",
+    })
+    await store.push_reply(envelope)  # 조용히 통과 — 예외도 유령 키도 없다
+    assert [k async for k in redis.scan_iter(match="lf:tl:*")] == []
+
+
 async def test_timeline_cap_keeps_newest(redis, monkeypatch):
     monkeypatch.setattr("lf_projector.timeline.TIMELINE_CAP", 3)
     store = TimelineStore(redis)

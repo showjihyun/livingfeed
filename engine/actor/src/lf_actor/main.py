@@ -32,6 +32,7 @@ from lf_actor.phases import ActorPhases
 from lf_actor.reflection import BeliefLedger
 from lf_actor.relationship import RelationshipAdapter
 from lf_actor.semantic import SemanticMemory
+from lf_actor.social import FeedFanout
 
 logger = logging.getLogger("lf.actor.main")
 
@@ -61,13 +62,14 @@ async def run() -> None:
     semantic = SemanticMemory(qdrant_url)
     try:
         mailbox = Mailbox(redis)
+        relationship = RelationshipAdapter(redis)
         phases = ActorPhases(
             personas,
             ai=AiRuntimeClient(nc, env, timeout_s=ai_timeout_s),
             memory=WorkingMemory(redis),
             mailbox=mailbox,
             emotion=EmotionAdapter(redis),
-            relationship=RelationshipAdapter(redis),
+            relationship=relationship,
             semantic=semantic,
             goal=GoalAdapter(redis),
             belief_ledger=BeliefLedger(redis),
@@ -78,10 +80,13 @@ async def run() -> None:
             # 고강도 사건 승격 임계 — 세계 톤에 맞춰 조정 가능 (ADR-011 관심 신호)
             promote_intensity=float(os.environ.get("LF_PROMOTE_INTENSITY", "0.7")),
         )
+        # 액터 소셜 루프 — 피드 포스트를 관계 이웃에게, 액터 댓글을 글 작성자에게
+        # (배달 수는 params.yaml social.feed_fanout이 원천)
+        fanout = FeedFanout(relationship, [p.id for p in personas])
         # tick 루프와 메일박스 라우터(LF_PLAYER → Redis)가 나란히 돈다 (ADR-012)
         await asyncio.gather(
             run_tick_loop(cfg, phases, stop=stop),
-            run_mailbox_router(nc, mailbox, env, stop=stop),
+            run_mailbox_router(nc, mailbox, env, stop=stop, fanout=fanout),
         )
     finally:
         await semantic.close()

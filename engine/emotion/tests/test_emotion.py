@@ -4,6 +4,7 @@ from lf_emotion import (
     EmotionState,
     appraise_goal,
     appraise_interaction,
+    appraise_post,
     baseline_from_ocean,
     decay,
     describe,
@@ -133,3 +134,63 @@ def test_unknown_goal_kind_is_noop():
     result = appraise_goal(EmotionState(), OPTIMIST, kind="goal.exploded", magnitude=1.0)
     assert not result.significant
     assert result.state == EmotionState()
+
+
+# --- 피드 포스트 지각 → 감정 (액터 소셜 루프) ---------------------------------
+
+WARM_EDGE = {"trust": 0.7, "intimacy": 0.8, "respect": 0.3, "attraction": 0.0,
+             "resentment": 0.0}
+SORE_EDGE = {"trust": -0.2, "intimacy": 0.1, "respect": 0.0, "attraction": 0.0,
+             "resentment": 0.7}
+
+
+def test_post_from_warm_relation_brings_small_joy():
+    result = appraise_post(
+        EmotionState(), OPTIMIST,
+        author_id="a_friend", drama=0.8, edge=WARM_EDGE, source_event="01J",
+    )
+    [instance] = result.state.emotions
+    assert instance.type == "joy"
+    assert instance.target_id == "a_friend"  # '누구의 글 때문에'가 남는다
+    assert result.state.mood.pleasure > 0
+    # 결정성 — 같은 입력, 같은 결과 (리플레이 재현성)
+    assert result == appraise_post(
+        EmotionState(), OPTIMIST,
+        author_id="a_friend", drama=0.8, edge=WARM_EDGE, source_event="01J",
+    )
+
+
+def test_post_from_resented_relation_brings_small_displeasure():
+    result = appraise_post(
+        EmotionState(), NEUROTIC,
+        author_id="a_rival", drama=0.8, edge=SORE_EDGE, source_event="01J",
+    )
+    [instance] = result.state.emotions
+    assert instance.type == "distress"
+    assert instance.target_id == "a_rival"
+    assert result.state.mood.pleasure < 0
+
+
+def test_post_without_relation_leaves_no_trace():
+    # 모르는 사람의 글은 마음을 흔들지 않는다 — 관계 강도가 magnitude의 축이다
+    result = appraise_post(
+        EmotionState(), OPTIMIST, author_id="a_stranger", drama=1.0, edge=None,
+    )
+    assert not result.significant
+    assert result.state == EmotionState()
+
+
+def test_post_magnitude_scales_with_drama_and_relation():
+    calm = appraise_post(
+        EmotionState(), OPTIMIST, author_id="a_friend", drama=0.1, edge=WARM_EDGE,
+    )
+    dramatic = appraise_post(
+        EmotionState(), OPTIMIST, author_id="a_friend", drama=1.0, edge=WARM_EDGE,
+    )
+    assert dramatic.state.emotions[0].intensity > calm.state.emotions[0].intensity
+
+    faint_edge = {**WARM_EDGE, "trust": 0.2, "intimacy": 0.2}
+    faint = appraise_post(
+        EmotionState(), OPTIMIST, author_id="a_friend", drama=1.0, edge=faint_edge,
+    )
+    assert dramatic.state.emotions[0].intensity > faint.state.emotions[0].intensity

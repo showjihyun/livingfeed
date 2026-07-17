@@ -52,6 +52,23 @@ appraisal:
     base_intensity: 0.45
     pad: { pleasure: -0.55, arousal: 0.25, dominance: -0.35 }
 
+# 피드 포스트 지각 → 감정 (액터 소셜 루프) — 관계의 온도가 글의 감흥을 정한다.
+# magnitude = (drama_floor + (1-drama_floor)·drama) × 관계 강도.
+# 관계 엣지가 없으면 감흥도 없다 — 모르는 사람의 글은 마음을 흔들지 않는다.
+post_appraisal:
+  # 따뜻한 관계(trust·intimacy 평균, 양수만)의 글 → 잔잔한 기쁨/관심
+  warm:
+    type: joy
+    base_intensity: 0.3
+    pad: { pleasure: 0.5, arousal: 0.15, dominance: 0.05 }
+  # 앙금(resentment) 있는 상대의 글 → 잔잔한 불쾌
+  sore:
+    type: distress
+    base_intensity: 0.3
+    pad: { pleasure: -0.5, arousal: 0.2, dominance: -0.1 }
+  # drama 스케일의 바닥 — 밋밋한 근황도 관계가 있으면 이만큼은 울린다
+  drama_floor: 0.2
+
 # 성격 변조 (ADR-015 personality_filter)
 personality:
   # 민감도 = 1 + neuroticism*sensitivity_neuroticism  (예민할수록 크게 흔들린다)

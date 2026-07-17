@@ -92,6 +92,41 @@ def test_context_unknown_stage_falls_back_to_code():
     assert "wanderer에 있다" in bundle.user
 
 
+def test_post_status_frame_tells_actor_to_vent_feelings():
+    # ④ 감정 분출: 근황 프레임이 작업 기억의 기분을 명시적으로 가리키고 분출을 시킨다
+    aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
+    bundle = build(
+        aria, ["지금 기분: 밝은, 들뜬 상태 · joy 0.6"], WORLD,
+        trace_id="t", purpose="post_status",
+    )
+    assert "숨기지" in bundle.user  # "감정을 숨기지 말고 글의 결에 드러내라"
+    assert "지친 대로" in bundle.user
+
+
+def test_reply_to_comment_frame_exists_and_vents_feelings():
+    # 액터 댓글 답글 프레임 — 같은 감정 분출 결 (액터 소셜 루프)
+    aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
+    bundle = build(aria, [], WORLD, trace_id="t", purpose="reply_to_comment")
+    assert "댓글" in bundle.user and "숨기지" in bundle.user
+
+
+def test_context_seen_posts_section_sits_between_working_and_world():
+    # 방금 본 이웃의 글 — Working 뒤·World 앞, 댓글은 의무가 아니라는 결
+    aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
+    bundle = build(
+        aria, ["tick 6: 나는 work — 취재"], WORLD, trace_id="t",
+        seen_posts=['[01ABC] 박준호: "새 시작" — 오늘부터 다시 쓴다'],
+    )
+    assert (
+        bundle.user.index("## 작업 기억")
+        < bundle.user.index("## 방금 피드에서 본 글")
+        < bundle.user.index("## 세계 상황")
+    )
+    assert "의무가 아니다" in bundle.user
+    # 본 글이 없으면 섹션 자체가 없다 (아크·관계와 같은 규약)
+    assert "## 방금 피드에서 본 글" not in build(aria, [], WORLD, trace_id="t").user
+
+
 def test_context_working_memory_budget_truncates_oldest():
     aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
     # 예산(1200 tokens ≈ 3000 chars)을 초과하는 항목들 — 최신 우선으로 담고 나머지 절단

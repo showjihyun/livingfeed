@@ -146,6 +146,39 @@ async def test_actor_reply_is_pushed_to_owning_session(gateway, nc, conn):
         assert frame["payload"]["payload"]["target_player_id"] == PLAYER
 
 
+def test_actor_comment_is_pushed_to_every_session():
+    """액터→액터 댓글 (소셜 루프) — world 포스트의 공개 대화라 모든 세션이 본다.
+
+    수신자 필터(target_player_id)는 나를 향한 응답의 것 — 액터 댓글은
+    target_actor_id가 있고 post_id가 있어, 피드 인라인 렌더의 재료로 push된다.
+    """
+    from lf_gateway.session import reply_frame_for
+
+    comment = {
+        "event_id": "01JZK7Q3W0000000000000000N",
+        "stream": "actor", "type": "actor.message.sent", "schema_version": 1,
+        "world_id": WORLD, "actor_id": "a_junho_park", "tick": 2,
+        "occurred_at": "2026-03-01T00:02:00Z",
+        "causation_id": "01JZK7Q3W0000000000000000F",
+        "correlation_id": "01JZK7Q3W0000000000000000B",
+        "payload": {
+            "channel": "comment", "target_player_id": None,
+            "target_actor_id": "a_aria_kim",
+            "text": "그 시작, 응원할게.",
+            "post_id": "01JZK7Q3W0000000000000000F",
+            "in_reply_to": "01JZK7Q3W0000000000000000F",
+        },
+    }
+    frame = reply_frame_for(json.dumps(comment).encode(), PLAYER, 3)
+    assert frame is not None and frame["type"] == "actor.reply"
+
+    # 남을 향한 DM은 여전히 걸러진다 (수신자 단독)
+    dm = json.loads(json.dumps(comment))
+    dm["payload"].update({"channel": "dm", "target_actor_id": None,
+                          "target_player_id": "p_someone_else", "post_id": None})
+    assert reply_frame_for(json.dumps(dm).encode(), PLAYER, 4) is None
+
+
 async def test_invalid_player_id_is_rejected(gateway):
     with pytest.raises(websockets.exceptions.InvalidStatus):
         async with websockets.connect(f"ws://{gateway}/session?player_id=hacker"):

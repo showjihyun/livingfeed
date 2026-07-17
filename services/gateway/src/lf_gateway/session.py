@@ -111,9 +111,21 @@ async def open_reply_subscription(js: JetStreamContext, cfg: Config, world_id: s
 
 
 def reply_frame_for(data: bytes, player_id: str, seq: int) -> dict[str, Any] | None:
-    """수신 actor.message.sent → 이 세션 대상이면 push 프레임, 아니면 None."""
+    """수신 actor.message.sent → push 대상이면 프레임, 아니면 None.
+
+    두 경로가 push된다: (1) 나를 향한 응답 (target_player_id == 나),
+    (2) 액터→액터 댓글 (액터 소셜 루프 — target_actor_id·post_id가 있는 world
+    포스트의 공개 대화라 모든 세션이 본다; FE가 post_id로 인라인 렌더한다).
+    """
     envelope = json.loads(data)
-    if envelope.get("payload", {}).get("target_player_id") != player_id:
+    payload = envelope.get("payload", {})
+    mine = payload.get("target_player_id") == player_id
+    actor_comment = (
+        payload.get("channel") == "comment"
+        and payload.get("target_actor_id")
+        and payload.get("post_id")
+    )
+    if not (mine or actor_comment):
         return None
     return {"type": "actor.reply", "seq": seq, "payload": envelope}
 

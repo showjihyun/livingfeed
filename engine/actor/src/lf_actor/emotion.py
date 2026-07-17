@@ -12,7 +12,14 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from lf_emotion import EmotionState, appraise_goal, appraise_interaction, decay, describe
+from lf_emotion import (
+    EmotionState,
+    appraise_goal,
+    appraise_interaction,
+    appraise_post,
+    decay,
+    describe,
+)
 from redis.asyncio import Redis
 
 from lf_actor.persona import Persona
@@ -21,6 +28,7 @@ logger = logging.getLogger("lf.actor.emotion")
 
 PRINCIPAL = "engine.emotion"
 SHIFT_TYPE = "actor.emotion.shifted"
+FEED_POST_TYPE = "feed.post.published"
 
 
 @dataclass(frozen=True)
@@ -64,15 +72,30 @@ class EmotionAdapter:
         interactions: list[dict[str, Any]],
         *,
         tick: int,
+        edges: dict[str, dict[str, float]] | None = None,
     ) -> tuple[list[PendingShift], str]:
         """상호작용들을 평가해 상태를 갱신하고, 임계 이상 변화의 적재물을 돌려준다.
 
         반환: (pending shifts, 현재 감정의 자연어 요약 — Working Memory 주입용).
+        edges(작성자 id → 관계 차원)는 피드 글 평가(appraise_post)의 관계 입력이다 —
+        관계 없는 작성자의 글은 마음을 흔들지 않는다 (액터 소셜 루프).
         """
         state = await self.load(world_id, persona.id)
         shifts: list[PendingShift] = []
         for interaction in interactions:
-            result = appraise_interaction(state, interaction, persona.big_five)
+            if interaction["type"] == FEED_POST_TYPE:
+                author = interaction.get("actor_id")
+                counterpart = author
+                result = appraise_post(
+                    state, persona.big_five,
+                    author_id=author or "?",
+                    drama=float(interaction["payload"].get("drama_score", 0.0)),
+                    edge=(edges or {}).get(author or ""),
+                    source_event=interaction["event_id"],
+                )
+            else:
+                counterpart = interaction["payload"].get("player_id")
+                result = appraise_interaction(state, interaction, persona.big_five)
             state = result.state
             if result.significant:
                 # 이 상호작용이 만든/강화한 인스턴스 — 대상 기준 최신 상태에서 찾는다
@@ -81,7 +104,7 @@ class EmotionAdapter:
                         e.to_json()
                         for e in state.emotions
                         if e.source_event == interaction["event_id"]
-                        or e.target_id == interaction["payload"].get("player_id")
+                        or e.target_id == counterpart
                     ),
                     {"type": "unknown", "intensity": 0.0, "target_id": None},
                 )

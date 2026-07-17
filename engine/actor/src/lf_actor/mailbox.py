@@ -19,10 +19,15 @@ import nats.errors
 from lf_dispatcher.subjects import dlq_subject
 from redis.asyncio import Redis
 
+from lf_actor.social import FEED_POST_TYPE, FeedFanout, comment_targets
+
 logger = logging.getLogger("lf.actor.mailbox")
 
 SOURCE_STREAM = "LF_PLAYER"
 DURABLE = "actor-mailbox"
+
+#: 액터 소셜 루프의 순환 대상 — 피드 포스트(이웃 배달)와 액터 댓글(작성자 배달)
+ACTOR_MESSAGE_TYPE = "actor.message.sent"
 
 #: 메일박스 보존 — 오래 잠든 액터의 미처리 개입은 이 창이 지나면 소멸한다
 MAILBOX_TTL = timedelta(hours=24)
@@ -60,6 +65,25 @@ class Mailbox:
         return [json.loads(item) for item in raw]
 
 
+async def route_targets(
+    envelope: dict[str, Any], fanout: FeedFanout | None
+) -> list[str]:
+    """봉투 하나의 메일박스 배달 대상 (라우터의 유일한 대상 판단 지점).
+
+    피드 포스트는 관계 이웃 N명(FeedFanout), 액터 댓글은 글 작성자 1명
+    (comment_targets — 깊이 1 차단), 세계 사건은 영향권 전원, 나머지
+    (플레이어 개입·관측·승격·아크)는 payload의 대상 1명이다.
+    """
+    kind = envelope["type"]
+    if kind == FEED_POST_TYPE:
+        return await fanout.targets(envelope) if fanout is not None else []
+    if kind == ACTOR_MESSAGE_TYPE:
+        return comment_targets(envelope)
+    if kind == "world.incident.occurred":
+        return list(envelope["payload"]["affected_actor_ids"])
+    return [envelope["payload"]["target_actor_id"]]
+
+
 async def run_mailbox_router(
     nc: nats.NATS,
     mailbox: Mailbox,
@@ -68,6 +92,7 @@ async def run_mailbox_router(
     stop: asyncio.Event | None = None,
     batch_size: int = 64,
     fetch_timeout_s: float = 5.0,
+    fanout: FeedFanout | None = None,
 ) -> None:
     """LF_PLAYER → 대상 액터 메일박스 라우팅 루프.
 
@@ -103,18 +128,29 @@ async def run_mailbox_router(
             durable=f"{DURABLE}-arc", stream="LF_SYS",
         ),
     ]
-    logger.info("메일박스 라우터 대기 — durable=%s (플레이어+세계사건+관측+승격+아크)", DURABLE)
-
-    def targets_of(envelope: dict[str, Any]) -> list[str]:
-        if envelope["type"] == "world.incident.occurred":
-            return list(envelope["payload"]["affected_actor_ids"])
-        # player.*/observation/spotlighted/arc_planned — 모두 대상 1명
-        return [envelope["payload"]["target_actor_id"]]
+    if fanout is not None:
+        # 액터 소셜 루프 (fanout 주입 시에만) — 피드 순환 + 액터 댓글 배달.
+        # 라우터는 feed.post.published만 순환시킨다 — 댓글 자체는 순환하지 않고
+        # 글 작성자 1명에게만 간다 (comment_targets, 깊이 1 차단).
+        subs += [
+            await js.pull_subscribe(
+                f"lf.{env}.*.feed.post.published",
+                durable=f"{DURABLE}-feed", stream="LF_FEED",
+            ),
+            await js.pull_subscribe(
+                f"lf.{env}.*.actor.message.sent",
+                durable=f"{DURABLE}-comment", stream="LF_ACTOR",
+            ),
+        ]
+    logger.info(
+        "메일박스 라우터 대기 — durable=%s (플레이어+세계사건+관측+승격+아크%s)",
+        DURABLE, "+피드순환+댓글" if fanout is not None else "",
+    )
 
     async def route(msg: Any) -> None:
         try:
             envelope = json.loads(msg.data)
-            for target in targets_of(envelope):
+            for target in await route_targets(envelope, fanout):
                 await mailbox.push(envelope["world_id"], target, envelope)
         except (json.JSONDecodeError, KeyError, TypeError) as e:
             # 라우팅 불가 독약 — DLQ로 (조용한 유실 금지, ADR-017 §4)

@@ -1,0 +1,20 @@
+{
+  "event_id": "01JZK7Q3W0000000000000000N",
+  "stream": "actor",
+  "type": "actor.message.sent",
+  "schema_version": 1,
+  "world_id": "w_main",
+  "actor_id": "a_junho_park",
+  "tick": 45,
+  "occurred_at": "2026-07-11T09:06:12Z",
+  "causation_id": "01JZK7Q3W0000000000000000F",
+  "correlation_id": "01JZK7Q3W0000000000000000B",
+  "payload": {
+    "channel": "comment",
+    "target_player_id": null,
+    "target_actor_id": "a_aria_kim",
+    "text": "그 얘기, 나도 오래 마음에 걸렸었어. 먼저 꺼내줘서 고마워.",
+    "post_id": "01JZK7Q3W0000000000000000F",
+    "in_reply_to": "01JZK7Q3W0000000000000000F"
+  }
+}

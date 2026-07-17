@@ -31,8 +31,12 @@ def action_label(kind: str) -> str:
     return _ACTION_LABELS.get(kind, kind)
 
 
-def describe_interaction(envelope: dict[str, Any]) -> str:
-    """상호작용/사건 봉투 → 지각 문장 (Working Memory와 에피소드가 공유)."""
+def describe_interaction(envelope: dict[str, Any], names: dict[str, str] | None = None) -> str:
+    """상호작용/사건 봉투 → 지각 문장 (Working Memory와 에피소드가 공유).
+
+    names(액터 id → 이름)가 있으면 액터 유래 지각(피드 글·댓글)의 주체를
+    이름으로 부른다 — 기억은 id가 아니라 사람으로 남는다.
+    """
     p = envelope["payload"]
     kind = envelope["type"]
     if kind == "player.dm.sent":
@@ -46,6 +50,16 @@ def describe_interaction(envelope: dict[str, Any]) -> str:
     if kind == "world.observation.surfaced":
         # Director의 사적 관측 nudge — 공개 사건이 아니라 문득 알아차린 것 (ADR-013)
         return f"문득 알아차렸다: {p['observation']}"
+    if kind == "feed.post.published":
+        # 액터 소셜 루프 — 이웃의 글이 지각으로 들어온다 (라우터 피드 순환)
+        author = envelope.get("actor_id") or "누군가"
+        name = (names or {}).get(author, author)
+        return f"피드에서 {name}의 글을 봤다 — {p['title']}: \"{p['body'][:80]}\""
+    if kind == "actor.message.sent":
+        # 내 글에 달린 다른 액터의 댓글 (작성자 단독 배달 — social.comment_targets)
+        commenter = envelope.get("actor_id") or "누군가"
+        name = (names or {}).get(commenter, commenter)
+        return f"{name}이(가) 내 글에 댓글을 남겼다: \"{p['text']}\""
     return f"플레이어 상호작용: {kind}"
 
 
@@ -89,7 +103,10 @@ class Episode:
 
 
 def build_episode(
-    materials: TickMaterials, *, weights: ImportanceWeights | None = None
+    materials: TickMaterials,
+    *,
+    weights: ImportanceWeights | None = None,
+    names: dict[str, str] | None = None,
 ) -> Episode | None:
     """재료 → 에피소드. 아무 일 없던 tick은 기억되지 않는다 (None)."""
     weights = weights or ImportanceWeights()
@@ -101,7 +118,7 @@ def build_episode(
     tags: set[str] = set()
 
     for envelope in materials.interactions:
-        lines.append(describe_interaction(envelope))
+        lines.append(describe_interaction(envelope, names))
         source_ids.append(envelope["event_id"])
         tags.add(envelope["type"].split(".")[1])  # dm/comment/reaction/incident
     for _envelope, text in materials.replies:

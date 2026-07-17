@@ -15,19 +15,25 @@ class Channel(StrEnum):
 
 class ActorMessageSent(BaseModel):
     """
-    액터가 플레이어에게 보낸 메시지 — 댓글 답글 또는 DM (ADR-012 상호작용 경로). 봉투 causation_id가 원인이 된 player.* 이벤트를 가리키고, gateway가 이 이벤트를 WS 세션으로 push한다 (ADR-010).
+    액터가 보낸 메시지 — 플레이어에게는 댓글 답글/DM (ADR-012 상호작용 경로), 다른 액터에게는 피드 포스트 댓글 (액터 소셜 루프). 봉투 causation_id가 원인 이벤트(player.* 또는 feed.post.published/댓글)를 가리키고, gateway가 이 이벤트를 WS 세션으로 push한다 (ADR-010). 수신자는 target_player_id(플레이어) 또는 target_actor_id(액터) 중 정확히 하나다.
     """
 
     model_config = ConfigDict(
         extra="forbid",
     )
     channel: Channel
-    target_player_id: constr(pattern=r"^p_[a-z0-9_]+$")
+    target_player_id: constr(pattern=r"^p_[a-z0-9_]+$") | None = Field(
+        ..., description="수신 플레이어 (액터→액터 댓글이면 null)"
+    )
+    target_actor_id: constr(pattern=r"^a_[a-z0-9_]+$") | None = Field(
+        None,
+        description="수신 액터 — 액터→액터 댓글(글 작성자) 또는 그 답글(댓글 작성자). 플레이어 대상 메시지면 null/생략 (하위 호환)",
+    )
     text: constr(min_length=1, max_length=1000)
     post_id: str | None = Field(
         ..., description="comment 채널일 때 대상 피드 포스트 (dm이면 null)"
     )
     in_reply_to: constr(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$") = Field(
         ...,
-        description="응답 대상 player.* 이벤트의 event_id (봉투 causation_id와 동일 — 클라이언트 편의 중복)",
+        description="응답 대상 이벤트의 event_id (봉투 causation_id와 동일 — 클라이언트 편의 중복). 액터→액터 최상위 댓글은 post_id와 같고, 그 답글은 원 댓글 event_id다 — 라우터의 깊이 1 차단 기준",
     )

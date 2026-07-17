@@ -23,6 +23,9 @@ class Persona:
     needs_bias: dict[str, float] = field(default_factory=dict)
     goals: tuple[dict[str, Any], ...] = ()
     secrets: tuple[dict[str, Any], ...] = ()
+    #: 생활 패턴 — SNS 포스팅 리듬의 키 (rhythm.py). 미지의 값은 사용처에서
+    #: flexible로 폴백한다 (전방 호환 — consolidation.action_label 선례)
+    lifestyle: str = "flexible"
 
 
 def load_persona(path: Path) -> Persona:
@@ -36,6 +39,7 @@ def load_persona(path: Path) -> Persona:
         needs_bias=dict(doc.get("needs_bias") or {}),
         goals=tuple(doc.get("goals") or ()),
         secrets=tuple(doc.get("secrets") or ()),
+        lifestyle=doc.get("lifestyle") or "flexible",
     )
 
 

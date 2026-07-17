@@ -28,6 +28,7 @@ BUDGET_EPISODES = 600
 BUDGET_WORKING = 1_200
 BUDGET_WORLD = 400
 BUDGET_TASK_FRAME = 600
+BUDGET_SEEN_POSTS = 400
 
 #: 인생 단계 → 한글 라벨 (docs/plan/08 Life Journey). 아크 섹션 표기용
 STAGE_LABELS = {
@@ -157,6 +158,23 @@ def _working_section(entries: list[str]) -> str:
     return "## 작업 기억 (최신 우선)\n" + "\n".join(f"- {e}" for e in kept)
 
 
+def _seen_posts_section(posts: list[str]) -> str:
+    """방금 피드에서 본 이웃의 글 (액터 소셜 루프) — 자발 댓글 결정의 재료.
+
+    비어 있으면 섹션 생략 (아크·관계와 같은 규약 — 없는 것은 소음이다).
+    댓글은 의무가 아니다 — 마음이 움직였을 때만, 그 결이 지침의 전부다.
+    """
+    if not posts:
+        return ""
+    text = (
+        "## 방금 피드에서 본 글\n"
+        + "\n".join(f"- {p}" for p in posts)
+        + "\n마음이 움직이면 comment 필드로 짧은 답글을 남겨도 좋다 — 의무가 아니다."
+        "\n지금 감정을 숨기지 마라 — 반가우면 반갑게, 심드렁하면 남기지 않는 것도 답이다."
+    )
+    return _clip(text, BUDGET_SEEN_POSTS)
+
+
 def _world_section(world: WorldContext) -> str:
     text = (
         "## 세계 상황\n"
@@ -177,6 +195,18 @@ _TASK_FRAMES = {
         "- target_actor_id는 실제로 존재하는 상대에게만. 없으면 null.\n"
         "- 출력은 지정된 JSON 스키마를 정확히 따른다. JSON 외 텍스트 금지."
     ),
+    "post_status": (
+        "## 임무\n"
+        "지금은 SNS에 근황을 남기고 싶은 순간이다 — 의무가 아니라 문득 이는 충동이다.\n"
+        "요즘의 일·기분·관심사에서 지금 나누고 싶은 것 하나를 골라 행동으로 옮겨라.\n"
+        "- 작업 기억의 '지금 기분'이 지금의 너다 — 감정을 숨기지 말고 글의 결에\n"
+        "  드러내라. 기쁘면 들뜨게, 화나면 날 서게, 지치면 지친 대로 (ADR-015).\n"
+        "- 행동은 성격·욕구·목표·작업 기억과 일관되어야 한다.\n"
+        "- intent는 피드 내레이션에 쓰일 한 줄 요약이다 — 구체적이고 이 인물답게.\n"
+        "- headline은 이 행동의 짧은 제목이다(20자 안팎) — intent를 압축한 헤드라인.\n"
+        "- target_actor_id는 실제로 존재하는 상대에게만. 없으면 null.\n"
+        "- 출력은 지정된 JSON 스키마를 정확히 따른다. JSON 외 텍스트 금지."
+    ),
     "reply_to_player": (
         "## 임무\n"
         "위 '이 사람과 나눈 대화'가 지금까지의 흐름이다. 표시된 마지막 상대 발화에 답하라.\n"
@@ -185,6 +215,14 @@ _TASK_FRAMES = {
         "- 말투를 유지한다 — 당신이 앞서 반말이었으면 반말, 존댓말이었으면 존댓말.\n"
         "- 이 인물답게 1~3문장. 과장 금지 — 관계의 온도와 지금 상황에 맞게.\n"
         "- 상대는 세계 밖의 관찰자지만, 당신에게는 그냥 아는 사람이다.\n"
+        '- 출력은 {"text": "..."} JSON 하나뿐이다. JSON 외 텍스트 금지.'
+    ),
+    "reply_to_comment": (
+        "## 임무\n"
+        "누군가 당신의 글에 댓글을 남겼다 — 작업 기억 최신 항목에 그 내용이 있다.\n"
+        "그 사람에게 한 번, 짧게 답하라 (1~2문장). 이 인물답게, 관계의 온도에 맞게.\n"
+        "- 지금 감정을 숨기지 말고 답의 결에 드러내라 — 기쁘면 들뜨게, 지치면 지친 대로.\n"
+        "- 말투를 유지한다 — 평소 반말이면 반말, 존댓말이면 존댓말.\n"
         '- 출력은 {"text": "..."} JSON 하나뿐이다. JSON 외 텍스트 금지.'
     ),
     "reflect": (
@@ -212,6 +250,7 @@ def build(
     conversation: list[tuple[str, str]] | None = None,
     arc: Arc | None = None,
     relationships: str | None = None,
+    seen_posts: list[str] | None = None,
 ) -> Bundle:
     """ContextBundle 조립 — 섹션 순서 고정 (ADR-009 규칙 1: Relationship(3) <
     Episodes(4) < Working(5)).
@@ -220,6 +259,8 @@ def build(
     relationships(있으면)는 아크 뒤·에피소드 앞 — 기억을 회상하기 전에 상대와의
     온도가 먼저 놓인다. conversation(reply_to_player 전용)이 있으면 Working 앞에
     대화 흐름 섹션을 끼운다 — 답장은 뒤섞인 버퍼가 아니라 시간순 대화를 보고 써야 한다.
+    seen_posts(있으면)는 Working 뒤 — 방금 본 이웃의 글이 자발 댓글의 재료가 된다
+    (액터 소셜 루프). 변동성이 가장 큰 섹션이라 프리픽스 캐시를 해치지 않는 뒤쪽이다.
     """
     frame = _TASK_FRAMES.get(purpose)
     if frame is None:
@@ -232,8 +273,10 @@ def build(
     sections.append(_episodes_section(episodes or []))
     if conversation:
         sections.append(_conversation_section(conversation))
+    sections.append(_working_section(working))
+    if (posts_text := _seen_posts_section(seen_posts or [])):
+        sections.append(posts_text)
     sections += [
-        _working_section(working),
         _world_section(world),
         _clip(frame, BUDGET_TASK_FRAME),
     ]

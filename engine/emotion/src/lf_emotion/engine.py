@@ -158,6 +158,69 @@ def appraise_goal(
     )
 
 
+def appraise_post(
+    state: EmotionState,
+    big_five: dict[str, float],
+    *,
+    author_id: str,
+    drama: float,
+    edge: dict[str, float] | None,
+    source_event: str | None = None,
+    params: dict[str, Any] | None = None,
+) -> AppraisalResult:
+    """피드에서 본 남의 글을 평가한다 (액터 소셜 루프 — ADR-015 확장).
+
+    관계의 온도가 감흥의 채널을 정한다: 앙금(resentment)이 온기(trust·intimacy)보다
+    크면 불쾌, 아니면 잔잔한 기쁨. magnitude는 drama와 관계 강도의 곱 —
+    엣지가 없거나 온도가 0이면 아무 일도 없다 (모르는 사람의 글이다).
+    """
+    params = params or default_params()
+    if edge is None:
+        return AppraisalResult(state=state, significant=False, reason="")
+
+    rules = params["post_appraisal"]
+    warmth = max(0.0, (edge.get("trust", 0.0) + edge.get("intimacy", 0.0)) / 2)
+    sore = max(0.0, edge.get("resentment", 0.0))
+    channel, strength = ("sore", sore) if sore > warmth else ("warm", warmth)
+    if strength <= 0.0:
+        return AppraisalResult(state=state, significant=False, reason="")
+
+    rule = rules[channel]
+    floor = float(rules["drama_floor"])
+    magnitude = (floor + (1 - floor) * min(1.0, max(0.0, drama))) * strength
+    intensity = min(1.0, rule["base_intensity"] * magnitude * _sensitivity(big_five, params))
+    if intensity < params["instances"]["cull_threshold"]:
+        return AppraisalResult(state=state, significant=False, reason="")
+
+    instance = EmotionInstance(
+        type=rule["type"],
+        intensity=round(intensity, 4),
+        target_id=author_id,
+        source_event=source_event,
+    )
+    inst_params = params["instances"]
+    emotions = merge_instance(
+        state.emotions, instance,
+        reinforcement=inst_params["reinforcement"], max_active=inst_params["max_active"],
+    )
+    weight = params["mood"]["instance_weight"] * intensity
+    pad = rule["pad"]
+    mood = Pad(
+        pleasure=state.mood.pleasure + weight * pad["pleasure"],
+        arousal=state.mood.arousal + weight * pad["arousal"],
+        dominance=state.mood.dominance + weight * pad["dominance"],
+    ).clamped()
+
+    # 유의성은 mood 변화만으로 본다 (appraise_goal 규약) — 잔잔한 감흥이 강도
+    # 트리거로 스팸이 되지 않게. 임계 미만은 상태만 물들고 이벤트는 안 남는다.
+    significant = mood.l1_distance(state.mood) >= params["shift_thresholds"]["mood_delta"]
+    return AppraisalResult(
+        state=EmotionState(mood=mood, emotions=emotions),
+        significant=significant,
+        reason=f"feed.post — {rule['type']} {intensity:.2f} ({author_id}의 글)",
+    )
+
+
 def decay(
     state: EmotionState,
     big_five: dict[str, float],

@@ -1,0 +1,36 @@
+# Actor Runtime 파라미터 — 단일 파일 (emotion/goal params.yaml 선례).
+# 튜닝 대상 수치는 코드가 아니라 여기에 있다 (하드코딩 금지).
+
+# SNS 포스팅 리듬 (rhythm.posting_moment) — "이 tick이 근황을 남기고 싶은 순간인가"
+rhythm:
+  # 휴일 (ISO 날짜 목록) — 이 날은 요일과 무관하게 주말처럼 동작한다
+  holidays: []
+  # 생활 패턴별 프로파일.
+  #   busy: 평일 일과 창(시각) — [start, end). start > end면 자정을 넘는 창(night_worker).
+  #         주말·휴일엔 무시된다. null이면 일과 억제가 없다.
+  #   daily_posts: 하루 목표 모먼트 수 (weekday 평일 / weekend 주말·휴일)
+  lifestyles:
+    office_worker:
+      busy: { start: 9, end: 18 }
+      daily_posts: { weekday: 2, weekend: 5 }
+    teacher:
+      busy: { start: 8, end: 17 }
+      daily_posts: { weekday: 2, weekend: 5 }
+    student:
+      busy: { start: 8, end: 16 }
+      daily_posts: { weekday: 3, weekend: 6 }
+    night_worker:
+      busy: { start: 22, end: 7 }
+      daily_posts: { weekday: 3, weekend: 4 }
+    flexible:
+      busy: null
+      daily_posts: { weekday: 4, weekend: 5 }
+
+# 액터 소셜 루프 (social.py / phases.py) — 피드 순환·댓글 예산
+social:
+  # 포스트 하나가 배달되는 이웃 수 — 관계 salience 상위 N (관계 전무 시 결정적 해시 N)
+  feed_fanout: 3
+  # 액터당 tick당 자발 댓글 상한 — 루프 폭주의 마지막 빗장
+  max_comments_per_tick: 1
+  # 다음 LLM decide까지 들고 가는 '본 글' 최대 수 — 오래된 것부터 밀려난다
+  seen_posts_max: 3

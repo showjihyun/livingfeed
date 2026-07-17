@@ -141,12 +141,15 @@ class TimelineStore:
         return len(interested)
 
     async def push_reply(self, envelope: dict[str, Any]) -> None:
-        """답장/댓글은 팬아웃이 아니라 수신자 단독 배달이다 (Private, ADR-014)."""
-        await self.push(
-            envelope["world_id"],
-            envelope["payload"]["target_player_id"],
-            reply_to_doc(envelope),
-        )
+        """답장/댓글은 팬아웃이 아니라 수신자 단독 배달이다 (Private, ADR-014).
+
+        액터→액터 댓글(소셜 루프)은 수신 플레이어가 없다 — Private 배달 대상이
+        아니므로 조용히 통과한다 (world 가시성 댓글은 gateway 세션 push의 몫).
+        """
+        target = envelope["payload"]["target_player_id"]
+        if not target:
+            return
+        await self.push(envelope["world_id"], target, reply_to_doc(envelope))
 
     async def drop_all(self) -> None:
         """재구축용 파괴 (ADR-003 계약 3) — 타임라인·팔로워 인덱스·거부 마커 전부."""

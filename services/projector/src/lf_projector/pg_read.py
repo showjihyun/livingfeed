@@ -204,11 +204,17 @@ def belief_params(envelope: dict[str, Any]) -> tuple:
 
 
 def message_params(envelope: dict[str, Any]) -> tuple:
-    """세 대화 이벤트를 한 테이블로 정규화한다 — 대화는 방향이 다른 같은 데이터다."""
+    """세 대화 이벤트를 한 테이블로 정규화한다 — 대화는 방향이 다른 같은 데이터다.
+
+    액터→액터 댓글(소셜 루프)은 target_player_id가 null이다 — 상대(counterpart)
+    열에는 target_actor_id가 들어간다. /messages 조회는 p_* 기준이라 플레이어
+    대화 화면을 오염시키지 않는다.
+    """
     p = envelope["payload"]
     kind = envelope["type"]
     if kind == "actor.message.sent":
-        row = (p["channel"], p["target_player_id"], envelope["actor_id"], "actor",
+        counterpart = p["target_player_id"] or p.get("target_actor_id")
+        row = (p["channel"], counterpart, envelope["actor_id"], "actor",
                p["text"], p["post_id"])
     elif kind == "player.dm.sent":
         row = ("dm", p["player_id"], p["target_actor_id"], "player", p["text"], None)

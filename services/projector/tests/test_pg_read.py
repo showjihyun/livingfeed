@@ -43,6 +43,19 @@ def test_message_params_normalizes_three_directions():
     assert comment[7] == "01JZK7Q3W0000000000000000F"  # post_id 보존
 
 
+def test_message_params_actor_comment_counterpart_is_the_actor():
+    # 액터→액터 댓글 (소셜 루프) — target_player_id가 null, 상대는 target_actor_id
+    envelope = sample("actor.message.sent")
+    envelope["payload"].update({
+        "channel": "comment",
+        "target_player_id": None,
+        "target_actor_id": "a_junho_park",
+        "post_id": "01JZK7Q3W0000000000000000F",
+    })
+    params = message_params(envelope)
+    assert params[2:6] == ("comment", "a_junho_park", "a_aria_kim", "actor")
+
+
 def test_message_params_rejects_non_conversation():
     with pytest.raises(KeyError):
         message_params(sample("actor.action.performed"))
