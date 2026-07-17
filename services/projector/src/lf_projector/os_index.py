@@ -39,6 +39,8 @@ MAPPING: dict[str, Any] = {
             "worthiness": {"type": "float"},
             "source_event_type": {"type": "keyword"},
             "tags": {"type": "keyword"},
+            # 데뷔 포스트의 창조자 — '당신이 빚은 인물' 표식 원천 (페르소나 스튜디오)
+            "created_by": {"type": "keyword"},
             "media": {"type": "object", "enabled": False},
         },
     },
