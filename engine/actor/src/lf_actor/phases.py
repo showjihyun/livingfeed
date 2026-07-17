@@ -339,12 +339,16 @@ class ActorPhases:
                 logger.info(
                     "인생 아크 수신: %s stage=%s tick=%d", actor_id, last["stage"], ctx.tick
                 )
-            # LOD 갱신: 승격이 최우선(Hot), 없으면 지각 규칙, 지각도 없으면 유휴 강등 (ADR-011)
+            # LOD 갱신: 승격이 최우선(Hot), 없으면 지각 규칙, 지각도 없으면 유휴 강등
+            # (ADR-011). 이웃의 피드 글 배달은 '나를 향한 관심'이 아니라 소비 입력이라
+            # 관심 신호에서 제외한다 — 활발한 세계에선 몇 tick마다 배달이 와서 touch만
+            #으로 전원이 상시 Hot을 유지했다 (2026-07-18 과열 관측: 강등이 영영 안 옴)
+            attention = [e for e in items if e["type"] != FEED_TYPE]
             if promoted:
                 self._lods[actor_id] = promote(self._lods[actor_id], ctx.tick)
-            elif items:
+            elif attention:
                 self._lods[actor_id] = lod_after_perception(
-                    self._lods[actor_id], items, ctx.tick,
+                    self._lods[actor_id], attention, ctx.tick,
                     high_intensity=self._promote_intensity,
                 )
             else:

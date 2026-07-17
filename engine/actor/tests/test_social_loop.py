@@ -110,12 +110,13 @@ async def test_feed_post_is_perceived_without_waking_sleeper(conn, redis):
         emotion=EmotionAdapter(redis),
         relationship=RelationshipAdapter(redis),
     )
-    # 남의 글이 잠든 사람을 깨우진 않는다 — touch만 (비용 정책, ADR-011)
+    # 남의 글은 잠든 사람을 깨우지도, 관심 시계를 되돌리지도 않는다 (ADR-011).
+    # 배달=touch였을 땐 활발한 세계에서 전원이 상시 Hot을 유지했다 (과열 관측)
     phases._lods[READER] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
     await run_tick(conn, phases, CLOCK, WORLD, tick=5, head=0)
 
     assert phases._lods[READER].tier is Tier.COLD  # 깨어나지 않았다
-    assert phases._lods[READER].last_interest_tick == 5  # 그러나 관심 타이머는 리셋
+    assert phases._lods[READER].last_interest_tick == 0  # 관심 시계도 그대로다
 
     # 지각이 기억에 남았다 — 작성자 이름과 제목·본문 일부
     recent = await WorkingMemory(redis).recent(WORLD, READER)
@@ -225,6 +226,8 @@ async def test_comment_cooldown_closes_the_window(conn, redis):
         emotion=EmotionAdapter(redis), relationship=RelationshipAdapter(redis),
     )
     phases._lods[WRITER] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
+    # 배달은 관심이 아니라 시계를 안 되돌린다 — 검증 구간 내내 Hot이도록 관심 기준점만 당겨둔다
+    phases._lods[READER] = ActorLod(tier=Tier.HOT, last_interest_tick=5)
 
     post1 = feed_post()
     await mailbox.push(WORLD, READER, post1)
@@ -261,6 +264,34 @@ async def test_rule_fallback_never_comments(conn, redis):
     assert not [e for e in events if e["type"] == "actor.message.sent"]
     # 행동은 규칙 폴백으로 남는다 — 세계는 멈추지 않는다
     assert [e for e in events if e["type"] == "actor.action.performed"]
+
+
+async def test_feed_delivery_is_not_attention(conn, redis):
+    """이웃의 글 배달은 '나를 향한 관심'이 아니다 — 강등 시계는 계속 간다.
+
+    배달마다 touch로 타이머가 리셋되면 활발한 세계에선 몇 tick마다 배달이
+    와서 전원이 promote 없이도 상시 Hot을 유지한다 (2026-07-18 과열 관측:
+    수정 ①(댓글 promote 제거) 후에도 GPU 96% 지속의 남은 누수). 글 자체는
+    기억·자발 댓글의 재료로 온전히 소비된다.
+    """
+    reader, writer = make_reader(), make_writer()
+    mailbox = Mailbox(redis)
+    phases = ActorPhases(
+        [reader, writer], ai=_SilentAi(), memory=WorkingMemory(redis), mailbox=mailbox,
+    )
+    phases._lods[READER] = ActorLod(tier=Tier.HOT, last_interest_tick=0)
+    phases._lods[WRITER] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
+
+    head = 0
+    for tick in range(5, 16):  # 매 tick 이웃의 글이 배달돼도
+        await mailbox.push(WORLD, READER, feed_post())
+        head = await run_tick(conn, phases, CLOCK, WORLD, tick=tick, head=head)
+
+    # 관심(tick 0) 기준 유휴가 쌓여 강등됐다 — 배달은 시계를 되돌리지 못했다
+    assert phases._lods[READER].tier is not Tier.HOT
+    # 글은 소비됐다 — 기억에 남아 다음 결정의 재료가 된다
+    recent = await WorkingMemory(redis).recent(WORLD, READER)
+    assert any("피드에서" in m for m in recent)
 
 
 def actor_comment(post: dict, commenter: str = READER) -> dict:
