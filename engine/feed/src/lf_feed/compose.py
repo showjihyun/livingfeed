@@ -269,8 +269,11 @@ def evaluate(
     payload = envelope["payload"]
     kind = payload["action_kind"]
     drama = drama_score(kind, has_target=payload.get("target_actor_id") is not None, cfg=cfg)
-    score = worthiness(drama, 0.0, rarity.rarity(kind), director_boost, cfg)
-    rarity.observe(kind)
+    # 희소성은 인물별 — 한 사람의 도배를 막되, 모두의 근황을 막지 않는다 (ADR-014).
+    # kind 전역 키는 SNS 리듬(여럿이 각자 speak)에서 서로의 글을 깎아 피드를 굶긴다
+    rarity_key = f"{envelope.get('actor_id')}:{kind}"
+    score = worthiness(drama, 0.0, rarity.rarity(rarity_key), director_boost, cfg)
+    rarity.observe(rarity_key)
     return drama, score
 
 

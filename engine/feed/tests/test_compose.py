@@ -186,3 +186,22 @@ def test_evaluate_passes_interpersonal_speak_but_filters_spam():
         _, last_score = evaluate(SAMPLE, tracker, cfg)
     assert last_score < first_score
     assert last_score < cfg.threshold
+
+
+def test_rarity_is_per_actor_not_global():
+    """희소성은 인물별이다 — 한 사람의 도배를 막되, 모두의 근황을 막지 않는다.
+
+    SNS 리듬(16명이 각자 근황 speak)에서 kind 전역 희소성은 서로의 글을
+    깎아 두 번째 speak부터 아무도 임계를 못 넘게 만든다 (2026-07-17 관측).
+    """
+    cfg = ScoringConfig()
+    tracker = RarityTracker(cfg.rarity_window)
+
+    _, first = evaluate(SAMPLE, tracker, cfg)
+    assert first >= cfg.threshold
+
+    # 다른 인물의 같은 종류(speak) 근황 — 앞사람의 발화가 내 희소성을 깎지 않는다
+    other = {**SAMPLE, "actor_id": "a_someone_else"}
+    _, second = evaluate(other, tracker, cfg)
+    assert second >= cfg.threshold
+    assert second == first  # 서로 독립 — 같은 조건이면 같은 점수
