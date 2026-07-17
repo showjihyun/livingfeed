@@ -27,6 +27,7 @@ from lf_actor.goal import GoalAdapter
 from lf_actor.ledger import DecayLedger
 from lf_actor.mailbox import Mailbox, run_mailbox_router
 from lf_actor.memory import WorkingMemory
+from lf_actor.outreach import OutreachLedger
 from lf_actor.persona import load_personas
 from lf_actor.phases import ActorPhases
 from lf_actor.reflection import BeliefLedger
@@ -79,6 +80,8 @@ async def run() -> None:
             decay_ledger=DecayLedger(redis),
             # 고강도 사건 승격 임계 — 세계 톤에 맞춰 조정 가능 (ADR-011 관심 신호)
             promote_intensity=float(os.environ.get("LF_PROMOTE_INTENSITY", "0.7")),
+            # 선제 DM 빈도 장부 — 없으면 '기억됨' 경로 자체가 조용히 꺼진다 (plan/02)
+            outreach=OutreachLedger(redis),
         )
         # 액터 소셜 루프 — 피드 포스트를 관계 이웃에게, 액터 댓글을 글 작성자에게
         # (배달 수는 params.yaml social.feed_fanout이 원천)
