@@ -123,21 +123,19 @@ def lod_after_perception(
 ) -> ActorLod:
     """지각한 항목들 → LOD 갱신 (ADR-011 §관심 신호).
 
-    Hot 승격 신호 넷: 응답 의무가 있는 상호작용(dm/comment — 상호작용 우선,
-    ADR-012 규칙 2), 내 글에 달린 액터 댓글(응답 의무와 동형 — 액터 소셜 루프),
-    Director의 사적 지목(nudge 관측 — 반응을 기대하고 심은 지각이라 잠든 채
-    두면 다음 due까지 썩는다, ADR-013), 고강도 세계 사건(내 삶을 흔든 사건은
-    곧바로 반응하게 한다 — 임계는 high_intensity, 운영 설정으로 조정 가능).
-    그 밖의 지각(반응·저강도 사건·이웃의 피드 글)은 관심 신호 — 티어는
-    유지하고 강등 타이머만 리셋한다(touch). 남의 글이 잠든 사람을 깨우진 않는다.
+    Hot 승격 신호 셋: 응답 의무가 있는 플레이어 상호작용(dm/comment — 상호작용
+    우선, ADR-012 규칙 2), Director의 사적 지목(nudge 관측 — 반응을 기대하고
+    심은 지각이라 잠든 채 두면 다음 due까지 썩는다, ADR-013), 고강도 세계
+    사건(내 삶을 흔든 사건은 곧바로 반응하게 한다 — 임계 high_intensity).
+
+    **액터 댓글은 승격하지 않는다** — 답글 의무 경로는 due 무관이라 Hot이
+    필요 없고, 댓글→promote는 자기 강화 루프였다: 포스트→댓글→작성자 Hot→
+    매 tick 행동→포스트… 전원이 상시 Hot이 되어 tick이 LLM 큐에 눌렸다
+    (2026-07-17 라이브 관측). 그 밖의 지각(반응·액터 댓글·저강도 사건·이웃의
+    피드 글)은 관심 신호 — 티어는 유지하고 강등 타이머만 리셋한다(touch).
     """
     for envelope in items:
         if envelope["type"] in _REPLYABLE or envelope["type"] == OBSERVATION_TYPE:
-            return promote(lod, tick)
-        if (
-            envelope["type"] == MESSAGE_TYPE
-            and envelope["payload"].get("channel") == "comment"
-        ):
             return promote(lod, tick)
         if (
             envelope["type"] == INCIDENT_TYPE
@@ -215,6 +213,9 @@ class ActorPhases:
         self._seen_posts: dict[str, list[dict[str, Any]]] = {}
         #: 이번 tick의 자발 댓글: (actor_id, 대상 포스트 봉투, 텍스트) — RESOLVE 적재
         self._pending_comments: list[tuple[str, dict[str, Any], str]] = []
+        #: 액터별 마지막 자발 댓글 tick — 쿨다운(social.comment_cooldown_ticks)의
+        #: 장부. in-memory — 재시작 시 쿨다운을 잊는 건 허용 오차다
+        self._last_comment: dict[str, int] = {}
         #: perceive의 감정 평가 결과 — RESOLVE에서 engine.emotion으로 적재 (ADR-015)
         self._shifts: list[PendingShift] = []
         #: RESOLVE가 남기는 이번 tick의 응고 재료 — CONSOLIDATE의 관계·기억 입력 (ADR-008/016)
@@ -625,6 +626,15 @@ class ActorPhases:
         episodes = await self._recall(ctx.world_id, actor_id, working)
         relationships = await self._relationship_summary(ctx.world_id, actor_id)
         seen = self._seen_posts.get(actor_id, [])
+        # 댓글 쿨다운 — 방금 댓글 단 액터는 기회 창을 닫는다 (본 글은 남아 다음
+        # 기회에). 댓글마다 작성자의 답장(converse)이 따라오므로, 이 창이 곧
+        # 수다의 예산이다 (2026-07-17 과열 관측: tick당 댓글 15건 × 답장 15건)
+        social = default_params()["social"]
+        last = self._last_comment.get(actor_id)
+        if seen and last is not None and ctx.tick - last < int(
+            social["comment_cooldown_ticks"]
+        ):
+            seen = []
         if seen:
             schema = with_comment_path(schema, seen)
         bundle = build(
@@ -640,11 +650,12 @@ class ActorPhases:
         if seen:
             payload, comment = extract_comment(payload, seen)
             self._seen_posts.pop(actor_id, None)  # 댓글 기회는 이 결정에 소진됐다
-            cap = int(default_params()["social"]["max_comments_per_tick"])
+            cap = int(social["max_comments_per_tick"])
             written = sum(1 for a, _, _ in self._pending_comments if a == actor_id)
             if comment is not None and written < cap:
                 post, text = comment
                 self._pending_comments.append((actor_id, post, text))
+                self._last_comment[actor_id] = ctx.tick
         return payload, bundle.trace_id
 
     def _post_line(self, envelope: dict[str, Any]) -> str:

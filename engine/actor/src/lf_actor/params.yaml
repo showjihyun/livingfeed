@@ -44,5 +44,8 @@ social:
   feed_fanout: 3
   # 액터당 tick당 자발 댓글 상한 — 루프 폭주의 마지막 빗장
   max_comments_per_tick: 1
+  # 자발 댓글 쿨다운 — 방금 댓글 단 액터는 이 tick 수만큼 기회 창이 닫힌다.
+  # 댓글마다 작성자의 답장이 따라오므로 이 창이 곧 수다(와 LLM 비용)의 예산이다
+  comment_cooldown_ticks: 5
   # 다음 LLM decide까지 들고 가는 '본 글' 최대 수 — 오래된 것부터 밀려난다
   seen_posts_max: 3

@@ -48,6 +48,11 @@ class ScoringConfig:
     threshold: float = 0.35
     #: 희소성 관측 창 (최근 행동 수)
     rarity_window: int = 256
+    #: 연속 반복 감쇠 — 같은 인물의 같은 종류가 연달아 승격될 때 penalty^streak.
+    #: confront(0.85)처럼 희소성 없이 임계를 넘는 종류의 도배를 막는다
+    repeat_penalty: float = 0.5
+    #: 반복으로 보는 시간 창 (tick) — 이 창을 지나면 같은 종류도 새 마디다
+    repeat_window_ticks: int = 30
 
 
 def drama_score(action_kind: str, *, has_target: bool, cfg: ScoringConfig) -> float:
@@ -67,6 +72,43 @@ def worthiness(
         + cfg.w_boost * boost
     )
     return min(1.0, max(0.0, score))
+
+
+class RepeatTracker:
+    """같은 인물의 같은 종류가 연달아 승격되는 걸 감쇠한다 (연속 반복 ≠ 새 마디).
+
+    인물별 희소성(rarity)이 못 막는 구멍을 닫는다: confront(0.85)처럼 드라마
+    항만으로 임계를 넘는 종류는 희소성이 0이어도 승격됐다 — 같은 결심이
+    10여 건 피드를 채웠다 (2026-07-17 라이브 관측). 연속 승격의 두 번째부터
+    penalty^streak을 곱해 가라앉히고, 다른 종류가 승격되거나 창(window)이
+    지나면 흐름이 바뀐 것으로 보고 리셋한다. 프로세스-로컬 근사(재시작 시
+    초기화) — RarityTracker와 같은 허용 오차.
+    """
+
+    def __init__(self, *, penalty: float, window_ticks: int) -> None:
+        self._penalty = penalty
+        self._window = window_ticks
+        #: 인물 → (마지막 승격 종류, 그 tick, 연속 승격 수)
+        self._last: dict[str, tuple[str, int, int]] = {}
+
+    def penalty(self, author: str, kind: str, *, tick: int) -> float:
+        entry = self._last.get(author)
+        if entry is None:
+            return 1.0
+        last_kind, last_tick, streak = entry
+        if last_kind != kind or tick - last_tick >= self._window:
+            return 1.0
+        return self._penalty**streak
+
+    def observe(self, author: str, kind: str, *, tick: int, promoted: bool) -> None:
+        """승격 결과를 기록한다 — 거절은 streak을 늘리지도 풀지도 않는다."""
+        if not promoted:
+            return
+        entry = self._last.get(author)
+        if entry is not None and entry[0] == kind and tick - entry[1] < self._window:
+            self._last[author] = (kind, tick, entry[2] + 1)
+        else:
+            self._last[author] = (kind, tick, 1)
 
 
 class RarityTracker:

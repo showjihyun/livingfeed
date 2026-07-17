@@ -243,6 +243,45 @@ def test_evaluate_passes_interpersonal_speak_but_filters_spam():
     assert last_score < cfg.threshold
 
 
+def test_repeat_tracker_sinks_consecutive_same_resolve():
+    """연속 반복 감쇠 — 같은 인물의 같은 종류 '결심'이 연달아 피드를 채우지 못한다.
+
+    confront(0.85)는 희소성 항 없이도 임계를 넘어(0.5×0.85=0.425) 인물별
+    희소성이 못 막는다 — 라이브 관측: 같은 결심 포스트 10여 건 도배
+    (2026-07-17). 반복은 새 마디가 아니다: 연속 승격에 penalty^streak.
+    """
+    from lf_feed.scoring import RepeatTracker
+
+    cfg = ScoringConfig()
+    tracker = RepeatTracker(
+        penalty=cfg.repeat_penalty, window_ticks=cfg.repeat_window_ticks
+    )
+    author, kind = "a_resolver", "confront"
+    base = 0.625  # confront 첫 관측(드라마 0.85 + 희소성 1.0)의 실제 점수대
+
+    # 첫 결심은 온전히 — 마디다
+    assert tracker.penalty(author, kind, tick=100) == 1.0
+    tracker.observe(author, kind, tick=100, promoted=True)
+
+    # 연속 같은 결심 — 임계 아래로 가라앉는다
+    assert base * tracker.penalty(author, kind, tick=102) < cfg.threshold
+    tracker.observe(author, kind, tick=102, promoted=False)
+    # 거절은 streak을 늘리지도 풀지도 않는다 — 창이 닫혀 있는 동안 계속 잠잠
+    assert base * tracker.penalty(author, kind, tick=104) < cfg.threshold
+
+    # 다른 종류의 행동이 승격되면 흐름이 바뀐 것 — 반복이 아니다
+    assert tracker.penalty(author, "speak", tick=105) == 1.0
+    tracker.observe(author, "speak", tick=105, promoted=True)
+    assert tracker.penalty(author, kind, tick=106) == 1.0
+
+    # 창(repeat_window_ticks)이 지나면 같은 종류도 새 마디다
+    tracker.observe(author, kind, tick=106, promoted=True)
+    assert tracker.penalty(author, kind, tick=106 + cfg.repeat_window_ticks) == 1.0
+
+    # 다른 인물은 서로 독립
+    assert tracker.penalty("a_someone_else", kind, tick=102) == 1.0
+
+
 def test_rarity_is_per_actor_not_global():
     """희소성은 인물별이다 — 한 사람의 도배를 막되, 모두의 근황을 막지 않는다.
 

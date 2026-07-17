@@ -207,6 +207,44 @@ async def test_moved_actor_leaves_a_comment_through_llm_decide(conn, redis):
     assert any("댓글을 남겼다" in m and "응원할게" in m for m in recent)
 
 
+async def test_comment_cooldown_closes_the_window(conn, redis):
+    """자발 댓글 쿨다운 — 방금 댓글 단 액터는 기회 창이 닫힌다 (수다의 예산).
+
+    댓글마다 글 작성자의 답장(converse)이 따라오므로 이 창이 곧 LLM 비용의
+    예산이다 (2026-07-17 과열 관측: tick당 댓글 15건, GPU 96%). 창이 닫힌
+    동안의 본 글은 소진되지 않고 다음 기회를 기다린다.
+    """
+    from lf_actor.rhythm import default_params
+
+    reader, writer = make_reader(), make_writer()
+    mailbox = Mailbox(redis)
+    await warm_edge(redis, READER, WRITER)
+    ai = _CommentingAi()
+    phases = ActorPhases(
+        [reader, writer], ai=ai, memory=WorkingMemory(redis), mailbox=mailbox,
+        emotion=EmotionAdapter(redis), relationship=RelationshipAdapter(redis),
+    )
+    phases._lods[WRITER] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
+
+    post1 = feed_post()
+    await mailbox.push(WORLD, READER, post1)
+    head = await run_tick(conn, phases, CLOCK, WORLD, tick=5, head=0)  # 첫 댓글
+
+    post2 = feed_post()
+    await mailbox.push(WORLD, READER, post2)
+    head = await run_tick(conn, phases, CLOCK, WORLD, tick=6, head=head)  # 쿨다운 — 침묵
+
+    cooldown = int(default_params()["social"]["comment_cooldown_ticks"])
+    await run_tick(conn, phases, CLOCK, WORLD, tick=5 + cooldown, head=head)  # 창 열림
+
+    events = [s.envelope for s in await read_stream(conn, WORLD, "actor", READER)]
+    comments = [e for e in events if e["type"] == "actor.message.sent"]
+    # 쿨다운 tick의 post2는 소진되지 않고 살아남아 창이 열리는 tick에 댓글이 된다
+    assert [c["payload"]["post_id"] for c in comments] == [
+        post1["event_id"], post2["event_id"]
+    ]
+
+
 async def test_rule_fallback_never_comments(conn, redis):
     """규칙 폴백은 댓글을 만들지 않는다 — 자발 댓글은 LLM의 몫 (dev 결정성)."""
     reader, writer = make_reader(), make_writer()
@@ -244,8 +282,13 @@ def actor_comment(post: dict, commenter: str = READER) -> dict:
     }
 
 
-async def test_post_author_wakes_and_replies_exactly_once(conn, redis):
-    """②③ 작성자 답글 의무: 댓글을 받은 작성자는 promote되고 반드시 한 번 답한다.
+async def test_post_author_replies_exactly_once_without_waking(conn, redis):
+    """②③ 작성자 답글 의무: 댓글을 받은 작성자는 반드시 한 번 답한다 — Hot 승격 없이.
+
+    답글 경로는 due 무관이라 Hot이 필요 없다. 댓글→promote는 자기 강화 루프였다:
+    포스트→댓글→작성자 Hot→매 tick 행동→포스트… 전원이 상시 Hot이 되어 tick이
+    LLM 큐에 눌렸다 (2026-07-17 라이브 관측, GPU 96%). 액터 댓글은 touch만 —
+    관심은 이어지되 비용은 LOD가 정한다. 플레이어 개입의 promote는 불변(plan/02).
 
     답글은 댓글 작성자를 향하고 in_reply_to가 댓글 event_id다 — post_id와 달라
     라우터가 다시 돌리지 않는다 (깊이 1 종결). LLM이 없어도(규칙 폴백) 답한다.
@@ -263,8 +306,9 @@ async def test_post_author_wakes_and_replies_exactly_once(conn, redis):
     phases._lods[READER] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
     await run_tick(conn, phases, CLOCK, WORLD, tick=8, head=0)
 
-    # 댓글은 응답 의무와 동형 — 잠들어 있던 작성자도 깨어난다
-    assert phases._lods[WRITER].tier is Tier.HOT
+    # 액터 댓글은 관심 신호(touch)일 뿐 — 잠든 작성자를 깨우지 않는다 (비용 정책)
+    assert phases._lods[WRITER].tier is Tier.COLD
+    assert phases._lods[WRITER].last_interest_tick == 8  # 강등 타이머는 리셋됐다
 
     events = [s.envelope for s in await read_stream(conn, WORLD, "actor", WRITER)]
     [reply] = [e for e in events if e["type"] == "actor.message.sent"]

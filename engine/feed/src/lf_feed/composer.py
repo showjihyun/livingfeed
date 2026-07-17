@@ -35,7 +35,7 @@ from lf_feed.compose import (
 )
 from lf_feed.config import Config
 from lf_feed.narrator import FeedNarrator
-from lf_feed.scoring import RarityTracker
+from lf_feed.scoring import RarityTracker, RepeatTracker
 
 logger = logging.getLogger("lf.feed.composer")
 
@@ -80,6 +80,10 @@ class FeedComposer:
             actor_names if actor_names is not None else load_actor_names(cfg.personas_dir)
         )
         self._rarity = RarityTracker(cfg.scoring.rarity_window)
+        self._repeat = RepeatTracker(
+            penalty=cfg.scoring.repeat_penalty,
+            window_ticks=cfg.scoring.repeat_window_ticks,
+        )
         #: Director의 편집 조명 (boost_feed, ADR-013/014): (world, actor) → (boost, until).
         #: composer는 전 세계를 소비하므로 세계가 키에 들어간다. in-memory — 재시작 시
         #: 남은 조명이 꺼진다 (세계 열거 없이는 es 복원 불가, 조명은 60 tick짜리라 허용)
@@ -134,6 +138,15 @@ class FeedComposer:
             drama, score = evaluate(
                 envelope, self._rarity, self._cfg.scoring,
                 director_boost=self._active_boost(envelope),
+            )
+            # 연속 반복 감쇠 — 같은 인물의 같은 종류 연속 승격은 새 마디가 아니다
+            # (confront처럼 드라마 항만으로 임계를 넘는 종류의 도배 차단, ADR-014)
+            author = envelope["actor_id"]
+            kind = envelope["payload"]["action_kind"]
+            score *= self._repeat.penalty(author, kind, tick=envelope["tick"])
+            self._repeat.observe(
+                author, kind, tick=envelope["tick"],
+                promoted=score >= self._cfg.scoring.threshold,
             )
             event = build_post_event(
                 envelope, drama=drama, score=score, actor_names=self._names
