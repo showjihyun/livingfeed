@@ -102,6 +102,39 @@ def fallback_action(persona: Persona, tick: int, trace_id: str) -> dict[str, Any
     }
 
 
+#: 여운 분출 폴백 풀 — 그 대화를 이어받는 결의 문장 (드라마 재생산, plan/02).
+#: 상대는 '그 사람'뿐 — 플레이어 식별자·기계 어휘 비노출 (리시트 정화의 결)
+_FOLLOW_UP_PHRASES = (
+    '며칠이 지났는데도 그 사람이 남긴 말이 마음에 남아 있다 — "{fragment}"',
+    '문득 그때의 대화가 다시 떠올랐다. "{fragment}" — 그 말을 아직 굴리고 있다',
+    '그 사람과 나눈 이야기가 자꾸 생각난다. "{fragment}" — 오래 남을 것 같은 말이다',
+)
+_FOLLOW_UP_HEADLINES = ("마음에 남은 대화", "그 말이 남긴 것", "며칠째 맴도는 이야기")
+
+
+def fallback_follow_up(
+    persona: Persona, tick: int, trace_id: str, *, fragment: str
+) -> dict[str, Any]:
+    """여운 후속 포스트의 결정적 규칙 행동 — LLM 없이도 분출은 보증된다.
+
+    분출 여부는 상태(여운·쿨다운·TTL)가 정하고 문장 품질만 LLM의 몫이다 —
+    첫 접촉 인사 폴백과 같은 급의 보증 (correlation 승계가 배지·계측의 판정
+    그 자체라, 머뭇거림으로 조용히 생략하면 드라마 재생산이 통째로 빠진다).
+    fragment는 그 대화의 한 조각(상대의 말) — 따옴표 인용으로만 싣는다.
+    """
+    i = zlib.crc32(f"{persona.id}:resonance:{tick}".encode())
+    phrase = _FOLLOW_UP_PHRASES[i % len(_FOLLOW_UP_PHRASES)]
+    return {
+        "action_kind": "speak",
+        "intent": f"{persona.name}, {phrase.format(fragment=fragment)}"[:500],
+        "headline": _FOLLOW_UP_HEADLINES[i % len(_FOLLOW_UP_HEADLINES)][:80],
+        "target_actor_id": None,
+        "location_id": None,
+        "params": {"fallback": True, "resonance": True},
+        "decision_trace": {"trace_id": trace_id, "tier": "cold_rule"},
+    }
+
+
 #: Cold 일과 패턴 — 잠든 기간의 생활을 요약하는 서술 (ADR-012 §Cold 통계적 일괄 처리).
 #: 순간의 머뭇거림(fallback_action)과 달리 기간의 결이 담긴다. 최강 욕구가 기조,
 #: 두 번째 욕구가 틈틈이 스민다.

@@ -63,8 +63,15 @@ from lf_actor.reflection import (
 )
 from lf_actor.relationship import PRINCIPAL as REL_PRINCIPAL
 from lf_actor.relationship import PendingRelEvent, RelationshipAdapter
+from lf_actor.resonance import GIST_MAX, Resonance, ResonanceStore
 from lf_actor.rhythm import default_params, posting_moment
-from lf_actor.rules import fallback_action, fallback_greeting, fallback_reply, routine_action
+from lf_actor.rules import (
+    fallback_action,
+    fallback_follow_up,
+    fallback_greeting,
+    fallback_reply,
+    routine_action,
+)
 from lf_actor.semantic import SemanticMemory
 from lf_actor.social import extract_comment, with_comment_path
 
@@ -86,6 +93,10 @@ _BIO_MAX = 500
 
 #: 응답 의무가 있는 상호작용 (반응(like)은 지각·감정 입력일 뿐 응답하지 않는다)
 _REPLYABLE = {"player.dm.sent": "dm", "player.comment.posted": "comment"}
+
+#: 플레이어 댓글 — 여운(드라마 재생산, plan/02)이 남을 수 있는 유일한 교환.
+#: 공개 대화라 그 사슬의 후속 포스트가 '이 대화가 낳은 이야기'로 성립한다
+COMMENT_TYPE = "player.comment.posted"
 
 #: 플레이어의 반응(좋아요) — 응답 의무는 없지만, 엣지 없는 플레이어의 '첫' 좋아요만은
 #: 가벼운 인사 댓글을 받는다 (plan/03 §첫 개입 — 무반응으로 끝나면 루프는 시작도 못 한다)
@@ -172,6 +183,7 @@ class ActorPhases:
         decay_ledger: DecayLedger | None = None,
         promote_intensity: float = HIGH_INTENSITY,
         outreach: OutreachLedger | None = None,
+        resonance: ResonanceStore | None = None,
         shard_select: Callable[[Persona], bool] | None = None,
     ) -> None:
         if not personas:
@@ -206,11 +218,15 @@ class ActorPhases:
         self._lods: dict[str, ActorLod] = {
             actor_id: ActorLod(tier=Tier.HOT, last_interest_tick=0) for actor_id in self._personas
         }
-        self._intents: list[tuple[str, str, dict[str, Any]]] = []  # (actor_id, tier, payload)
+        #: (actor_id, tier, payload[, causation_id, correlation_id]) — 여운 분출
+        #: intent만 5-튜플로 원 대화의 인과·사슬을 실어 온다 (resolve가 관대하게 푼다)
+        self._intents: list[tuple[Any, ...]] = []
         #: 이번 tick에 응답할 상호작용: (actor_id, 원인 봉투, 답장 텍스트)
         self._replies: list[tuple[str, dict[str, Any], str]] = []
         #: 선제 DM 빈도 장부 — 없으면 선제 DM 경로 자체가 없다 (후방 호환)
         self._outreach = outreach
+        #: 여운 저장소 (드라마 재생산, plan/02) — 없으면 경로 자체가 없다 (후방 호환)
+        self._resonance = resonance
         #: perceive가 찾은 첫 접촉 좋아요: (actor_id, reaction 봉투) — decide가 인사한다.
         #: 엣지 존재는 perceive 시점(이번 tick의 관계 응고 이전) 기준이다 (plan/03)
         self._pending_greetings: list[tuple[str, dict[str, Any]]] = []
@@ -503,7 +519,25 @@ class ActorPhases:
         # 않고 조용히 생략한다. 자기 발화는 관심 신호가 아니다 — LOD 불변 (ADR-011).
         already = {actor_id for actors in due.values() for actor_id in actors}
         rhythm = default_params()
-        for actor_id in sorted(set(self._personas) - already):
+
+        # 여운 분출 (드라마 재생산, plan/02) — 리듬 모먼트에서, LOD 불문. non-due
+        # 한정을 걸면 강렬한 교환으로 Hot이 된 액터 — 즉 여운이 가장 잘 남는
+        # 액터 — 일수록 분출이 영영 못 나가는 역설이 생긴다 (선제 DM의 교훈).
+        # due 액터는 행동과 분출이 한 tick에 공존하고, 아니면 분출이 리듬 포스팅을
+        # 대체한다. 빈도의 빗장은 여운의 희소성(임계)·1회 소모·쿨다운·TTL이다.
+        burst: set[str] = set()
+        if self._resonance is not None:
+            for actor_id in sorted(self._personas):
+                lifestyle = self._personas[actor_id].lifestyle
+                if not posting_moment(actor_id, lifestyle, ctx.world_time, rhythm):
+                    continue
+                if await self._burst_resonance(ctx, world, actor_id, schema):
+                    burst.add(actor_id)
+                    # tick.completed의 actors_decided는 hot/warm/cold로 닫힌 스키마 —
+                    # 리듬 관례를 따라 warm에 합산한다
+                    decided["warm"] += 1
+
+        for actor_id in sorted(set(self._personas) - already - burst):
             persona = self._personas[actor_id]
             if not posting_moment(actor_id, persona.lifestyle, ctx.world_time, rhythm):
                 continue
@@ -616,6 +650,102 @@ class ActorPhases:
         self._proactive_dms.append((actor_id, target, text))
         logger.info("선제 DM: %s → %s tick=%d ('기억됨', plan/02)", actor_id, target, ctx.tick)
         return True
+
+    async def _burst_resonance(
+        self, ctx: TickContext, world: WorldContext, actor_id: str, schema: dict[str, Any]
+    ) -> bool:
+        """여운 → 원 대화의 correlation을 승계한 후속 포스트 (드라마 재생산, plan/02).
+
+        승계가 배지('이 대화가 낳은 이야기')와 loop_health 드라마 재생산율의 판정
+        그 자체다 — 그래서 분출은 보증이다: 표현은 LLM, 실패 시 규칙 폴백이 문장을
+        채운다 (조용한 생략 금지 — 리듬 포스팅과 다른 급). 과열 가드 4중: 액터당
+        여운 1개(store 계약), correlation당 1회 소모(spend), 쿨다운(액터당), TTL
+        (바랜 여운은 지우고 분출하지 않는다). 반환: 분출 여부.
+        """
+        assert self._resonance is not None
+        res = await self._resonance.load(ctx.world_id, actor_id)
+        if res is None:
+            return False
+        knobs = default_params()["resonance"]
+        if ctx.tick - res.tick > int(knobs["ttl_ticks"]):
+            await self._resonance.clear(ctx.world_id, actor_id)  # 바랜 여운 — 침묵
+            return False
+        last = await self._resonance.last_burst_tick(ctx.world_id, actor_id)
+        if last is not None and ctx.tick - last < int(knobs["cooldown_ticks"]):
+            return False
+        persona = self._personas[actor_id]
+        working = await self._memory.recent(ctx.world_id, actor_id)
+        # 여운 요지가 재료다 — 상대는 세계 안 어휘('그 사람')로만 (리시트 정화의 결)
+        material = (
+            f'마음에 남은 대화: 그 사람이 남긴 말 "{res.comment}"'
+            f' — 나는 "{res.reply}"라고 답했었다'
+        )
+        bundle = build(
+            persona, [material, *working], world, purpose="follow_up_post",
+            episodes=await self._recall(ctx.world_id, actor_id, working),
+            arc=await self._arc_of(ctx.world_id, actor_id),
+            relationships=await self._relationship_summary(ctx.world_id, actor_id),
+        )
+        payload = await self._ai.decide_action(
+            bundle, schema, tier=Tier.WARM.value, actor_id=actor_id, tick=ctx.tick
+        )
+        if payload is None:
+            payload = fallback_follow_up(
+                persona, ctx.tick, bundle.trace_id, fragment=res.comment
+            )
+        payload = sanitize_target(payload, set(self._roster), actor_id)
+        # 5-튜플 — 원 대화의 인과·사슬을 RESOLVE까지 실어 간다 (승계의 배선 지점)
+        self._intents.append(
+            (actor_id, "rhythm", payload, res.source_event_id, res.correlation_id)
+        )
+        await self._resonance.spend(ctx.world_id, actor_id, res.correlation_id, ctx.tick)
+        logger.info(
+            "여운 분출: %s corr=%s tick=%d (드라마 재생산, plan/02)",
+            actor_id, res.correlation_id, ctx.tick,
+        )
+        return True
+
+    async def _record_resonances(self, ctx: TickContext) -> None:
+        """플레이어 댓글 교환의 여운 기록 — 감정 강도가 임계 이상일 때만 (plan/02).
+
+        강도의 원천은 이 tick의 감정 평가(perceive appraise)가 그 댓글에 남긴
+        shift 인스턴스다 — 감정 어댑터가 없으면 여운도 없다 (감정 없는 교환은
+        마음에 남지 않는다). DM·좋아요는 제외 — 여운은 공개 대화(댓글)의 것이다.
+        저장 계약(액터당 1개·소모된 사슬 재기록 거부)은 ResonanceStore의 몫이다.
+        """
+        assert self._resonance is not None
+        threshold = float(default_params()["resonance"]["threshold"])
+        peak_by_cause: dict[str, float] = {}
+        for shift in self._shifts:
+            if shift.causation_id is None:
+                continue
+            intensity = float(shift.instance.get("intensity", 0.0))
+            peak_by_cause[shift.causation_id] = max(
+                peak_by_cause.get(shift.causation_id, 0.0), intensity
+            )
+        for actor_id, envelope, text in self._replies:
+            if envelope["type"] != COMMENT_TYPE:
+                continue
+            intensity = peak_by_cause.get(envelope["event_id"], 0.0)
+            if intensity < threshold:
+                continue
+            recorded = await self._resonance.record(
+                ctx.world_id, actor_id,
+                Resonance(
+                    correlation_id=envelope["correlation_id"],
+                    source_event_id=envelope["event_id"],
+                    player_id=envelope["payload"]["player_id"],
+                    comment=envelope["payload"]["text"][:GIST_MAX],
+                    reply=text[:GIST_MAX],
+                    intensity=intensity,
+                    tick=ctx.tick,
+                ),
+            )
+            if recorded:
+                logger.info(
+                    "여운 기록: %s corr=%s intensity=%.2f tick=%d (plan/02)",
+                    actor_id, envelope["correlation_id"], intensity, ctx.tick,
+                )
 
     async def _llm_action(
         self,
@@ -908,6 +1038,11 @@ class ActorPhases:
                 memo = f"tick {ctx.tick}: 나는 플레이어 {player}에게 답했다 — \"{text}\""
             memos.setdefault(actor_id, []).append(memo)
 
+        # 여운 기록 (드라마 재생산, plan/02) — 강렬했던 플레이어 댓글 교환은
+        # 마음에 남아, 이후 리듬 모먼트에 원 사슬을 승계한 후속 포스트가 된다
+        if self._resonance is not None:
+            await self._record_resonances(ctx)
+
         # 선제 DM ('기억됨', plan/02) — 원인 플레이어 이벤트가 없는 자발 발화라
         # causation 없음·in_reply_to null (스키마가 허용, 사슬의 시작이 된다)
         for actor_id, player_id, text in self._proactive_dms:
@@ -944,7 +1079,13 @@ class ActorPhases:
                 f"tick {ctx.tick}: 나는 {name}의 글에 댓글을 남겼다 — \"{text}\""
             )
 
-        for actor_id, _tier, payload in self._intents:
+        for intent in self._intents:
+            actor_id, payload = intent[0], intent[2]
+            # 여운 분출 intent(5-튜플)만 원 대화의 인과·사슬을 실어 온다 — 이 승계가
+            # '이 대화가 낳은 이야기' 배지와 드라마 재생산율의 판정이다 (plan/02).
+            # 나머지(3-튜플)는 사슬 없음 — append가 새 사슬의 루트로 만든다 (ADR-002)
+            causation_id = intent[3] if len(intent) > 3 else None
+            correlation_id = intent[4] if len(intent) > 4 else None
             events_by_actor.setdefault(actor_id, []).append(
                 NewEvent(
                     world_id=ctx.world_id,
@@ -953,6 +1094,8 @@ class ActorPhases:
                     type=ACTION_TYPE,
                     tick=ctx.tick,
                     actor_id=actor_id,
+                    causation_id=causation_id,
+                    correlation_id=correlation_id,
                     payload=payload,
                 )
             )

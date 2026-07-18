@@ -33,6 +33,7 @@ from lf_actor.phases import ActorPhases
 from lf_actor.reflection import BeliefLedger
 from lf_actor.relationship import RelationshipAdapter
 from lf_actor.reload import PersonaReloader, ReloadingPhases
+from lf_actor.resonance import ResonanceStore
 from lf_actor.semantic import SemanticMemory
 from lf_actor.shard_barrier import RedisShardBarrier
 from lf_actor.social import FeedFanout
@@ -102,6 +103,9 @@ async def run() -> None:
             promote_intensity=float(os.environ.get("LF_PROMOTE_INTENSITY", "0.7")),
             # 선제 DM 빈도 장부 — 없으면 '기억됨' 경로 자체가 조용히 꺼진다 (plan/02)
             outreach=OutreachLedger(redis),
+            # 여운 저장소 — 없으면 드라마 재생산 경로가 조용히 꺼진다 (plan/02,
+            # OutreachLedger 배선 누락 사고의 교훈: composition root가 반영 지점이다)
+            resonance=ResonanceStore(redis),
             shard_select=shard_select,
         )
         barrier = (
