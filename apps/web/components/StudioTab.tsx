@@ -21,6 +21,7 @@ import {
   NEED_LABELS,
   TRAIT_BAND_LABELS,
   blankPersona,
+  deletePersona,
   freshId,
   groupKeyOf,
   groupPersonas,
@@ -42,6 +43,15 @@ const AMBER = {
   bg: "#F9F1DF",
   border: "#EAD9B0",
   solid: "#B08430",
+};
+
+/* 작별의 색 — 파괴는 공방의 호박색이 아니라 차분한 회색·적색 계열로 가른다 */
+const FAREWELL = {
+  text: "#8A4A5C",
+  soft: "#9A6371",
+  bg: "#FBF5F7",
+  border: "#EAD3D9",
+  solid: "#A34D5F",
 };
 
 const AVATAR_COLORS = ["#E8D5A8", "#F5C8B8", "#BFE3D0", "#AFC8F5", "#CBBDE8"];
@@ -228,16 +238,23 @@ function PersonaEditor({
   isNew,
   onBack,
   onSaved,
+  onRetired,
 }: {
   initial: PersonaDoc;
   isNew: boolean;
   onBack: () => void;
   onSaved: (doc: PersonaDoc) => void;
+  /** 떠나보내기 확정·성공 후 — 명단 제거와 작별 문장은 부모의 몫 */
+  onRetired: (name: string) => void;
 }) {
   const [draft, setDraft] = useState<PersonaDoc>(initial);
   const [saving, setSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formMessage, setFormMessage] = useState<string | null>(null);
+  // 떠나보내기 — 2단 확인(누름 → 확인 카드 → 확정). 파괴적이라 저장과 상태를 섞지 않는다
+  const [confirmingRetire, setConfirmingRetire] = useState(false);
+  const [retiring, setRetiring] = useState(false);
+  const [retireError, setRetireError] = useState<string | null>(null);
 
   const patch = useCallback((p: Partial<PersonaDoc>) => setDraft((d) => ({ ...d, ...p })), []);
 
@@ -274,6 +291,20 @@ function PersonaEditor({
       setFormMessage(result.message);
     }
   }, [draft, isNew, saving, onSaved]);
+
+  const handleRetire = useCallback(async () => {
+    if (retiring) return;
+    setRetiring(true);
+    setRetireError(null);
+    const result = await deletePersona(draft.id);
+    setRetiring(false);
+    if (result.ok) {
+      onRetired(result.name || draft.name || draft.id);
+    } else {
+      // 실패는 기존 오류 규약 — offline이면 닿지 못했다는 문장이 그대로 온다
+      setRetireError(result.message);
+    }
+  }, [retiring, draft.id, draft.name, onRetired]);
 
   // 화면 자리가 없는 검증 에러 — 배너에서라도 그대로 보여준다 (조용히 삼키지 않는다)
   const shownKeys = new Set<string>([
@@ -664,6 +695,111 @@ function PersonaEditor({
             <FieldError error={fieldErrors.identity_core} />
           </SectionCard>
 
+          {!isNew && (
+            <SectionCard
+              title="작별"
+              hint="세계에 살던 사람을 떠나보내는 자리 — 이 작업대에서 가장 무거운 버튼이에요"
+            >
+              {retireError && (
+                <div
+                  style={{
+                    background: "#FBECF0",
+                    border: "1.5px solid #F2CBD7",
+                    borderRadius: 14,
+                    padding: "12px 16px",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "#B24E6B",
+                    lineHeight: 1.6,
+                  }}
+                >
+                  {retireError}
+                </div>
+              )}
+              {confirmingRetire ? (
+                <div
+                  style={{
+                    background: FAREWELL.bg,
+                    border: `1.5px solid ${FAREWELL.border}`,
+                    borderRadius: 16,
+                    padding: "16px 18px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                  }}
+                >
+                  <div style={{ fontSize: 14, fontWeight: 800, color: FAREWELL.text }}>
+                    {draft.name || draft.id} — 이 이름을 세계에서 떠나보내려 해요
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: FAREWELL.soft,
+                      lineHeight: 1.65,
+                    }}
+                  >
+                    이 사람의 글·관계가 세계의 모든 화면에서 사라집니다. 되돌릴 수 없어요.
+                  </div>
+                  <div style={{ display: "flex", gap: 10, marginTop: 2 }}>
+                    <div
+                      onClick={() => void handleRetire()}
+                      className={styles.press95}
+                      style={{
+                        padding: "9px 18px",
+                        borderRadius: 9999,
+                        background: retiring ? "#D8DEEA" : FAREWELL.solid,
+                        color: "#fff",
+                        fontSize: 13,
+                        fontWeight: 800,
+                        cursor: retiring ? "default" : "pointer",
+                      }}
+                    >
+                      {retiring ? "세계가 놓아주는 중…" : "떠나보내기"}
+                    </div>
+                    <div
+                      onClick={() => {
+                        if (retiring) return;
+                        setConfirmingRetire(false);
+                        setRetireError(null);
+                      }}
+                      className={styles.press95}
+                      style={{
+                        padding: "9px 18px",
+                        borderRadius: 9999,
+                        background: "#F2F6FC",
+                        color: "#6B7691",
+                        fontSize: 13,
+                        fontWeight: 800,
+                        cursor: "pointer",
+                      }}
+                    >
+                      남겨두기
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  onClick={() => setConfirmingRetire(true)}
+                  className={styles.press95}
+                  style={{
+                    alignSelf: "flex-start",
+                    padding: "9px 18px",
+                    borderRadius: 9999,
+                    background: "#fff",
+                    border: "1.5px solid #D8DEEA",
+                    color: "#77808F",
+                    fontSize: 13,
+                    fontWeight: 800,
+                    cursor: "pointer",
+                  }}
+                >
+                  세계에서 떠나보내기
+                </div>
+              )}
+            </SectionCard>
+          )}
+
           <div style={{ height: 8 }} />
         </div>
       </div>
@@ -685,10 +821,12 @@ interface StudioTabProps {
 }
 
 export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
-  const { personas, available, applyLocal } = usePersonaRoster(enabled);
+  const { personas, available, applyLocal, removeLocal } = usePersonaRoster(enabled);
   const [view, setView] = useState<View>({ kind: "roster" });
   // 수정 저장 직후 명단 위에 뜨는 확인 — "세계가 받아들입니다" 결
   const [savedName, setSavedName] = useState<string | null>(null);
+  // 떠나보낸 직후 명단 위에 뜨는 작별 — 저장 확인(초록)과 다른, 차분한 회색 결
+  const [farewellName, setFarewellName] = useState<string | null>(null);
   const [togglingIds, setTogglingIds] = useState<ReadonlySet<string>>(new Set());
   const [rosterError, setRosterError] = useState<string | null>(null);
   // 명단 조회 — 검색어, 그룹 기준(성격의 결·아키타입·생활 리듬), 선택 그룹(null=전체)
@@ -745,6 +883,16 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
     [applyLocal],
   );
 
+  const handleRetired = useCallback(
+    (id: string, name: string) => {
+      removeLocal(id);
+      setSavedName(null);
+      setFarewellName(name);
+      setView({ kind: "roster" });
+    },
+    [removeLocal],
+  );
+
   if (view.kind === "edit") {
     return (
       <PersonaEditor
@@ -753,6 +901,7 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
         isNew={view.isNew}
         onBack={() => setView({ kind: "roster" })}
         onSaved={(doc) => handleSaved(doc, view.isNew)}
+        onRetired={(name) => handleRetired(view.initial.id, name)}
       />
     );
   }
@@ -934,6 +1083,35 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
             <div
               onClick={() => setSavedName(null)}
               style={{ color: "#3E8A66", cursor: "pointer", fontSize: 15, fontWeight: 800, padding: 4 }}
+            >
+              ×
+            </div>
+          </div>
+        )}
+
+        {farewellName && (
+          <div
+            style={{
+              background: "#EFF1F6",
+              border: "1.5px solid #D8DEEA",
+              borderRadius: 16,
+              padding: "13px 18px",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              animation: "lf-pop 0.35s ease-out",
+            }}
+          >
+            <Icon d={ICON.moon} size={16} color="#6B7691" />
+            <div
+              style={{ flex: 1, fontSize: 13, fontWeight: 700, color: "#5A6478", lineHeight: 1.6 }}
+            >
+              세계가 이 사람을 기억에서 놓아줍니다 — {farewellName}의 흔적이 화면에서 조용히
+              물러나요
+            </div>
+            <div
+              onClick={() => setFarewellName(null)}
+              style={{ color: "#6B7691", cursor: "pointer", fontSize: 15, fontWeight: 800, padding: 4 }}
             >
               ×
             </div>

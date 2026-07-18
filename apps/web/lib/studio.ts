@@ -335,6 +335,45 @@ export async function savePersona(doc: PersonaDoc): Promise<SaveResult> {
   }
 }
 
+/* ── 떠나보내기 (DELETE) — 세계의 역사에 은퇴가 기록되고, 화면들이 이 사람을 놓아준다 ── */
+
+export type DeleteResult =
+  | { ok: true; name: string }
+  | {
+      ok: false;
+      /** true면 게이트웨이 자체에 닿지 못한 것 — 서버의 거절과 구분해 보여준다 */
+      offline: boolean;
+      message: string;
+    };
+
+/** 인물을 세계에서 떠나보낸다 — 되돌릴 수 없다 (호출 전 확인은 화면의 몫) */
+export async function deletePersona(id: string): Promise<DeleteResult> {
+  try {
+    const query = new URLSearchParams({ retired_by: PLAYER_ID });
+    const response = await fetch(
+      `${GATEWAY_URL}/admin/personas/${encodeURIComponent(id)}?${query.toString()}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) {
+      const message =
+        response.status === 410
+          ? "이 사람은 이미 세계를 떠났어요"
+          : response.status === 404
+            ? "이 사람은 세계의 명단에 없어요"
+            : `떠나보내지 못했어요 (gateway ${response.status})`;
+      return { ok: false, offline: false, message };
+    }
+    const body = (await response.json()) as { actor_id: string; name: string };
+    return { ok: true, name: body.name };
+  } catch {
+    return {
+      ok: false,
+      offline: true,
+      message: "게이트웨이에 닿지 못했어요 — 연결되면 다시 시도해주세요",
+    };
+  }
+}
+
 /* ── 명단 훅 ── */
 
 export function usePersonaRoster(enabled: boolean): {
@@ -344,6 +383,8 @@ export function usePersonaRoster(enabled: boolean): {
   reload: () => void;
   /** 저장 성공본을 목록에 즉시 반영 (재조회 없이) — 신규는 맨 앞에 선다 */
   applyLocal: (doc: PersonaDoc) => void;
+  /** 떠나보낸 인물을 목록에서 즉시 내린다 (재조회 없이) */
+  removeLocal: (id: string) => void;
 } {
   const [personas, setPersonas] = useState<PersonaDoc[]>([]);
   const [available, setAvailable] = useState(false);
@@ -380,5 +421,9 @@ export function usePersonaRoster(enabled: boolean): {
     );
   }, []);
 
-  return { personas, available, reload, applyLocal };
+  const removeLocal = useCallback((id: string) => {
+    setPersonas((list) => list.filter((p) => p.id !== id));
+  }, []);
+
+  return { personas, available, reload, applyLocal, removeLocal };
 }

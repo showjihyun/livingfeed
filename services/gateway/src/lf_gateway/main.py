@@ -126,7 +126,8 @@ def create_app(
         allow_methods=["GET", "PUT", "POST", "DELETE"],
         allow_headers=["*"],
     )
-    # 페르소나 스튜디오 — 파일(SoT) CRUD 중재, es 적재 없음 (admin.py)
+    # 페르소나 스튜디오 — 파일(SoT) CRUD 중재 (admin.py). es 적재는 은퇴(DELETE)
+    # 하나뿐이다 — actor.identity.retired, read 모델 소멸은 프로젝터의 몫
     app.include_router(create_admin_router(cfg))
     # 서사 푸시 구독 저장/해지 — 구독은 상태가 아니라 전달 채널, es 적재 없음 (push.py)
     app.include_router(create_push_router(cfg))

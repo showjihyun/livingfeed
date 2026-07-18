@@ -1,8 +1,10 @@
 """페르소나 스튜디오 관리 API — 파일(agents/personas, SoT)의 CRUD 중재.
 
-es에 아무것도 적재하지 않는다 — 세계 반영은 tick 워커 핫 리로드의 몫.
+조회·저장은 es에 아무것도 적재하지 않는다 — 세계 반영은 tick 워커 핫 리로드의
+몫. 예외는 은퇴(DELETE)로, actor.identity.retired를 es에 적재한다(아래 은퇴 절).
 전부 tmp_path 페르소나 디렉터리 — 인프라(NATS/PG/Redis) 없이 돈다
-(lifespan을 태우지 않는 ASGITransport).
+(lifespan을 태우지 않는 ASGITransport). 은퇴의 es 실적재만 PG 통합 테스트가
+따로 본다(미설정 skip — conftest 가드).
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ from pathlib import Path
 import httpx
 import pytest
 import yaml
+from lf_gateway import admin
 from lf_gateway.config import Config
 from lf_gateway.main import create_app
 
@@ -83,10 +86,16 @@ def personas_dir(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def make_client(personas_dir: Path, *, token: str | None = None) -> httpx.AsyncClient:
+def make_client(
+    personas_dir: Path,
+    *,
+    token: str | None = None,
+    # 기본은 닿지 않는 DSN — 대역을 안 붙인 테스트가 es를 건드리면 시끄럽게 죽는다
+    pg_dsn: str = "postgresql://unused:unused@localhost:1/unused",
+) -> httpx.AsyncClient:
     cfg = Config(
         nats_url="nats://localhost:4222", env="test",
-        personas_dir=personas_dir, admin_token=token,
+        personas_dir=personas_dir, admin_token=token, pg_dsn=pg_dsn,
     )
     app = create_app(cfg)
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
@@ -474,8 +483,200 @@ async def test_admin_token_gates_all_admin_routes(personas_dir):
         assert (
             await client.put("/admin/personas/a_new_face", json=valid_doc())
         ).status_code == 403
+        assert (
+            await client.delete("/admin/personas/a_zed", params={"retired_by": "p_reaper"})
+        ).status_code == 403
         ok = await client.get(
             "/admin/personas", headers={"Authorization": "Bearer secret-token"}
         )
         assert ok.status_code == 200
     assert not (personas_dir / "new-face.yaml").exists()  # 거부된 PUT은 쓰지 않는다
+    assert (personas_dir / "zed.yaml").exists()  # 거부된 DELETE는 옮기지 않는다
+
+
+# ── DELETE — 은퇴: yaml은 retired/로 물러나고, 소멸은 이벤트가 나른다 ─────────
+#
+# actor.identity.retired의 스키마 파일·발행 권한(permissions.yaml)은
+# packages/schemas의 병렬 작업분이다. 등록 전까지 여기서는 적재 경로를
+# 대역(fixture)으로 붙잡아 봉투 계약을 검증하고, es 실적재는 아래 통합
+# 테스트가 registry 선등록으로 본다.
+
+
+@pytest.fixture
+def retired_events(monkeypatch) -> list:
+    """es 적재 대역 — 인프라 없이 NewEvent를 붙잡는다. 실적재는 통합 테스트의 몫."""
+    events: list = []
+
+    async def capture(cfg: Config, event) -> None:
+        events.append(event)
+
+    monkeypatch.setattr(admin, "append_retired_event", capture)
+    return events
+
+
+@pytest.fixture
+def broken_eventstore(monkeypatch) -> None:
+    """es 불통 대역 — 적재 실패 시 원복(반쪽 은퇴 금지) 검증용."""
+
+    async def explode(cfg: Config, event) -> None:
+        raise RuntimeError("es가 응답하지 않는다 (대역)")
+
+    monkeypatch.setattr(admin, "append_retired_event", explode)
+
+
+async def test_delete_moves_yaml_and_appends_retired_event(personas_dir, retired_events):
+    original = (personas_dir / "zed.yaml").read_text(encoding="utf-8")
+    async with make_client(personas_dir) as client:
+        resp = await client.delete("/admin/personas/a_zed", params={"retired_by": "p_reaper"})
+        listed = (await client.get("/admin/personas")).json()["personas"]
+        single = await client.get("/admin/personas/a_zed")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"actor_id": "a_zed", "name": "제드"}
+
+    # ① 이동 — 삭제가 아니다: 루트에서 빠지고 retired/에 원문 그대로 남는다
+    assert not (personas_dir / "zed.yaml").exists()
+    assert (personas_dir / "retired" / "zed.yaml").read_text(encoding="utf-8") == original
+    # roster(루트 glob)에서 이탈 — 목록·단건 모두
+    assert [d["id"] for d in listed] == ["a_ari"]
+    assert single.status_code == 404
+
+    # ② 적재 봉투 — 프로젝터와 합의된 고정 계약
+    [event] = retired_events
+    assert event.stream == "actor" and event.stream_key == "a_zed"
+    assert event.type == "actor.identity.retired"
+    assert event.world_id == "w_main"  # 기본 세계
+    assert event.actor_id == "a_zed" and event.tick == 0
+    assert event.payload == {"actor_id": "a_zed", "name": "제드", "retired_by": "p_reaper"}
+
+
+async def test_delete_unknown_persona_is_404(personas_dir, retired_events):
+    async with make_client(personas_dir) as client:
+        resp = await client.delete("/admin/personas/a_nobody", params={"retired_by": "p_reaper"})
+    assert resp.status_code == 404
+    assert retired_events == []
+
+
+async def test_double_delete_is_410_and_appends_once(personas_dir, retired_events):
+    async with make_client(personas_dir) as client:
+        first = await client.delete("/admin/personas/a_zed", params={"retired_by": "p_reaper"})
+        second = await client.delete("/admin/personas/a_zed", params={"retired_by": "p_reaper"})
+    assert first.status_code == 200
+    assert second.status_code == 410  # 미존재(404)와 구분 — 이미 떠난 사람
+    assert len(retired_events) == 1  # 은퇴는 역사에 한 번만 남는다
+    assert (personas_dir / "retired" / "zed.yaml").exists()  # 보관본은 그대로
+
+
+async def test_delete_requires_wellformed_retired_by(personas_dir, retired_events):
+    async with make_client(personas_dir) as client:
+        missing = await client.delete("/admin/personas/a_zed")
+        malformed = await client.delete("/admin/personas/a_zed", params={"retired_by": "reaper"})
+    assert missing.status_code == 422
+    assert malformed.status_code == 422
+    assert (personas_dir / "zed.yaml").exists()  # 거부된 삭제는 옮기지 않는다
+    assert retired_events == []
+
+
+async def test_delete_append_failure_restores_yaml(personas_dir, broken_eventstore):
+    original = (personas_dir / "zed.yaml").read_text(encoding="utf-8")
+    async with make_client(personas_dir) as client:
+        resp = await client.delete("/admin/personas/a_zed", params={"retired_by": "p_reaper"})
+        listed = (await client.get("/admin/personas")).json()["personas"]
+
+    assert resp.status_code == 500
+    # 원복 — 반쪽 은퇴(파일만 물러난 상태)가 남지 않는다
+    assert (personas_dir / "zed.yaml").read_text(encoding="utf-8") == original
+    assert not (personas_dir / "retired" / "zed.yaml").exists()
+    assert [d["id"] for d in listed] == ["a_ari", "a_zed"]  # 세계는 그대로다
+
+
+async def test_delete_keeps_prior_retiree_with_same_filename(personas_dir, retired_events):
+    # 같은 파일명이 이미 보관돼 있어도 역사를 덮지 않는다 — zed-2.yaml로 물러난다
+    prior = ZED_YAML.replace("id: a_zed", "id: a_zed_elder").replace("name: 제드", "name: 옛 제드")
+    retired = personas_dir / "retired"
+    retired.mkdir()
+    (retired / "zed.yaml").write_text(prior, encoding="utf-8")
+
+    async with make_client(personas_dir) as client:
+        resp = await client.delete("/admin/personas/a_zed", params={"retired_by": "p_reaper"})
+
+    assert resp.status_code == 200
+    assert load_yaml(retired / "zed.yaml")["id"] == "a_zed_elder"  # 선임자 보존
+    assert load_yaml(retired / "zed-2.yaml")["id"] == "a_zed"
+    assert len(retired_events) == 1
+
+
+# ── DELETE 통합 — 실제 es CAS 적재 (PG 필요, 미설정 skip — conftest 가드) ─────
+
+#: 합의된 payload 계약의 대역 스키마 — packages/schemas 등록 전 선등록용
+RETIRED_PAYLOAD_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+        "actor_id": {"type": "string", "pattern": "^a_[a-z0-9_]+$"},
+        "name": {"type": "string"},
+        "retired_by": {"type": "string", "pattern": "^p_[a-z0-9_]+$"},
+    },
+    "required": ["actor_id", "name", "retired_by"],
+    "additionalProperties": False,
+}
+
+
+@pytest.fixture
+def preregistered_retired_schema(monkeypatch) -> None:
+    """actor.identity.retired가 registry에 아직 없으면 합의 계약대로 선등록한다.
+
+    스키마 파일과 permissions.yaml 갱신은 packages/schemas의 병렬 작업분이다 —
+    이미 등록돼 있으면(정상 종착) 아무것도 덧대지 않고 실물 registry로 검증한다.
+    """
+    from lf_schemas import registry
+
+    try:
+        registry.payload_schema(admin.RETIRED_TYPE)
+        registered = registry.is_allowed("services.gateway", admin.RETIRED_TYPE)
+    except KeyError:
+        registered = False
+    if registered:
+        return  # 실물 스키마·권한이 이미 있다 — 대역 없이 그대로 간다
+
+    real_schema, real_allowed = registry.payload_schema, registry.is_allowed
+
+    def payload_schema(event_type: str) -> dict:
+        if event_type == admin.RETIRED_TYPE:
+            return RETIRED_PAYLOAD_SCHEMA
+        return real_schema(event_type)
+
+    def is_allowed(principal: str, event_type: str) -> bool:
+        if event_type == admin.RETIRED_TYPE:
+            return principal == "services.gateway"
+        return real_allowed(principal, event_type)
+
+    monkeypatch.setattr(registry, "payload_schema", payload_schema)
+    monkeypatch.setattr(registry, "is_allowed", is_allowed)
+
+
+async def test_delete_appends_envelope_to_real_eventstore(
+    personas_dir, conn, preregistered_retired_schema
+):
+    from lf_eventstore import current_head, read_stream
+    from lf_eventstore.testing import test_database_url
+
+    dsn = test_database_url()
+    assert dsn is not None  # conn 픽스처가 스킵을 보장한다
+    async with make_client(personas_dir, pg_dsn=dsn) as client:
+        resp = await client.delete(
+            "/admin/personas/a_zed",
+            params={"retired_by": "p_reaper", "world_id": "w_test"},
+        )
+    assert resp.status_code == 200
+    assert resp.json() == {"actor_id": "a_zed", "name": "제드"}
+
+    [event] = await read_stream(conn, "w_test", "actor", "a_zed")
+    env = event.envelope
+    assert env["type"] == "actor.identity.retired"
+    assert env["stream"] == "actor"
+    assert env["actor_id"] == "a_zed"
+    assert env["tick"] == 0
+    assert env["payload"] == {"actor_id": "a_zed", "name": "제드", "retired_by": "p_reaper"}
+    assert env["correlation_id"] == env["event_id"]  # 사슬의 시작 — 자기 자신이 루트
+    assert await current_head(conn, "w_test", "actor", "a_zed") == 1  # CAS head 전진
