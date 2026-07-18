@@ -41,6 +41,9 @@ def test_message_params_normalizes_three_directions():
     assert outgoing_dm[2:6] == ("dm", "p_observer_0417", "a_aria_kim", "player")
     assert comment[2:6] == ("comment", "p_observer_0417", "a_aria_kim", "player")
     assert comment[7] == "01JZK7Q3W0000000000000000F"  # post_id 보존
+    # in_reply_to: 액터는 페이로드 보존(답장 판별 근거), 플레이어는 항상 최상위(null)
+    assert reply[8] == "01JZK7Q3W0000000000000000G"
+    assert comment[8] is None
 
 
 def test_message_params_actor_comment_counterpart_is_the_actor():
@@ -93,6 +96,53 @@ async def test_apply_is_idempotent(pg):
         "   AND actor_id = 'a_aria_kim' ORDER BY event_id"
     )).fetchall()
     assert [r[0] for r in rows] == ["player", "actor"]
+
+
+async def test_comment_thread_projects_by_post_and_replays_idempotently(pg):
+    """댓글 영속화의 핵심 계약 — post_id로 조회 가능, 리플레이(재적용)는 무변화.
+
+    플레이어 댓글·액터 답글(대상=플레이어)·액터→액터 소셜 댓글이 전부
+    한 포스트의 스레드로 모인다 (도파민 루프의 되읽기 원천).
+    """
+    store = ReadStore(pg)
+    await store.ensure()
+    post_id = "01JZK7Q3W0000000000000000F"
+    player_comment = sample("player.comment.posted")  # …H: 최상위, post F
+    reply = sample("actor.message.sent")
+    base_id = reply["event_id"][:-1]
+    # …M: 아리의 답글 (플레이어 댓글 …H에 대한 depth-1 답장)
+    actor_reply = dict(
+        reply, event_id=base_id + "M",
+        payload=dict(reply["payload"], channel="comment", post_id=post_id,
+                     in_reply_to=player_comment["event_id"]),
+    )
+    # …N: 준호의 액터→액터 최상위 댓글 (소셜 루프 — in_reply_to == post_id)
+    social = dict(
+        reply, event_id=base_id + "N", actor_id="a_junho_park",
+        payload={"channel": "comment", "target_player_id": None,
+                 "target_actor_id": "a_aria_kim", "text": "소셜 루프",
+                 "post_id": post_id, "in_reply_to": post_id},
+    )
+    for envelope in (player_comment, actor_reply, social):
+        assert await store.apply(envelope)
+        assert await store.apply(envelope)  # 재전달/리플레이 — 무변화여야 한다
+
+    rows = await (await pg.execute(
+        "SELECT sender, in_reply_to FROM read.messages"
+        " WHERE world_id = 'w_main' AND channel = 'comment' AND post_id = %s"
+        " ORDER BY event_id",
+        (post_id,),
+    )).fetchall()
+    assert [r[0] for r in rows] == ["player", "actor", "actor"]  # 시간순 스레드
+    assert [r[1] for r in rows] == [None, player_comment["event_id"], post_id]
+
+    # 다른 포스트의 스레드는 비어 있다 — post_id가 조회 키다
+    other = await (await pg.execute(
+        "SELECT count(*) FROM read.messages"
+        " WHERE world_id = 'w_main' AND channel = 'comment' AND post_id = %s",
+        ("0" * 26,),
+    )).fetchone()
+    assert other == (0,)
 
 
 async def test_identity_projects_and_upserts_forward(pg):

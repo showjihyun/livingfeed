@@ -30,6 +30,8 @@ export interface ActorReply {
   actorId: string;
   text: string;
   postId: string | null;
+  /** 봉투 event_id — 되읽은 댓글(read.messages)과의 중복 제거 키 */
+  eventId: string;
 }
 
 export function useActorSession(opts: {
@@ -60,6 +62,7 @@ export function useActorSession(opts: {
           actorId: envelope.actor_id ?? "",
           text: p.text,
           postId: p.post_id,
+          eventId: envelope.event_id,
         });
       },
       onStatus: (s) => {

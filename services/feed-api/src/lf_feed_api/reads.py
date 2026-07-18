@@ -61,6 +61,25 @@ ORDER BY event_id DESC
 LIMIT %s
 """
 
+# 포스트별 댓글 스레드 — 시간 오름차순(대화는 처음부터 읽는다). 작성자는
+# sender에 따라 갈린다: player 댓글은 player_id, actor 댓글(답글·소셜 루프)은
+# actor_id가 저자다. 액터 이름은 read.actors에서 동봉한다 (이름 그라운딩 —
+# FE가 원시 id를 화면에 싣지 않게 한다). 플레이어 이름 read 모델은 아직 없다 — null.
+_POST_COMMENTS_SQL = """
+SELECT m.event_id,
+       m.sender,
+       CASE WHEN m.sender = 'player' THEN m.player_id ELSE m.actor_id END AS author_id,
+       a.name AS author_name,
+       m.text, m.in_reply_to, m.tick, m.occurred_at
+FROM read.messages m
+LEFT JOIN read.actors a
+    ON a.world_id = m.world_id
+   AND m.sender = 'actor' AND a.actor_id = m.actor_id
+WHERE m.world_id = %s AND m.channel = 'comment' AND m.post_id = %s
+ORDER BY m.event_id
+LIMIT %s
+"""
+
 # 액터별 마지막 메시지 1건 → 최신 대화 순 — 인박스 목록의 좌표계도 event_id(ULID)다.
 # player_id 필터가 액터↔액터 대화(counterpart가 a_*)를 자연히 걸러낸다 (pg_read 참고).
 _THREADS_SQL = """
@@ -171,6 +190,38 @@ class ProfileReads:
                     "last_from_actor": sender == "actor",
                 }
                 for actor_id, sender, channel, text, event_id, occurred_at in rows
+            ],
+        }
+
+    async def post_comments(
+        self, world_id: str, post_id: str, *, limit: int
+    ) -> dict[str, Any]:
+        """포스트에 달린 댓글 스레드 — 플레이어·액터 모두, 시간순 (도파민 루프의
+        되읽기: 새로고침해도 개입의 흔적이 남는다).
+
+        author_kind로 player/actor를 가르고, 액터 저자는 표시 이름을 동봉한다.
+        in_reply_to가 post_id와 다르면 다른 댓글에 대한 답장이다 (깊이 1 스레드).
+        """
+        async with self._pool.connection() as conn:
+            rows = await (await conn.execute(
+                _POST_COMMENTS_SQL, (world_id, post_id, limit)
+            )).fetchall()
+        return {
+            "post_id": post_id,
+            "items": [
+                {
+                    "event_id": event_id,
+                    "author_kind": sender,
+                    "author_id": author_id,
+                    # player 저자는 null — 표시명은 FE의 자기표시('나') 몫
+                    "author_name": author_name,
+                    "text": text,
+                    "in_reply_to": in_reply_to,
+                    "tick": tick,
+                    "occurred_at": occurred_at,
+                }
+                for event_id, sender, author_id, author_name,
+                    text, in_reply_to, tick, occurred_at in rows
             ],
         }
 

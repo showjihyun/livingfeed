@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { TOAST_DURATION_MS, WORLD_MIN_START, formatWorldTime } from "@/lib/data";
 import { useActorDirectory } from "@/lib/actors";
-import { FOCUS_ACTOR_ID } from "@/lib/config";
+import { fetchPostComments } from "@/lib/comments";
+import { FOCUS_ACTOR_ID, PLAYER_NAME } from "@/lib/config";
 import { useRelationshipGraph } from "@/lib/graph";
 import { useHiddenFeed } from "@/lib/hidden";
 import type { LivePost } from "@/lib/live-feed";
@@ -29,6 +30,8 @@ import { Toasts } from "./Toasts";
 
 const ME_COMMENT = { bg: "#EDF3FD", avatarBg: "#D9E2F2" };
 const ACTOR_COMMENT = { bg: "#F8FAFD", avatarBg: "#AFC8F5" };
+// 내 댓글의 자기표시 — 표시명은 config seam에서 온다 (원시 id 노출 금지)
+const MY_COMMENT_AUTHOR = `${PLAYER_NAME} (나)`;
 
 export function LivingFeedApp() {
   const [screen, setScreen] = useState<Screen>("onboarding");
@@ -116,6 +119,49 @@ export function LivingFeedApp() {
 
   // 액터의 내면 실측 (pg-projector 신념·에피소드, ADR-003/008) — 미가용이면 데모 서사
   const focusProfile = useActorProfile(FOCUS_ACTOR_ID, screen === "app");
+
+  // 되읽은 댓글 합류 — 이미 화면에 있는 분(라이브 WS·방금 쓴 내 댓글) 앞에
+  // 시간순으로 이어 붙인다 (event id 중복 제거 — DM 히스토리와 같은 규약)
+  const mergeLoadedComments = useCallback((postId: string, loaded: FeedComment[]) => {
+    setCommentsByPost((prev) => {
+      const current = prev[postId] ?? [];
+      const seen = new Set(current.map((c) => c.eventId).filter(Boolean));
+      const older = loaded.filter((c) => !c.eventId || !seen.has(c.eventId));
+      if (older.length === 0) return prev;
+      return { ...prev, [postId]: [...older, ...current] };
+    });
+  }, []);
+
+  // 피드에 뜬 포스트의 지난 댓글 되읽기 (read.messages) — 새로고침에도 내 개입의
+  // 흔적과 액터들의 소셜 루프가 남는다. 포스트당 한 번만 요청한다 (미가용이면
+  // 라이브 분만 — 조용한 강등).
+  const commentsRequested = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (screen !== "app") return;
+    for (const post of livePosts) {
+      if (!post.authorId.startsWith("a_")) continue; // 댓글은 액터 포스트에만 붙는다
+      if (commentsRequested.current.has(post.id)) continue;
+      commentsRequested.current.add(post.id);
+      void fetchPostComments(post.id).then((loaded) => {
+        if (!loaded || loaded.length === 0) return;
+        mergeLoadedComments(
+          post.id,
+          loaded.map((c) => ({
+            // 이름 그라운딩: 액터는 BE 동봉 이름(없으면 디렉터리→'누군가'), 나는 자기표시
+            author: c.isMine
+              ? MY_COMMENT_AUTHOR
+              : c.authorKind === "actor"
+                ? (c.authorName ?? authorName(c.authorId))
+                : "다른 관찰자",
+            text: c.text,
+            eventId: c.eventId,
+            isReply: c.isReply,
+            ...(c.isMine ? ME_COMMENT : ACTOR_COMMENT),
+          })),
+        );
+      });
+    }
+  }, [screen, livePosts, authorName, mergeLoadedComments]);
 
   // 인박스 목록 이어받기 (threads API) — 액터별 마지막 메시지 1건, 최신 대화 순.
   // 로컬에서 이미 대화가 시작됐으면 덮지 않는다 (히스토리와 같은 '빈 곳만 채우기' 규약).
@@ -222,13 +268,23 @@ export function LivingFeedApp() {
             next.delete(postId);
             return next;
           });
-          setCommentsByPost((prev) => ({
-            ...prev,
-            [postId]: [
-              ...(prev[postId] ?? []),
-              { author: authorName(reply.actorId), text: reply.text, ...ACTOR_COMMENT },
-            ],
-          }));
+          setCommentsByPost((prev) => {
+            const current = prev[postId] ?? [];
+            // 되읽기(REST)와 라이브(WS)가 겹칠 수 있다 — event id로 한 번만 싣는다
+            if (current.some((c) => c.eventId === reply.eventId)) return prev;
+            return {
+              ...prev,
+              [postId]: [
+                ...current,
+                {
+                  author: authorName(reply.actorId),
+                  text: reply.text,
+                  eventId: reply.eventId,
+                  ...ACTOR_COMMENT,
+                },
+              ],
+            };
+          });
         });
       }
     },
@@ -259,7 +315,7 @@ export function LivingFeedApp() {
         ...prev,
         [post.id]: [
           ...(prev[post.id] ?? []),
-          { author: "관찰자_0417 (나)", text: trimmed, ...ME_COMMENT },
+          { author: MY_COMMENT_AUTHOR, text: trimmed, ...ME_COMMENT },
         ],
       }));
       setInterventions((n) => n + 1);

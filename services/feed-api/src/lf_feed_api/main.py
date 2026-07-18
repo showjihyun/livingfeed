@@ -3,7 +3,8 @@
 프로젝션만 읽는다 (ADR-003 읽기 API 규칙):
 - GET /feed: World/Community 등은 OpenSearch(fan-out-on-read + Redis 캐시 30s),
   Personal/Private는 Redis 타임라인(fan-out-on-write, redis-projector 산출물)
-- GET /actors/{id}/profile, GET /messages: PG read 테이블(pg-projector 산출물)
+- GET /actors/{id}/profile, GET /messages, GET /posts/{id}/comments:
+  PG read 테이블(pg-projector 산출물)
 플레이어 인증·개인화(Personal/Private 접근 제어)는 gateway 인증 단계의 후속이다.
 
 실행: uvicorn lf_feed_api.main:app --reload
@@ -257,6 +258,23 @@ def create_app(
         return await story.timeline(
             world_id, correlation_id,
             player_id=player_id, limit=min(limit, cfg.max_limit),
+        )
+
+    @app.get("/posts/{post_id}/comments")
+    async def post_comments(
+        post_id: str = Path(
+            pattern=ULID_RE.pattern, description="feed.post.published의 event_id (ULID)"
+        ),
+        world_id: str = Query("w_main", pattern=r"^w_[a-z0-9_]+$"),
+        limit: int = Query(cfg.max_limit, ge=1),
+    ) -> dict:
+        """포스트의 댓글 스레드 — 플레이어·액터 모두, 시간순 (read.messages).
+
+        라이브(SSE/WS)로 본 댓글이 새로고침에도 남게 하는 되읽기 경로다 —
+        도파민 루프(개입→반응 확인)의 영속 화면. PG 미가용이면 503 (격리 규약).
+        """
+        return await _reads().post_comments(
+            world_id, post_id, limit=min(limit, cfg.max_limit)
         )
 
     @app.get("/messages/threads")

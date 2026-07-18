@@ -113,6 +113,64 @@ async def test_conversation_merges_both_directions(pg):
     assert other["items"] == []
 
 
+async def test_post_comments_thread_roundtrip(pg):
+    """댓글 스레드 왕복 — 플레이어·액터 댓글이 post_id로 모이고 이름이 실린다.
+
+    도파민 루프의 되읽기 계약: 시간순, author_kind 구분, 액터 저자는
+    read.actors의 표시 이름 동봉 (이름 그라운딩 — FE가 원시 id를 싣지 않는다).
+    """
+    store = ReadStore(pg)
+    await store.ensure()
+    await store.apply(sample("actor.identity.declared"))  # 김아리 — 이름의 원천
+    player_comment = sample("player.comment.posted")      # …H: 최상위, post F
+    post_id = player_comment["payload"]["post_id"]
+    reply = sample("actor.message.sent")
+    base_id = reply["event_id"][:-1]
+    # …M: 아리의 답글 — 플레이어 댓글에 대한 depth-1 답장
+    actor_reply = dict(
+        reply, event_id=base_id + "M",
+        payload=dict(reply["payload"], channel="comment", post_id=post_id,
+                     in_reply_to=player_comment["event_id"]),
+    )
+    # …N: 이름 미선언 액터의 소셜 댓글 — author_name은 null로 남는다 (FE '누군가' 폴백)
+    social = dict(
+        reply, event_id=base_id + "N", actor_id="a_junho_park",
+        payload={"channel": "comment", "target_player_id": None,
+                 "target_actor_id": ACTOR, "text": "소셜 루프",
+                 "post_id": post_id, "in_reply_to": post_id},
+    )
+    for envelope in (player_comment, actor_reply, social):
+        await store.apply(envelope)
+
+    reads = ProfileReads(OneConnPool(pg))
+    thread = await reads.post_comments(WORLD, post_id, limit=10)
+    assert thread["post_id"] == post_id
+    items = thread["items"]
+    # 시간순(event_id ULID 오름차순) — 대화는 처음부터 읽는다
+    assert [i["author_kind"] for i in items] == ["player", "actor", "actor"]
+    assert [i["event_id"] for i in items] == sorted(i["event_id"] for i in items)
+
+    mine, aria, junho = items
+    assert mine["author_id"] == PLAYER
+    assert mine["author_name"] is None      # 플레이어 표시명은 FE 몫 ('나')
+    assert mine["in_reply_to"] is None      # 플레이어 댓글은 항상 최상위
+    assert "멋져요" in mine["text"]
+    assert aria["author_id"] == ACTOR
+    assert aria["author_name"] == "김아리"  # read.actors 조인 — 이름 그라운딩
+    assert aria["in_reply_to"] == mine["event_id"]  # 답장 판별 근거
+    assert junho["author_name"] is None     # 미선언 액터 — FE가 '누군가'로 그린다
+    assert junho["in_reply_to"] == post_id  # 최상위 소셜 댓글
+
+    # limit은 스레드 앞에서부터 자른다
+    first = await reads.post_comments(WORLD, post_id, limit=1)
+    assert [i["event_id"] for i in first["items"]] == [mine["event_id"]]
+
+    # 다른 포스트의 스레드는 비어 있다 — DM(post_id null)도 섞이지 않는다
+    await store.apply(sample("player.dm.sent"))
+    empty = await reads.post_comments(WORLD, "0" * 26, limit=10)
+    assert empty["items"] == []
+
+
 async def test_threads_last_message_per_actor_newest_first(pg):
     """인박스 집계 — 액터별 마지막 1건, 최신 대화 순 (선제 DM도 그저 첫 마디다)."""
     store = ReadStore(pg)

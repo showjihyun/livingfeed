@@ -18,6 +18,10 @@ export interface FeedComment {
   text: string;
   bg: string;
   avatarBg: string;
+  /** read.messages 행의 event id — 되읽기(REST)와 라이브(WS) 합류 시 중복 제거 키 (방금 보낸 내 댓글은 없음) */
+  eventId?: string;
+  /** 다른 댓글에 대한 답장 (in_reply_to ≠ post_id) — 스레드 들여쓰기 근거 */
+  isReply?: boolean;
 }
 
 export interface DmMessage {

@@ -9,7 +9,8 @@
 - actor_beliefs:  actor.belief.formed — (kind, about) 자리 단위 최신 신념.
   같은 자리 재발행은 갱신이다 (reflection 계약과 동일)
 - messages:       player.dm.sent / player.comment.posted / actor.message.sent —
-  플레이어↔액터 대화 히스토리 (WS 재접속 시 이어보기)
+  플레이어↔액터 대화 히스토리 (WS 재접속 시 이어보기) + 포스트별 댓글
+  스레드 (post_id 조회 — 새로고침에도 댓글이 남는다)
 - actor_arcs:     system.director.arc_planned — 액터별 현재 인생 아크
   (ADR-013/plan-08, 프로필 "인생의 장"). 다음 계획이 자리를 덮어쓴다
 - actor_arc_history: 같은 이벤트의 append-only 연대기 — 장의 흐름이 남는다
@@ -66,11 +67,18 @@ CREATE TABLE IF NOT EXISTS read.messages (
     sender      TEXT NOT NULL,
     text        TEXT NOT NULL,
     post_id     TEXT,
+    -- 답장 대상 event_id (actor.message.sent 페이로드 보존) — 댓글 스레드에서
+    -- 최상위(=post_id/null)와 답장을 가른다. 플레이어 발신은 항상 최상위(null)
+    in_reply_to TEXT,
     tick        BIGINT NOT NULL,
     occurred_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS messages_conversation
     ON read.messages (world_id, player_id, actor_id, event_id DESC);
+-- 포스트별 댓글 스레드 조회 (feed-api /posts/{id}/comments) — event_id 오름차순 = 시간순
+CREATE INDEX IF NOT EXISTS messages_post_thread
+    ON read.messages (world_id, post_id, event_id)
+    WHERE post_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS read.actors (
     world_id     TEXT NOT NULL,
@@ -142,8 +150,8 @@ WHERE excluded.event_id > read.actor_beliefs.event_id
 _MESSAGE_SQL = """
 INSERT INTO read.messages
     (event_id, world_id, channel, player_id, actor_id, sender,
-     text, post_id, tick, occurred_at)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::timestamptz)
+     text, post_id, in_reply_to, tick, occurred_at)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::timestamptz)
 ON CONFLICT (event_id) DO NOTHING
 """
 
@@ -215,12 +223,13 @@ def message_params(envelope: dict[str, Any]) -> tuple:
     if kind == "actor.message.sent":
         counterpart = p["target_player_id"] or p.get("target_actor_id")
         row = (p["channel"], counterpart, envelope["actor_id"], "actor",
-               p["text"], p["post_id"])
+               p["text"], p["post_id"], p["in_reply_to"])
     elif kind == "player.dm.sent":
-        row = ("dm", p["player_id"], p["target_actor_id"], "player", p["text"], None)
+        row = ("dm", p["player_id"], p["target_actor_id"], "player", p["text"], None, None)
     elif kind == "player.comment.posted":
+        # 플레이어 댓글은 항상 포스트 직속(최상위)이다 — in_reply_to 페이로드가 없다
         row = ("comment", p["player_id"], p["target_actor_id"], "player",
-               p["text"], p["post_id"])
+               p["text"], p["post_id"], None)
     else:
         raise KeyError(f"대화 이벤트가 아니다: {kind}")
     return (

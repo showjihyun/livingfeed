@@ -38,6 +38,10 @@ class FakeReads:
         self.calls.append(("threads", world_id, player_id, limit))
         return {"threads": []}
 
+    async def post_comments(self, world_id, post_id, *, limit):
+        self.calls.append(("post_comments", world_id, post_id, limit))
+        return {"post_id": post_id, "items": []}
+
 
 class FakeTimelineRedis:
     """캐시 겸 타임라인 대역 — /feed가 쓰는 get/setex와 zrevrange만 구현한다."""
@@ -133,6 +137,19 @@ def test_threads_delegates_with_clamped_limit():
     assert reads.calls[-1] == ("threads", "w_main", PLAYER, 100)
 
 
+def test_post_comments_delegates_with_clamped_limit():
+    client, reads, _ = make_client()
+    resp = client.get(f"/posts/{CURSOR}/comments", params={"limit": 500})
+    assert resp.status_code == 200
+    assert resp.json() == {"post_id": CURSOR, "items": []}
+    assert reads.calls[-1] == ("post_comments", "w_main", CURSOR, 100)
+
+
+def test_post_comments_rejects_bad_post_id():
+    client, _, _ = make_client()
+    assert client.get("/posts/not-a-ulid/comments").status_code == 422
+
+
 def test_threads_rejects_bad_player_id():
     client, _, _ = make_client()
     assert client.get("/messages/threads", params={"player_id": "a_x"}).status_code == 422
@@ -160,6 +177,7 @@ def test_reads_unavailable_returns_503_without_killing_feed():
     assert client.get(
         "/messages/threads", params={"player_id": PLAYER}
     ).status_code == 503
+    assert client.get(f"/posts/{CURSOR}/comments").status_code == 503
     # 타임라인 경로는 PG와 무관하게 살아 있다 (장애 격리, ADR-003 계약 5)
     assert client.get(
         "/feed", params={"types": "personal", "player_id": PLAYER}

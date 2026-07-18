@@ -394,13 +394,16 @@ function LivePostCard({
 
       {comments.map((cm, i) => (
         <div
-          key={i}
+          // 되읽은 댓글은 event id가 안정 키 — 방금 쓴 내 댓글(id 미부여)만 순번
+          key={cm.eventId ?? `local-${i}`}
           style={{
             display: "flex",
             gap: 10,
             padding: "12px 14px",
             background: cm.bg,
             borderRadius: 14,
+            // 답장(in_reply_to ≠ post_id)은 살짝 들여쓴다 — 깊이 1 스레드의 결
+            marginLeft: cm.isReply ? 26 : 0,
           }}
         >
           <Avatar seed={cm.author} label={cm.author} size={28} />
