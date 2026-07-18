@@ -9,23 +9,28 @@
  * "게이트웨이 연결이 필요해요" 폴백 (기존 칩 규약).
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 
 import { PLAYER_ID } from "@/lib/config";
 import { ICON } from "@/lib/data";
 import {
+  BIG_FIVE_LABELS,
+  GROUP_AXIS_LABELS,
   LIFESTYLE_LABELS,
   NEED_LABELS,
   TRAIT_BAND_LABELS,
   blankPersona,
   freshId,
+  groupKeyOf,
+  groupPersonas,
+  personaMatches,
   personalityPreview,
   savePersona,
   traitBand,
   usePersonaRoster,
 } from "@/lib/studio";
-import type { BigFive, Lifestyle, Need, NeedsBias, PersonaDoc } from "@/lib/studio";
+import type { BigFive, GroupAxis, Lifestyle, Need, NeedsBias, PersonaDoc } from "@/lib/studio";
 
 import { Icon } from "./Icon";
 import styles from "./lf.module.css";
@@ -58,14 +63,6 @@ const INPUT_STYLE: CSSProperties = {
   background: "#FDFDFE",
   width: "100%",
   fontFamily: "inherit",
-};
-
-const BIG_FIVE_LABELS: Record<keyof BigFive, string> = {
-  openness: "개방성",
-  conscientiousness: "성실성",
-  extraversion: "외향성",
-  agreeableness: "친화성",
-  neuroticism: "신경성",
 };
 
 const NEEDS_LABELS: Record<keyof NeedsBias, string> = {
@@ -694,8 +691,23 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
   const [savedName, setSavedName] = useState<string | null>(null);
   const [togglingIds, setTogglingIds] = useState<ReadonlySet<string>>(new Set());
   const [rosterError, setRosterError] = useState<string | null>(null);
+  // 명단 조회 — 검색어, 그룹 기준(성격의 결·아키타입·생활 리듬), 선택 그룹(null=전체)
+  const [query, setQuery] = useState("");
+  const [axis, setAxis] = useState<GroupAxis>("trait");
+  const [group, setGroup] = useState<string | null>(null);
 
   const activeCount = personas.filter((p) => p.active).length;
+
+  const groups = useMemo(() => groupPersonas(personas, axis), [personas, axis]);
+  const visible = useMemo(
+    () =>
+      personas.filter(
+        (p) => personaMatches(p, query) && (group === null || groupKeyOf(p, axis) === group),
+      ),
+    [personas, query, group, axis],
+  );
+  // 전체 + 검색 없음일 때만 그룹 섹션으로 펼친다 — 필터 중엔 평평한 결과가 읽기 쉽다
+  const sectioned = group === null && !query.trim();
 
   const toggleActive = useCallback(
     (persona: PersonaDoc) => {
@@ -981,7 +993,95 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
             <br />첫 사람을 빚어 세계의 시간을 깨워보세요.
           </div>
         ) : (
-          personas.map((persona) => {
+          <>
+            {/* 조회 도구 — 검색 + 성격 그룹 칩. 그룹 어휘는 명단에서 파생된다 (고정 목록 없음) */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <input
+                style={{ ...INPUT_STYLE, maxWidth: 420 }}
+                value={query}
+                placeholder="이름·아키타입·내면·목표로 검색"
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: "#6B7691", flexShrink: 0 }}>
+                  그룹 기준
+                </div>
+                <ChipSelect
+                  options={["trait", "archetype", "lifestyle"] as const}
+                  labels={GROUP_AXIS_LABELS}
+                  value={axis}
+                  small
+                  onChange={(next) => {
+                    setAxis(next);
+                    setGroup(null); // 기준이 바뀌면 이전 축의 그룹명은 무의미하다
+                  }}
+                />
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {[null, ...groups.map((g) => g.key)].map((key) => {
+                  const selected = group === key;
+                  const count =
+                    key === null
+                      ? personas.length
+                      : (groups.find((g) => g.key === key)?.personas.length ?? 0);
+                  return (
+                    <div
+                      key={key ?? "__all"}
+                      onClick={() => setGroup(key)}
+                      className={styles.press95}
+                      style={{
+                        padding: "4px 12px",
+                        borderRadius: 9999,
+                        fontSize: 12,
+                        fontWeight: 800,
+                        cursor: "pointer",
+                        background: selected ? AMBER.bg : "#F2F6FC",
+                        color: selected ? AMBER.text : "#8C97AF",
+                        border: `1.5px solid ${selected ? AMBER.border : "transparent"}`,
+                      }}
+                    >
+                      {key ?? "전체"} · {count}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {visible.length === 0 ? (
+              <div
+                style={{
+                  border: "1.5px dashed #E4D9BE",
+                  borderRadius: 20,
+                  padding: "40px 24px",
+                  textAlign: "center",
+                  color: "#8C97AF",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  lineHeight: 1.7,
+                  background: "#fff",
+                }}
+              >
+                이 결에 닿는 사람이 아직 없어요.
+                <br />
+                검색어나 그룹을 바꿔보세요.
+              </div>
+            ) : (
+              (sectioned ? groups : [{ key: null, personas: visible }]).map(
+                (section: { key: string | null; personas: PersonaDoc[] }) => (
+                  <div
+                    key={section.key ?? "__flat"}
+                    style={{ display: "flex", flexDirection: "column", gap: 14 }}
+                  >
+                    {section.key !== null ? (
+                      <div style={{ fontSize: 13, fontWeight: 800, color: AMBER.text, marginTop: 4 }}>
+                        {section.key} · {section.personas.length}명
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#8C97AF" }}>
+                        {visible.length}명이 조건에 닿았어요
+                      </div>
+                    )}
+                    {section.personas.map((persona) => {
             const oneLiner =
               persona.identity_core.split("\n")[0]?.trim() ||
               persona.archetype ||
@@ -1077,7 +1177,12 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
                 </div>
               </div>
             );
-          })
+                    })}
+                  </div>
+                ),
+              )
+            )}
+          </>
         )}
       </div>
     </>

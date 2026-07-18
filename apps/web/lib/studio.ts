@@ -164,6 +164,108 @@ export function personalityPreview(f: BigFive): string {
   return `${o}, ${c}, ${e} 사람. ${a}, ${n}.`;
 }
 
+/* ── 명단 조회 — 성격 그룹(아키타입)별 묶기 + 검색 ──
+   그룹 어휘는 고정 목록이 아니라 명단 데이터에서 파생된다 — 창조자가 새
+   아키타입을 빚으면 그룹도 함께 태어난다. */
+
+/** 아키타입이 비어 있는 인물의 그룹 표기 — 표시 어휘일 뿐 문서를 바꾸지 않는다 */
+export const UNGROUPED_ARCHETYPE = "결 미정";
+
+/** 그룹 판정 키 — 카드·칩·묶기가 같은 규칙을 쓴다 */
+export function archetypeOf(persona: PersonaDoc): string {
+  return persona.archetype.trim() || UNGROUPED_ARCHETYPE;
+}
+
+/** Big Five 한국어 표기 — 편집기 슬라이더와 성격 그룹명이 같은 어휘를 쓴다 */
+export const BIG_FIVE_LABELS: Record<keyof BigFive, string> = {
+  openness: "개방성",
+  conscientiousness: "성실성",
+  extraversion: "외향성",
+  agreeableness: "친화성",
+  neuroticism: "신경성",
+};
+
+/** 결정적 순회 순서 — 동률일 때도 같은 인물은 언제나 같은 그룹에 선다 */
+const TRAIT_ORDER: readonly (keyof BigFive)[] = [
+  "openness",
+  "conscientiousness",
+  "extraversion",
+  "agreeableness",
+  "neuroticism",
+];
+
+/** 성격의 결 — 가운데(0.5)에서 가장 멀리 나간 축이 그 사람의 결이다.
+    전 축이 중간이면 "고른 결". traitBand와 같은 경계(0.35/0.65)를 쓴다. */
+export function traitGroup(f: BigFive): string {
+  let dominant: keyof BigFive | null = null;
+  let distance = 0;
+  for (const trait of TRAIT_ORDER) {
+    const d = Math.abs(f[trait] - 0.5);
+    if (d > distance) {
+      distance = d;
+      dominant = trait;
+    }
+  }
+  if (dominant === null || traitBand(f[dominant]) === "mid") return "고른 결";
+  return `${BIG_FIVE_LABELS[dominant]} ${f[dominant] > 0.5 ? "높은" : "낮은"} 결`;
+}
+
+/** 그룹 기준 — 성격의 결(Big Five 파생)·아키타입·생활 리듬 세 축 */
+export type GroupAxis = "trait" | "archetype" | "lifestyle";
+
+export const GROUP_AXIS_LABELS: Record<GroupAxis, string> = {
+  trait: "성격의 결",
+  archetype: "아키타입",
+  lifestyle: "생활 리듬",
+};
+
+/** 카드·칩·묶기가 공유하는 그룹 판정 — 축이 무엇이든 표시 어휘로 판정한다 */
+export function groupKeyOf(persona: PersonaDoc, axis: GroupAxis): string {
+  if (axis === "archetype") return archetypeOf(persona);
+  if (axis === "lifestyle") return LIFESTYLE_LABELS[persona.lifestyle] ?? persona.lifestyle;
+  return traitGroup(persona.big_five);
+}
+
+export interface PersonaGroup {
+  key: string;
+  personas: PersonaDoc[];
+}
+
+/** 명단 → 그룹. 인원 많은 순, 동수면 이름순 — 결정적 정렬 */
+export function groupPersonas(personas: PersonaDoc[], axis: GroupAxis): PersonaGroup[] {
+  const map = new Map<string, PersonaDoc[]>();
+  for (const persona of personas) {
+    const key = groupKeyOf(persona, axis);
+    const list = map.get(key);
+    if (list) list.push(persona);
+    else map.set(key, [persona]);
+  }
+  return [...map.entries()]
+    .map(([key, list]) => ({ key, personas: list }))
+    .sort(
+      (a, b) => b.personas.length - a.personas.length || a.key.localeCompare(b.key, "ko"),
+    );
+}
+
+/** 검색 — 이름·id·아키타입·생활 리듬·내면·목표·비밀을 대소문자 무시 부분일치로 훑는다.
+    비밀도 검색된다: 스튜디오는 창조자의 작업대라 편집기에서 이미 보이는 재료다. */
+export function personaMatches(persona: PersonaDoc, rawQuery: string): boolean {
+  const query = rawQuery.trim().toLowerCase();
+  if (!query) return true;
+  const haystack = [
+    persona.name,
+    persona.id,
+    persona.archetype,
+    LIFESTYLE_LABELS[persona.lifestyle] ?? persona.lifestyle,
+    persona.identity_core,
+    ...persona.goals.map((g) => g.description),
+    ...persona.secrets.map((s) => s.description),
+  ]
+    .join("\n")
+    .toLowerCase();
+  return haystack.includes(query);
+}
+
 /* ── 저장 (PUT 업서트) ── */
 
 export type SaveResult =
