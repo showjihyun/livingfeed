@@ -1,6 +1,12 @@
 """NATS request-reply 서버 — 엔진은 이 subject로만 모델을 호출한다 (ADR-018).
 
 queue group 구독으로 무상태 다중 인스턴스 수평 확장 (ADR-019).
+
+요청은 요청별 asyncio task로 **유계 동시 처리**된다 (Semaphore=LF_AI_CONCURRENCY).
+nats-py의 구독 콜백 루프는 콜백을 하나씩 await하므로, 핸들러가 추론을 직접
+기다리면 인스턴스당 직렬이 된다 — 샤드 워커(ADR-012 Phase 2)의 병렬 호출이
+여기서 막히지 않도록 핸들러는 task만 만들고 즉시 반환한다. 순서 보장은
+불필요하다(요청별 독립 reply subject). stop 시 진행 중 요청은 완주한다(drain).
 """
 
 from __future__ import annotations
@@ -81,9 +87,15 @@ def make_providers(cfg: Config) -> dict[str, Provider]:
     return providers
 
 
-async def serve(cfg: Config, *, stop: asyncio.Event | None = None) -> None:
+async def serve(
+    cfg: Config,
+    *,
+    stop: asyncio.Event | None = None,
+    providers: dict[str, Provider] | None = None,
+) -> None:
+    """서비스 루프. providers 주입은 테스트 시임 — 기본은 make_providers(cfg)."""
     stop = stop or asyncio.Event()
-    providers = make_providers(cfg)
+    providers = make_providers(cfg) if providers is None else providers
     if cfg.provider not in providers:
         raise RuntimeError(
             f"기본 프로바이더 '{cfg.provider}'가 구성되지 않았다 — API 키 환경변수를 확인하라"
@@ -96,22 +108,42 @@ async def serve(cfg: Config, *, stop: asyncio.Event | None = None) -> None:
 
     nc = await nats.connect(cfg.nats_url)
     try:
+        semaphore = asyncio.Semaphore(cfg.concurrency)
+        in_flight: set[asyncio.Task[None]] = set()
+
+        async def process(msg) -> None:
+            async with semaphore:  # 동시 in-flight ≤ LF_AI_CONCURRENCY
+                try:
+                    request = InferenceRequest.from_json(json.loads(msg.data))
+                    response = await runtime.infer(request)
+                except Exception as e:  # 파싱 실패 등 — 명시적 오류 응답 (조용한 유실 금지)
+                    logger.exception("요청 처리 실패")
+                    response = InferenceResponse(ok=False, error=f"요청 처리 실패: {e}")
+                try:
+                    await msg.respond(
+                        json.dumps(response.to_json(), ensure_ascii=False).encode()
+                    )
+                except Exception:  # task 예외는 아무도 await하지 않는다 — 여기서 남긴다
+                    logger.exception("응답 전송 실패 (reply=%s)", msg.reply)
 
         async def handle(msg) -> None:
-            try:
-                request = InferenceRequest.from_json(json.loads(msg.data))
-                response = await runtime.infer(request)
-            except Exception as e:  # 요청 파싱 실패 등 — 명시적 오류 응답 (조용한 유실 금지)
-                logger.exception("요청 처리 실패")
-                response = InferenceResponse(ok=False, error=f"요청 처리 실패: {e}")
-            await msg.respond(json.dumps(response.to_json(), ensure_ascii=False).encode())
+            # 콜백 루프를 막지 않는다 — task로 넘기고 즉시 반환 (동시 처리의 핵심)
+            task = asyncio.create_task(process(msg))
+            in_flight.add(task)
+            task.add_done_callback(in_flight.discard)
 
         subject = infer_subject(cfg.env)
-        await nc.subscribe(subject, queue=QUEUE_GROUP, cb=handle)
+        sub = await nc.subscribe(subject, queue=QUEUE_GROUP, cb=handle)
         logger.info(
-            "ai-runtime 대기 — subject=%s 기본=%s 등록=%s",
-            subject, cfg.provider, ",".join(sorted(providers)),
+            "ai-runtime 대기 — subject=%s 기본=%s 동시상한=%d 등록=%s",
+            subject, cfg.provider, cfg.concurrency, ",".join(sorted(providers)),
         )
-        await stop.wait()
+        try:
+            await stop.wait()
+        finally:
+            # drain: 새 수신 중단(버퍼된 메시지는 task로 전환 완료) → 진행 중 요청 완주
+            await sub.drain()
+            while in_flight:
+                await asyncio.gather(*in_flight, return_exceptions=True)
     finally:
         await nc.drain()

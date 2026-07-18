@@ -21,10 +21,17 @@ class Config:
     #: 프리픽스 없는 라우트가 속하는 기본 프로바이더
     provider: str
     routes: dict[tuple[str, str], str] = field(default_factory=dict)
+    #: 동시 처리 상한 — 요청별 task를 세마포어로 유계한다 (LF_AI_CONCURRENCY).
+    #: 기본 4: 샤드 워커의 병렬 호출을 흡수하면서 원격 rate limit·로컬
+    #: OLLAMA_NUM_PARALLEL 기본 권장치(4)와 정합하는 보수적 값.
+    concurrency: int = 4
 
     @classmethod
     def from_env(cls) -> Config:
         provider = os.environ.get("LF_AI_PROVIDER", "rule")
+        concurrency = int(os.environ.get("LF_AI_CONCURRENCY", "4"))
+        if concurrency < 1:
+            raise ValueError(f"LF_AI_CONCURRENCY는 1 이상이어야 한다: {concurrency}")
         routes = build_default_routes(provider)
         # 로컬 모델 일괄 교체 (전 티어 단일 모델) — 예: LF_LOCAL_MODEL=exaone3.5:7.8b
         local_model = os.environ.get("LF_LOCAL_MODEL")
@@ -41,4 +48,5 @@ class Config:
             env=os.environ.get("LF_ENV", "dev"),
             provider=provider,
             routes=routes,
+            concurrency=concurrency,
         )

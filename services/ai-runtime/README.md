@@ -4,6 +4,18 @@
 호출한다 — SDK 직접 사용 금지. 응답은 output_schema로 검증되고, 위반 시 1회 수정
 재시도, 재실패는 명시적 오류로 반환된다.
 
+## 동시 처리 (LF_AI_CONCURRENCY)
+
+요청은 요청별 asyncio task로 **유계 동시 처리**된다 — 동시 in-flight 상한은
+`LF_AI_CONCURRENCY`(기본 4). 샤드 워커(ADR-012 Phase 2)가 병렬로 쏘는 LLM 호출이
+인스턴스당 직렬 처리에 막히지 않게 한다. 순서 보장은 없다(요청별 독립 reply
+subject라 불필요). 종료(stop) 시 진행 중 요청은 완주 후 내려간다 — 응답 유실 없음.
+
+- 원격 프로바이더(anthropic/openai/…)에는 즉효다 — SDK의 공유 httpx 클라이언트가
+  커넥션 풀로 동시 요청을 받는다.
+- 상한을 올릴 때는 벤더 rate limit과 tick 예산(`LF_AI_TIMEOUT_S`)을 함께 보라.
+  큐에서 기다린 시간도 호출자 대기 시간에 포함된다.
+
 ## 프로바이더
 
 키가 설정된 프로바이더는 전부 등록된다. `LF_AI_PROVIDER`는 프리픽스 없는
@@ -42,6 +54,12 @@ LF_LOCAL_MODEL=qwen2.5:14b         # (선택) 전 티어 모델 일괄 교체
 - **Qwen3 thinking 주의**: qwen3 계열은 thinking 하이브리드라 기본적으로 추론 토큰을
   뱉어 지연이 커진다. 로컬 provider는 `/no_think` 소프트 스위치로 이를 끈다(구조화
   출력·tick 예산에 유리). 끄기를 원치 않으면 `LF_LOCAL_THINK=1`.
+- **Ollama 병렬화**: ai-runtime이 동시로 보내도 Ollama 서버가
+  `OLLAMA_NUM_PARALLEL=1`이면 그쪽 큐에서 직렬화된다. 로컬 실병렬은
+  `OLLAMA_NUM_PARALLEL=4`(Ollama 서버 env — `LF_AI_CONCURRENCY`와 맞추면 좋다)를
+  함께 설정해야 완성된다. 조건은 VRAM 여유다: 병렬 슬롯만큼 KV 캐시가 늘어나므로
+  (예: qwen3:8b Q4 ≈ 5GB + 슬롯당 컨텍스트 캐시), 부족하면 Ollama가 슬롯을 줄이거나
+  스왑으로 오히려 느려진다. 12GB VRAM에서 qwen3:8b + 4 슬롯은 무난하다.
 - 로컬 생성은 느릴 수 있다 — actor 대기 예산 `LF_AI_TIMEOUT_S`를 30~45로 상향 권장.
   초과 시 규칙 폴백으로 tick은 계속 흐른다 (`params.fallback: true`).
 - gpt-5/o 계열의 reasoning 지연은 `LF_OPENAI_REASONING_EFFORT`(기본 low)로

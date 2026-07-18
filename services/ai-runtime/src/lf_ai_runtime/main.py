@@ -2,7 +2,8 @@
 
 실행:
     uv run --package lf-ai-runtime python -m lf_ai_runtime.main
-설정: NATS_URL, LF_ENV, LF_AI_PROVIDER(rule|anthropic), LF_MODEL_ROUTES (config.py 참고).
+설정: NATS_URL, LF_ENV, LF_AI_PROVIDER(rule|anthropic), LF_MODEL_ROUTES,
+LF_AI_CONCURRENCY(동시 처리 상한, 기본 4) — config.py 참고.
 anthropic 프로바이더는 SDK 표준 자격증명 해석(ANTHROPIC_API_KEY 등)을 따른다.
 """
 

@@ -150,6 +150,8 @@ class AnthropicProvider:
         import anthropic
 
         self._anthropic = anthropic
+        # 공유 AsyncAnthropic 하나로 동시 요청을 받는다 — 내부 httpx.AsyncClient는
+        # 동시 사용 안전 + 커넥션 풀(max_connections=1000)이라 LF_AI_CONCURRENCY에 여유롭다
         self._client = anthropic.AsyncAnthropic()
         self._max_tokens = max_tokens  # 출력 예산 ≤600 tokens (ADR-009) + 여유
 
@@ -252,6 +254,8 @@ class OpenAICompatProvider:
 
         self.name = name
         self._openai = openai
+        # 공유 AsyncOpenAI 하나로 동시 요청을 받는다 (httpx 풀 — Anthropic 쪽 주석 참고).
+        # 단 local(Ollama)은 서버가 OLLAMA_NUM_PARALLEL=1이면 직렬화된다 — README 참고.
         self._client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
         self._json_mode = json_mode
         self._token_param = token_param
