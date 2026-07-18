@@ -10,6 +10,7 @@ CURSOR = "01JZK7Q3W0000000000000000A"
 class FakeSearch:
     def __init__(self) -> None:
         self.calls: list[dict] = []
+        self.text_calls: list[dict] = []
         self.items = [{"event_id": CURSOR, "title": "t"}]
 
     async def search(self, world_id, kinds, *, limit, sort, cursor):
@@ -18,6 +19,12 @@ class FakeSearch:
         )
         next_cursor = self.items[-1]["event_id"] if sort == "recent" else None
         return {"items": self.items, "next_cursor": next_cursor, "mode": sort}
+
+    async def text_search(self, world_id, kinds, *, q, actor_ids, limit):
+        self.text_calls.append(
+            {"world_id": world_id, "kinds": kinds, "q": q, "actor_ids": actor_ids, "limit": limit}
+        )
+        return {"items": self.items, "query": q}
 
 
 class FakeCache:
@@ -159,3 +166,29 @@ def test_authorless_world_news_survives_personalization():
     assert graph.calls[0][2] == ("a_close",)  # None은 근접도 질의에 실리지 않는다
     # 세계 뉴스(0.60) > a_close(0.45+0.25*0.8=0.65)? — 0.65가 앞선다: 정렬만 확인
     assert [i["event_id"][-1] for i in body["items"]] == ["A", "B"]
+
+
+def test_search_delegates_with_resolved_actors():
+    """GET /search — 검색어·역해석된 작성자 id가 그대로 질의로 위임된다."""
+    client, search, _ = make_client()
+    resp = client.get(
+        "/search", params=[("q", "오디션"), ("actor", "a_aria_kim"), ("actor", "a_serin_yun")]
+    )
+    assert resp.status_code == 200
+    assert resp.json()["query"] == "오디션"
+    assert search.text_calls == [
+        {
+            "world_id": "w_main", "kinds": ["world"], "q": "오디션",
+            "actor_ids": ["a_aria_kim", "a_serin_yun"], "limit": 20,
+        }
+    ]
+
+
+def test_search_rejects_bad_actor_id_and_timeline_kinds():
+    client, _, _ = make_client()
+    # 작성자 id 형식이 아니면 400 — 임의 문자열이 OS 질의에 실리지 않는다
+    assert client.get("/search", params={"q": "x", "actor": "김아리"}).status_code == 400
+    # personal/private는 타임라인 경로다 — 검색 경로가 아니다
+    assert client.get("/search", params={"q": "x", "types": "personal"}).status_code == 400
+    # 검색어는 비어 있을 수 없다
+    assert client.get("/search", params={"q": ""}).status_code == 422

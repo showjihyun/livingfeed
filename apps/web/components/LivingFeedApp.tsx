@@ -122,6 +122,18 @@ export function LivingFeedApp() {
     [byId],
   );
   const identityOf = useCallback((actorId: string) => byId.get(actorId), [byId]);
+  // 검색어→작성자 id 역해석 — 인덱스는 이름을 모르므로 로스터가 다리를 놓는다
+  const matchActorIds = useCallback(
+    (q: string) => {
+      const needle = q.trim().toLowerCase();
+      if (!needle) return [];
+      return [...byId.values()]
+        .filter((a) => a.name.toLowerCase().includes(needle))
+        .map((a) => a.actorId)
+        .slice(0, 8);
+    },
+    [byId],
+  );
 
   // 액터의 내면 실측 (pg-projector 신념·에피소드, ADR-003/008) — 미가용이면 데모 서사
   const focusProfile = useActorProfile(FOCUS_ACTOR_ID, screen === "app");
@@ -482,6 +494,7 @@ export function LivingFeedApp() {
             typingPosts={typingPosts}
             onComment={commentOnPost}
             authorName={authorName}
+            matchActorIds={matchActorIds}
             showCoach={screen === "app" && !coachDismissed}
             onDismissCoach={() => setCoachDismissed(true)}
           />

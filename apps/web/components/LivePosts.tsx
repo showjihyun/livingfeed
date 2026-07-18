@@ -120,7 +120,7 @@ const STORY_VIOLET = "#8A63D2";
  * (plan/03 §단계 3→4 "이 이야기의 시작점", Event Sourcing correlation 사슬).
  * 항목의 이름·문장은 전부 BE 실측(es + read.actors) — 하드코딩 서사 없음.
  */
-function StoryThread({ story }: { story: StoryTimeline }) {
+export function StoryThread({ story }: { story: StoryTimeline }) {
   return (
     <div
       style={{

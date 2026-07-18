@@ -43,6 +43,8 @@ if sys.platform == "win32":
 
 ULID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
 FEED_KINDS = frozenset({"world", "community", "relationship", "personal", "private", "hidden"})
+#: /search의 반복 파라미터 선언 — 모듈 수준 싱글턴 (기본값 함수 호출 금지 규칙)
+_ACTOR_QUERY = Query(None, description="작성자 후보 id — FE 로스터의 이름 역해석 결과")
 
 
 def create_app(
@@ -202,6 +204,28 @@ def create_app(
         if cache_key is not None:
             await _cache_set(app.state.cache, cache_key, result, cfg.cache_ttl_s)
         return result
+
+    @app.get("/search")
+    async def search_posts(
+        q: str = Query(..., min_length=1, max_length=200, description="검색어 — 제목·본문"),
+        world_id: str = Query("w_main", pattern=r"^w_[a-z0-9_]+$"),
+        types: str = Query("world", description="쉼표 구분 가시성 등급 (ADR-014)"),
+        actor: list[str] | None = _ACTOR_QUERY,
+        limit: int = Query(20, ge=1),
+    ) -> dict:
+        kinds = sorted({t.strip() for t in types.split(",") if t.strip()})
+        unknown = set(kinds) - FEED_KINDS
+        if not kinds or unknown:
+            raise HTTPException(400, f"알 수 없는 피드 유형: {sorted(unknown) or types!r}")
+        if set(kinds) & TIMELINE_KINDS:
+            raise HTTPException(400, "personal/private는 검색 경로가 아니다 (타임라인 경로)")
+        actor_ids = actor or []
+        for actor_id in actor_ids:
+            if not re.fullmatch(r"a_[a-z0-9_]+", actor_id):
+                raise HTTPException(400, f"작성자 id 형식이 아니다: {actor_id!r}")
+        return await app.state.search.text_search(
+            world_id, kinds, q=q, actor_ids=actor_ids, limit=min(limit, cfg.max_limit)
+        )
 
     def _reads() -> ProfileReads:
         reads = getattr(app.state, "reads", None)

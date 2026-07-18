@@ -1,10 +1,15 @@
+import { useState } from "react";
+
 import type { DerivedStories } from "@/lib/comments";
 import type { LivePost, LiveStatus } from "@/lib/live-feed";
+import { useWorldSearch } from "@/lib/search";
+import type { WorldSearchResult } from "@/lib/search";
+import { useStory } from "@/lib/story";
 import type { FeedComment } from "@/lib/types";
 
 import { Icon } from "./Icon";
 import { ICON } from "@/lib/data";
-import { LivePosts } from "./LivePosts";
+import { LivePosts, StoryThread } from "./LivePosts";
 
 interface FeedTabProps {
   livePosts: LivePost[];
@@ -19,8 +24,85 @@ interface FeedTabProps {
   onComment: (post: LivePost, text: string) => void;
   /** actor_id → 표시 이름 (라이브 identity, 하드코딩 금지) */
   authorName: (actorId: string) => string;
+  /** 검색어에 이름이 닿는 액터 id들 — 로스터 역해석 (인덱스는 이름을 모른다) */
+  matchActorIds: (q: string) => string[];
   showCoach: boolean;
   onDismissCoach: () => void;
+}
+
+/** 검색 결과 카드 하나 — "이야기 따라가기"로 기존 사슬 화면과 합류한다 */
+function SearchResultCard({
+  result,
+  authorName,
+}: {
+  result: WorldSearchResult;
+  authorName: (actorId: string) => string;
+}) {
+  const [open, setOpen] = useState(false);
+  const story = useStory(open ? (result.correlationId ?? undefined) : undefined);
+  const author = result.authorId ? authorName(result.authorId) : "세계";
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border: "1.5px solid #EEF3FB",
+        borderRadius: 18,
+        padding: "16px 20px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      {result.title && <div style={{ fontSize: 15, fontWeight: 800 }}>{result.title}</div>}
+      {result.body && (
+        <div
+          style={{
+            fontSize: 13,
+            color: "#5A6378",
+            fontWeight: 600,
+            lineHeight: 1.6,
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+          }}
+        >
+          {result.body}
+        </div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div
+          style={{
+            padding: "2px 10px",
+            background: "#EDF3FD",
+            color: "#5F7EC9",
+            borderRadius: 9999,
+            fontSize: 11,
+            fontWeight: 800,
+          }}
+        >
+          {author}
+        </div>
+        {result.correlationId && (
+          <div
+            onClick={() => setOpen((v) => !v)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 12,
+              fontWeight: 800,
+              color: "#8B7BD8",
+              cursor: "pointer",
+            }}
+          >
+            <Icon d={ICON.gitBranch} size={13} /> 이야기 따라가기
+          </div>
+        )}
+      </div>
+      {open && story && <StoryThread story={story} />}
+    </div>
+  );
 }
 
 export function FeedTab({
@@ -33,9 +115,15 @@ export function FeedTab({
   typingPosts,
   onComment,
   authorName,
+  matchActorIds,
   showCoach,
   onDismissCoach,
 }: FeedTabProps) {
+  // 검색 — 라이브는 흐르는 창일 뿐, 검색은 세계의 전 역사를 뒤진다 (OS 인덱스)
+  const [query, setQuery] = useState("");
+  const search = useWorldSearch(query, matchActorIds);
+  const searching = query.trim().length > 0;
+
   return (
     <>
       <div
@@ -89,8 +177,70 @@ export function FeedTab({
           gap: 16,
         }}
       >
+        {/* 검색 — 이름·제목·본문으로 세계의 전 역사를 (스튜디오와 같은 결) */}
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="세계의 이야기 검색 — 이름·제목·본문"
+          style={{
+            border: "1.5px solid #E2EAF6",
+            borderRadius: 12,
+            padding: "10px 14px",
+            fontSize: 14,
+            fontWeight: 600,
+            color: "#3A4256",
+            outline: "none",
+            background: "#FDFDFE",
+            maxWidth: 420,
+            fontFamily: "inherit",
+          }}
+        />
+
+        {searching && (
+          <>
+            {search.status === "offline" ? (
+              <div style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600 }}>
+                검색이 세계에 닿지 않아요 — 연결되면 다시 시도해주세요.
+              </div>
+            ) : search.status === "ready" && search.results.length === 0 ? (
+              <div
+                style={{
+                  border: "1.5px dashed #D8DEEA",
+                  borderRadius: 20,
+                  padding: "36px 24px",
+                  textAlign: "center",
+                  color: "#8C97AF",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  lineHeight: 1.7,
+                  background: "#fff",
+                }}
+              >
+                이 검색어에 닿는 이야기가 아직 없어요.
+              </div>
+            ) : search.status === "ready" ? (
+              <>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#8C97AF" }}>
+                  세계의 역사에서 {search.results.length}건이 닿았어요
+                </div>
+                {search.results.map((result) => (
+                  <SearchResultCard
+                    key={result.eventId}
+                    result={result}
+                    authorName={authorName}
+                  />
+                ))}
+              </>
+            ) : (
+              <div style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600 }}>
+                세계의 역사를 뒤지는 중…
+              </div>
+            )}
+          </>
+        )}
+
         {/* Aha 코치 배너 — 첫 개입을 유도 (특정 인물에 묶이지 않는 안내) */}
-        {showCoach && (
+        {!searching && showCoach && (
           <div
             style={{
               background: "#EDF3FD",
@@ -142,18 +292,21 @@ export function FeedTab({
           </div>
         )}
 
-        {/* 라이브 피드 — 실 백엔드(feed.post.published). 좋아요·댓글이 실제 포스트에 붙는다 */}
-        <LivePosts
-          posts={livePosts}
-          status={liveStatus}
-          liked={likedLive}
-          onLike={onLikeLive}
-          commentsByPost={commentsByPost}
-          derivedByPost={derivedByPost}
-          typingPosts={typingPosts}
-          onComment={onComment}
-          authorName={authorName}
-        />
+        {/* 라이브 피드 — 실 백엔드(feed.post.published). 좋아요·댓글이 실제 포스트에 붙는다.
+            검색 중에는 결과가 자리를 차지한다 — 검색어를 비우면 라이브로 돌아온다 */}
+        {!searching && (
+          <LivePosts
+            posts={livePosts}
+            status={liveStatus}
+            liked={likedLive}
+            onLike={onLikeLive}
+            commentsByPost={commentsByPost}
+            derivedByPost={derivedByPost}
+            typingPosts={typingPosts}
+            onComment={onComment}
+            authorName={authorName}
+          />
+        )}
       </div>
     </>
   );

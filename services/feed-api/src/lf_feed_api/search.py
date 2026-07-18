@@ -56,6 +56,32 @@ def build_ranked_query(cfg: Config, world_id: str, kinds: list[str], limit: int)
     }
 
 
+def build_text_search_query(
+    world_id: str, kinds: list[str], q: str, actor_ids: list[str], limit: int
+) -> dict[str, Any]:
+    """본문 검색 — 세계의 전 역사(OS 인덱스)에서 제목 가중(x2) multi_match.
+
+    작성자 이름→id 역해석은 호출자의 몫이다(FE 로스터가 이름을 안다 —
+    인덱스는 actor_id만 안다). actor_ids가 오면 그 작성자의 글도 함께 맞는다.
+    """
+    should: list[dict[str, Any]] = [
+        {"multi_match": {"query": q, "fields": ["title^2", "body"]}}
+    ]
+    if actor_ids:
+        should.append({"terms": {"actor_id": actor_ids}})
+    return {
+        "size": limit,
+        "query": {
+            "bool": {
+                "filter": visibility_filter(world_id, kinds),
+                "should": should,
+                "minimum_should_match": 1,
+            }
+        },
+        "sort": ["_score", {"event_id": "desc"}],
+    }
+
+
 def build_recent_query(
     world_id: str, kinds: list[str], limit: int, cursor: str | None
 ) -> dict[str, Any]:
@@ -97,6 +123,16 @@ class FeedSearch:
             items = [h["_source"] for h in hits]
         next_cursor = items[-1]["event_id"] if items and sort == "recent" else None
         return {"items": items, "next_cursor": next_cursor, "mode": sort}
+
+    async def text_search(
+        self, world_id: str, kinds: list[str], *, q: str, actor_ids: list[str], limit: int
+    ) -> dict[str, Any]:
+        """검색어로 세계의 전 역사를 뒤진다 — 관련도순 (동점은 최신 우선)."""
+        body = build_text_search_query(world_id, kinds, q, actor_ids, limit)
+        r = await self._client.post(f"/{self._cfg.index}/_search", json=body)
+        r.raise_for_status()
+        hits = r.json()["hits"]["hits"]
+        return {"items": [h["_source"] for h in hits], "query": q}
 
     async def close(self) -> None:
         await self._client.aclose()
