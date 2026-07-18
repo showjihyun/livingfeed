@@ -109,7 +109,7 @@ async def test_other_requesters_do_not_own_the_story(pg):
     assert anonymous["started_by_you"] is False
 
 
-async def test_actor_origin_is_not_yours_and_unknown_type_labels(pg):
+async def test_actor_origin_is_not_yours_and_no_type_label_leaks(pg):
     await seed_chain(pg)
     # 사슬 W: 액터의 정체성 선언 하나 — origin이 player.*가 아니다
     body = await StoryReads(OneConnPool(pg)).timeline(
@@ -118,8 +118,9 @@ async def test_actor_origin_is_not_yours_and_unknown_type_labels(pg):
     )
     assert [i["type"] for i in body["items"]] == ["actor.identity.declared"]
     assert body["started_by_you"] is False
-    # 요약 규칙에 없는 타입 — 타입 라벨 폴백 (숨기지 않는다)
-    assert body["items"][0]["summary"] == "actor.identity.declared"
+    # 정체성 선언의 사람 문장은 bio다 — 타입 라벨(기계 어휘)은 문장에 싣지 않는다
+    assert body["items"][0]["summary"] == sample("actor.identity.declared")["payload"]["bio"]
+    assert "actor.identity.declared" not in body["items"][0]["summary"]
 
 
 async def test_limit_caps_narrative_events(pg):
@@ -145,6 +146,70 @@ async def test_unknown_chain_is_empty_not_error(pg):
     assert body["items"] == []
     assert body["origin"] is None
     assert body["started_by_you"] is False
+
+
+# ── 실사고 재현 — 표시측 정화 (2026-07 실화면 유출 + 과거 발행분 원시 id) ──
+
+
+async def seed_leaky_chain(pg) -> str:
+    """유출 상태의 사슬을 es에 그대로 적재한다 — es는 불변이라 고칠 수 없는 것들:
+    emotion 엔진의 기계 사유, composer 정화 이전 발행분의 원시 id 제목·본문."""
+    await pg.execute("DROP SCHEMA IF EXISTS es CASCADE")
+    await migrate(pg)
+    comment = sample("player.comment.posted")
+    chain = comment["event_id"]
+    await _append_env(pg, "services.gateway", dict(comment, correlation_id=chain), head=0)
+    emotion = sample("actor.emotion.shifted")
+    await _append_env(pg, "engine.actor", dict(
+        emotion, correlation_id=chain,
+        payload=dict(
+            emotion["payload"],
+            reason="player.comment.posted — gratitude 0.75 (플레이어 p_observer_0417)",
+        ),
+    ), head=0)
+    post = sample("feed.post.published")
+    await _append_env(pg, "engine.feed", dict(
+        post, correlation_id=chain,
+        payload=dict(
+            post["payload"],
+            title="a_aria_kim, p_observer_0417에게 답하다",
+            body="p_observer_0417에게 전하고 싶은 말이 있었다",
+        ),
+    ), head=0)
+    return chain
+
+
+async def test_machine_reason_and_stale_ids_are_sanitized_in_chain(pg):
+    chain = await seed_leaky_chain(pg)
+    await seed_names(pg)
+    body = await StoryReads(OneConnPool(pg)).timeline(
+        WORLD, chain, player_id=PLAYER, limit=50
+    )
+    # 뼈대 생존 + 구조 필드(type)는 정화 대상이 아니다
+    assert [i["type"] for i in body["items"]] == [
+        "player.comment.posted", "actor.emotion.shifted", "feed.post.published",
+    ]
+    comment_item, emotion_item, post_item = body["items"]
+    # 시작점(뼈대)의 사람 문장은 원문 그대로
+    assert comment_item["summary"] == sample("player.comment.posted")["payload"]["text"]
+    # 실화면 유출 원문 → 사람 문장 (타입 토큰·감정 코드·수치·플레이어 id 소거)
+    assert emotion_item["summary"] == "댓글에 마음이 움직였다"
+    # 과거 발행분 제목 — 액터 id는 read.actors 실명, 플레이어 id는 세계 어휘
+    assert post_item["summary"] == "김아리, 어느 관찰자에게 답하다"
+    joined = " ".join(i["summary"] for i in body["items"])
+    for token in ("gratitude", "0.75", "p_observer_0417", "a_aria_kim",
+                  "player.comment.posted"):
+        assert token not in joined
+    assert body["started_by_you"] is True
+
+
+async def test_derived_post_title_is_sanitized_at_read_boundary(pg):
+    chain = await seed_leaky_chain(pg)
+    await seed_names(pg)
+    summary = await StoryReads(OneConnPool(pg)).derived_posts(WORLD, chain)
+    assert summary["count"] == 1
+    assert summary["latest"]["title"] == "김아리, 어느 관찰자에게 답하다"
+    assert summary["latest"]["author"] == "김아리"
 
 
 # ── 파생 포스트 요약 — "이 대화가 낳은 이야기" (댓글 스레드 배지 재료) ────

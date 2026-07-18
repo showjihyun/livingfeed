@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 
 from lf_feed_api.config import Config
+from lf_feed_api.sanitize import anonymize_players, humanize_ids
 
 
 def visibility_filter(world_id: str, kinds: list[str]) -> list[dict[str, Any]]:
@@ -98,11 +99,30 @@ def build_recent_query(
 class FeedSearch:
     """읽기 전용 질의 클라이언트 — 프로젝션만 읽는다 (ADR-003 읽기 API 규칙)."""
 
-    def __init__(self, cfg: Config) -> None:
+    def __init__(self, cfg: Config, actor_names: dict[str, str] | None = None) -> None:
         self._cfg = cfg
+        # 이름 원천 주입은 옵션이다 — feed-api 조립(main.py)은 FeedSearch(cfg)만
+        # 만들고 personas·read.actors에 닿는 경로가 없다. 미주입이면 액터 id는
+        # 그대로 두고(이름 그라운딩은 FE authorName 로스터의 몫 — '누군가'로
+        # 뭉개면 정보만 잃는다) 플레이어 id만 익명화한다 (sanitize.py 근거).
+        self._names = actor_names
         self._client = httpx.AsyncClient(
             base_url=cfg.opensearch_url.rstrip("/"), timeout=5.0
         )
+
+    def _sanitized(self, item: dict[str, Any]) -> dict[str, Any]:
+        """화면 문장(title/body)만 읽기 경계에서 정화 — es는 불변이라 composer
+        정화 이전 발행분의 원시 id가 인덱스에 남아 있다. actor_id 같은 구조
+        필드는 불변이다 (커서·근접도 재랭킹의 좌표)."""
+        for key in ("title", "body"):
+            text = item.get(key)
+            if isinstance(text, str):
+                item[key] = (
+                    humanize_ids(text, self._names)
+                    if self._names is not None
+                    else anonymize_players(text)
+                )
+        return item
 
     async def search(
         self, world_id: str, kinds: list[str], *, limit: int, sort: str, cursor: str | None
@@ -118,9 +138,12 @@ class FeedSearch:
         hits = r.json()["hits"]["hits"]
         # ranked 모드는 _score를 함께 싣는다 — 관계 근접도 재랭킹의 밑점수 (ADR-014)
         if sort == "ranked":
-            items = [{**h["_source"], "_score": h.get("_score") or 0.0} for h in hits]
+            items = [
+                self._sanitized({**h["_source"], "_score": h.get("_score") or 0.0})
+                for h in hits
+            ]
         else:
-            items = [h["_source"] for h in hits]
+            items = [self._sanitized({**h["_source"]}) for h in hits]
         next_cursor = items[-1]["event_id"] if items and sort == "recent" else None
         return {"items": items, "next_cursor": next_cursor, "mode": sort}
 
@@ -132,7 +155,7 @@ class FeedSearch:
         r = await self._client.post(f"/{self._cfg.index}/_search", json=body)
         r.raise_for_status()
         hits = r.json()["hits"]["hits"]
-        return {"items": [h["_source"] for h in hits], "query": q}
+        return {"items": [self._sanitized({**h["_source"]}) for h in hits], "query": q}
 
     async def close(self) -> None:
         await self._client.aclose()

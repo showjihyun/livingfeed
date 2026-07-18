@@ -63,8 +63,78 @@ def test_summarize_reaction_and_follow_are_human_sentences():
     assert follow != unfollow
 
 
-def test_summarize_unknown_type_falls_back_to_type_label():
-    assert summarize("actor.confession.made", {"depth": 1}) == "actor.confession.made"
+def test_summarize_unknown_type_is_generic_sentence_not_type_label():
+    # 타입 라벨 폴백은 기계 어휘 유출이었다 — 항목은 남되(침묵 실패 회피,
+    # 구조 필드 type이 관찰 좌표) 문장은 일반 문장으로 접는다
+    line = summarize("actor.confession.made", {"depth": 1})
+    assert line == "무언가가 일어났다"
+    assert "actor.confession.made" not in line
+
+
+# ── 실사고 재현 — 엔진 사유(reason/note)의 기계 형식 유출 (2026-07 실화면) ──
+
+
+def test_emotion_machine_reason_is_folded_to_interaction_sentence():
+    # 실화면 유출 원문 그대로: 타입 토큰·감정 코드·수치·플레이어 id
+    leak = "player.comment.posted — gratitude 0.75 (플레이어 p_observer_0417)"
+    line = summarize("actor.emotion.shifted", {"reason": leak})
+    assert line == "댓글에 마음이 움직였다"
+    for token in ("player.comment.posted", "gratitude", "0.75", "p_observer_0417"):
+        assert token not in line
+
+
+def _emotion(reason: str | None) -> str:
+    payload = {} if reason is None else {"reason": reason}
+    return summarize("actor.emotion.shifted", payload)
+
+
+def test_emotion_reason_variants_never_leak_machine_vocab():
+    # 좋아요·DM·공명(feed.post)·목표(goal.*) — emotion 엔진의 reason 형식 전 계열
+    assert _emotion("player.reaction.added — joy 0.25 (플레이어 p_x)") == "좋아요에 마음이 움직였다"
+    assert _emotion("player.dm.sent — gratitude 0.55 (플레이어 p_x)") == "DM에 마음이 움직였다"
+    assert _emotion("feed.post — envy 0.42 (a_hana의 글)") == "글에 마음이 움직였다"
+    # 모르는 토큰·수치만 있는 사유 — 일반 문장으로 (마디는 남긴다)
+    assert _emotion("goal.advanced — joy 0.30") == "마음이 움직였다"
+    assert _emotion(None) == "마음이 움직였다"
+
+
+def _relationship(reason: str) -> str:
+    return summarize("relationship.state.changed", {"reason": reason})
+
+
+def test_relationship_machine_reason_is_folded():
+    # relationship 엔진 형식: "{source_kind} ({direction})" / "감정 응고: {type} {수치}"
+    assert _relationship("player.comment.posted (received)") == "댓글에 마음의 거리가 달라졌다"
+    assert _relationship("감정 응고: gratitude 0.69") == "마음의 거리가 달라졌다"
+    # 사람 문장 사유는 그대로 살린다 (샘플·인물 통찰 계열)
+    assert _relationship("인물 통찰 — 비중이 는다") == "인물 통찰 — 비중이 는다"
+
+
+def test_milestone_dirty_note_falls_back_to_kind_label():
+    assert summarize(
+        "relationship.milestone.reached",
+        {"milestone": "betrayal", "note": "stage acquaintance 0.4"},
+    ) == "믿음이 배신으로 무너졌다"
+    assert summarize(
+        "relationship.milestone.reached", {"milestone": "who_knows"}
+    ) == "관계가 새로운 국면으로 넘어갔다"
+
+
+def test_director_numeric_reason_is_folded_to_stage_sentence():
+    # 규칙 개입 reason은 수치 보고서다 — LLM rationale(사람 문장)만 살린다
+    leak = "침체 감지 — drama 이동평균 0.12이 5 tick 지속 (임계 0.3/4)"
+    folded = summarize("system.director.intervened", {"reason": leak})
+    assert folded == "세계가 조용히 무대를 움직였다"
+    human = "아리의 특종이 벽에 부딪히게 한다"
+    assert summarize("system.director.intervened", {"reason": human}) == human
+
+
+def test_skeleton_items_survive_empty_payload_with_human_fallback():
+    # 뼈대(시작점·포스트·응답)는 문장이 비어도 접히지 않는다
+    assert summarize("player.comment.posted", {}) == "댓글을 남겼다"
+    assert summarize("player.dm.sent", {}) == "DM을 보냈다"
+    assert summarize("feed.post.published", {}) == "이야기를 실었다"
+    assert summarize("actor.message.sent", {}) == "말을 건넸다"
 
 
 # ── 표시 이름 해석 — read.actors + '당신' 치환 ───────────────────────
