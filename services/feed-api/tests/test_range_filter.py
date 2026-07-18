@@ -1,8 +1,8 @@
 """조회 범위(from_tick) 계약 — 오늘/이번 주/이번 달의 세계 tick 하한 (ADR-011).
 
 /feed(OS recent·Redis 타임라인)와 프로필 에피소드가 같은 하한 좌표(from_tick,
-포함)를 쓴다. OS 경로의 하한은 recent 질의 결과 후처리다 — search.py를 고치지
-않는 우회 (main._clip_from_tick 머리말 참고).
+포함)를 쓴다. OS 경로의 하한은 recent 질의의 range 필터다 (search.py) —
+커서는 자연 소진(빈 페이지)으로 끝난다.
 """
 
 import json
@@ -23,18 +23,25 @@ PLAYER = "p_observer_0417"
 
 
 class FakeSearch:
-    """recent 페이지 대역 — tick이 시간(event_id 내림차순)에 단조인 항목들."""
+    """recent 페이지 대역 — 실물처럼 from_tick을 range 필터로 적용한다 (search.py 계약)."""
 
     def __init__(self, items: list[dict]) -> None:
         self.calls: list[dict] = []
         self.items = items
 
-    async def search(self, world_id, kinds, *, limit, sort, cursor):
+    async def search(self, world_id, kinds, *, limit, sort, cursor, from_tick=None):
         self.calls.append(
-            {"world_id": world_id, "kinds": kinds, "limit": limit, "sort": sort, "cursor": cursor}
+            {
+                "world_id": world_id, "kinds": kinds, "limit": limit,
+                "sort": sort, "cursor": cursor, "from_tick": from_tick,
+            }
         )
-        next_cursor = self.items[-1]["event_id"] if self.items and sort == "recent" else None
-        return {"items": self.items, "next_cursor": next_cursor, "mode": sort}
+        items = [
+            i for i in self.items
+            if from_tick is None or i.get("tick", -1) >= from_tick
+        ]
+        next_cursor = items[-1]["event_id"] if items and sort == "recent" else None
+        return {"items": items, "next_cursor": next_cursor, "mode": sort}
 
 
 class FakeCache:
@@ -66,14 +73,16 @@ def make_client(items: list[dict]) -> tuple[TestClient, FakeSearch, FakeCache]:
     return TestClient(app), search, cache
 
 
-def test_from_tick_forces_recent_and_clips_page():
+def test_from_tick_forces_recent_and_filters_in_query():
     # tick 720이 일 경계 — 719(전날)부터는 범위 밖이다
     client, search, _ = make_client([post("0C", 1081), post("0B", 720), post("0A", 719)])
     body = client.get("/feed", params={"from_tick": 720}).json()
     assert search.calls[-1]["sort"] == "recent"  # 범위 조회는 정의상 시간순
+    assert search.calls[-1]["from_tick"] == 720  # 하한은 질의 필터로 내려간다
     assert body["mode"] == "recent"
     assert [i["tick"] for i in body["items"]] == [1081, 720]  # 하한은 포함이다
-    assert body["next_cursor"] is None  # 잘렸으면 더 과거에 범위 내 항목이 없다
+    # 커서는 자연 소진 — 범위 내 마지막 항목에서 이어보고, 다음 페이지가 비면 끝
+    assert body["next_cursor"] == "01JZK7Q3W0000000000000000B"
 
 
 def test_from_tick_keeps_cursor_when_page_fully_in_range():

@@ -13,7 +13,7 @@ class FakeSearch:
         self.text_calls: list[dict] = []
         self.items = [{"event_id": CURSOR, "title": "t"}]
 
-    async def search(self, world_id, kinds, *, limit, sort, cursor):
+    async def search(self, world_id, kinds, *, limit, sort, cursor, from_tick=None):
         self.calls.append(
             {"world_id": world_id, "kinds": kinds, "limit": limit, "sort": sort, "cursor": cursor}
         )

@@ -190,15 +190,9 @@ def create_app(
         # 개인화 재랭킹은 후보를 넉넉히 뽑아 근접도 항을 더한 뒤 자른다
         fetch_limit = min(limit * 2, cfg.max_limit) if personalize else limit
         result = await app.state.search.search(
-            world_id, kinds, limit=fetch_limit, sort=sort, cursor=cursor
+            world_id, kinds, limit=fetch_limit, sort=sort, cursor=cursor,
+            from_tick=from_tick,
         )
-        if from_tick is not None:
-            # 범위 하한은 기존 recent 질의 결과에 얹는다 — search.py의 질의 body를
-            # 고치지 않는 우회다 (병렬 편집 충돌 방지; 다음 정리 커밋에서 질의로 합친다).
-            # recent(event_id/ULID 내림차순)는 시간 내림차순이고 tick은 시간에 단조라,
-            # 하한 밑 첫 항목에서 자르면 그 뒤(더 과거)에 범위 내 항목이 없다 —
-            # 페이지 후처리가 질의 필터와 동치이고, 잘렸으면 커서도 닫는 게 정직하다.
-            result = _clip_from_tick(result, from_tick)
 
         if personalize and result["items"]:
             # 세계 사건(Director incident) 포스트는 작성자가 없다 — 근접도 항 제외
@@ -398,25 +392,6 @@ def create_app(
         )
 
     return app
-
-
-def _clip_from_tick(result: dict, from_tick: int) -> dict:
-    """recent 페이지를 tick 하한에서 자른다 — 조회 범위(오늘/주/월)의 서버 필터.
-
-    항목은 시간 내림차순이므로 하한 밑 첫 항목부터는 전부 범위 밖(더 과거)이다 —
-    거기서 자르고 next_cursor를 닫는다 (더 과거 페이지에 범위 내 항목이 없다).
-    tick 없는 항목은 창에 놓을 수 없으니 범위 밖으로 다룬다 (정직한 침묵).
-    """
-    items = result["items"]
-    kept = len(items)
-    for i, item in enumerate(items):
-        if item.get("tick", -1) < from_tick:
-            kept = i
-            break
-    if kept == len(items):
-        return result
-    clipped = items[:kept]
-    return {**result, "items": clipped, "next_cursor": None}
 
 
 async def _cache_get(cache: Redis, key: str) -> dict | None:

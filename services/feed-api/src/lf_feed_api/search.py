@@ -84,11 +84,19 @@ def build_text_search_query(
 
 
 def build_recent_query(
-    world_id: str, kinds: list[str], limit: int, cursor: str | None
+    world_id: str,
+    kinds: list[str],
+    limit: int,
+    cursor: str | None,
+    from_tick: int | None = None,
 ) -> dict[str, Any]:
+    filters = visibility_filter(world_id, kinds)
+    if from_tick is not None:
+        # 조회 범위(오늘/이번 주/이번 달)의 세계 tick 하한 — 포함 (ADR-011 좌표)
+        filters = [*filters, {"range": {"tick": {"gte": from_tick}}}]
     query: dict[str, Any] = {
         "size": limit,
-        "query": {"bool": {"filter": visibility_filter(world_id, kinds)}},
+        "query": {"bool": {"filter": filters}},
         "sort": [{"event_id": "desc"}],
     }
     if cursor:
@@ -125,11 +133,19 @@ class FeedSearch:
         return item
 
     async def search(
-        self, world_id: str, kinds: list[str], *, limit: int, sort: str, cursor: str | None
+        self,
+        world_id: str,
+        kinds: list[str],
+        *,
+        limit: int,
+        sort: str,
+        cursor: str | None,
+        from_tick: int | None = None,
     ) -> dict[str, Any]:
         cfg = self._cfg
+        # from_tick은 recent 전용이다 — 호출자(main)가 범위 조회를 recent로 강제한다
         body = (
-            build_recent_query(world_id, kinds, limit, cursor)
+            build_recent_query(world_id, kinds, limit, cursor, from_tick)
             if sort == "recent"
             else build_ranked_query(cfg, world_id, kinds, limit)
         )

@@ -38,6 +38,15 @@ def test_recent_query_paginates_by_ulid():
     assert q2["search_after"] == ["01JZK7Q3W0000000000000000A"]
 
 
+def test_recent_query_carries_from_tick_as_range_filter():
+    """조회 범위(오늘/주/월)의 tick 하한 — 후처리 클립이 아니라 질의 필터다."""
+    q = build_recent_query("w_main", ["world"], 20, cursor=None, from_tick=720)
+    assert {"range": {"tick": {"gte": 720}}} in q["query"]["bool"]["filter"]
+    # 하한 없으면 필터도 없다 — 현행 recent 그대로
+    q2 = build_recent_query("w_main", ["world"], 20, cursor=None)
+    assert all("range" not in f for f in q2["query"]["bool"]["filter"])
+
+
 def test_text_search_matches_title_weighted_and_body():
     q = build_text_search_query("w_main", ["world"], "오디션", [], 20)
     bool_q = q["query"]["bool"]
