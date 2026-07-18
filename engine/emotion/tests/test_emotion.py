@@ -1,5 +1,7 @@
 """Emotion Engine 순수 로직 검증 — 결정성·개인차·감쇠 (ADR-015)."""
 
+import re
+
 from lf_emotion import (
     EmotionState,
     appraise_goal,
@@ -9,6 +11,7 @@ from lf_emotion import (
     decay,
     describe,
 )
+from lf_emotion import engine as engine_module
 
 OPTIMIST = {  # 낮은 신경성, 높은 외향 — 밝고 회복 빠름
     "openness": 0.6, "conscientiousness": 0.6, "extraversion": 0.8,
@@ -178,6 +181,128 @@ def test_post_without_relation_leaves_no_trace():
     )
     assert not result.significant
     assert result.state == EmotionState()
+
+
+# --- reason 계약 — 사람 문장 (발원지 정화) ------------------------------------
+# reason은 리시트(projector)·이야기 사슬(feed-api)·LLM 컨텍스트에 그대로 실린다.
+# 계약: 이벤트 타입 토큰·수치·원시 id 금지, 결정적(같은 입력 → 같은 문장).
+
+_TYPE_TOKEN = re.compile(r"[a-z_]+\.[a-z_.]+")  # 점 표기 기계 토큰 (player.dm.sent 등)
+_RAW_ID = re.compile(r"\b[apw]_[A-Za-z0-9_]+")  # 원시 식별자 (p_/a_/w_ 접두)
+
+
+def _assert_human(reason: str) -> None:
+    assert reason, "발행되는 변화의 reason은 빈 문장일 수 없다"
+    assert not re.search(r"\d", reason), f"수치 유출: {reason!r}"
+    assert _TYPE_TOKEN.search(reason) is None, f"타입 토큰 유출: {reason!r}"
+    assert _RAW_ID.search(reason) is None, f"원시 id 유출: {reason!r}"
+
+
+def comment(event_id: str = "01JZK7Q3W0000000000000000C") -> dict:
+    return {
+        "event_id": event_id,
+        "type": "player.comment.posted",
+        "payload": {"player_id": "p_observer_0417", "text": "응원해요"},
+    }
+
+
+def like(event_id: str = "01JZK7Q3W0000000000000000L") -> dict:
+    return {
+        "event_id": event_id,
+        "type": "player.reaction.added",
+        "payload": {"player_id": "p_observer_0417", "kind": "like"},
+    }
+
+
+def test_interaction_reason_is_human_sentence():
+    result = appraise_interaction(EmotionState(), comment(), OPTIMIST)
+    assert result.reason == "댓글 한 마디에 고마움이 번졌다"
+    _assert_human(result.reason)
+
+    liked = appraise_interaction(EmotionState(), like(), OPTIMIST)
+    assert liked.reason == "좋아요에 기쁨이 번졌다"
+    _assert_human(liked.reason)
+
+
+def test_strong_intensity_reads_as_sentence_strength_not_number():
+    # 예민한 사람의 DM 감흥은 임계(0.7)를 넘는다 — 수치가 아니라 '크게'로만 남는다
+    strong = appraise_interaction(EmotionState(), dm(), NEUROTIC)
+    assert strong.reason == "DM 한 통에 고마움이 크게 번졌다"
+    _assert_human(strong.reason)
+    # 댓글(OPTIMIST)은 임계 미만 — '크게'는 남발하지 않는다
+    assert "크게" not in appraise_interaction(EmotionState(), comment(), OPTIMIST).reason
+
+
+def test_interaction_reason_is_deterministic():
+    a = appraise_interaction(EmotionState(), dm(), OPTIMIST).reason
+    b = appraise_interaction(EmotionState(), dm(), OPTIMIST).reason
+    assert a == b  # 리플레이 재현성 — reason도 상태와 같은 계약이다
+
+
+def test_goal_reasons_are_human_sentences():
+    advanced = appraise_goal(
+        EmotionState(), OPTIMIST, kind="goal.advanced", magnitude=0.9, source_event="01J"
+    )
+    assert advanced.reason == "하려던 일이 한 걸음 나아가 기쁨이 번졌다"
+    _assert_human(advanced.reason)
+
+    achieved = appraise_goal(EmotionState(), OPTIMIST, kind="goal.achieved", magnitude=1.0)
+    assert achieved.reason == "마음먹은 일을 이뤄내 기쁨이 크게 차올랐다"
+    _assert_human(achieved.reason)
+
+    frustrated = appraise_goal(EmotionState(), NEUROTIC, kind="goal.frustrated", magnitude=0.8)
+    assert frustrated.reason == "하려던 일이 막혀 괴로움이 밀려왔다"
+    _assert_human(frustrated.reason)
+
+
+def test_post_reason_never_carries_author_id():
+    warm = appraise_post(
+        EmotionState(), OPTIMIST, author_id="a_friend", drama=0.8, edge=WARM_EDGE,
+        source_event="01J",
+    )
+    assert warm.reason == "아끼는 사람의 글에 기쁨이 잔잔히 번졌다"
+    _assert_human(warm.reason)
+    assert "a_friend" not in warm.reason  # 대상은 구조 필드(emotions[].target_id)의 몫
+
+    sore = appraise_post(
+        EmotionState(), NEUROTIC, author_id="a_rival", drama=0.8, edge=SORE_EDGE,
+        source_event="01J",
+    )
+    assert sore.reason == "마음 불편한 상대의 글에 괴로움이 일었다"
+    _assert_human(sore.reason)
+    assert "a_rival" not in sore.reason
+
+
+def test_reason_vocab_covers_all_configured_emotion_codes():
+    """params가 만들 수 있는 전 감정 코드에 한국어 어휘가 있다 — 폴백은 미지 코드 전용."""
+    params = engine_module.default_params()
+    codes = {rule["type"] for rule in params["appraisal"].values()}
+    codes |= {
+        rule["type"] for rule in params["post_appraisal"].values()
+        if isinstance(rule, dict) and "type" in rule
+    }
+    assert codes <= set(engine_module._EMOTION_WORDS)
+
+
+def test_unknown_vocab_falls_back_to_human_sentence():
+    """params에 새 유형이 늘어도 reason은 사람 문장으로 남는다 (전방 호환)."""
+    params = {
+        **engine_module.default_params(),
+        "appraisal": {
+            "player.gift.sent": {
+                "type": "awe",
+                "base_intensity": 0.5,
+                "pad": {"pleasure": 0.5, "arousal": 0.2, "dominance": 0.1},
+            }
+        },
+    }
+    gift = {
+        "event_id": "01X", "type": "player.gift.sent",
+        "payload": {"player_id": "p_observer_0417"},
+    }
+    result = appraise_interaction(EmotionState(), gift, OPTIMIST, params=params)
+    _assert_human(result.reason)
+    assert "player.gift.sent" not in result.reason and "awe" not in result.reason
 
 
 def test_post_magnitude_scales_with_drama_and_relation():

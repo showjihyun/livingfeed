@@ -1,5 +1,7 @@
 """Relationship Engine 순수 로직 검증 — 응고·비대칭·감쇠·발행 규칙 (ADR-016)."""
 
+import re
+
 from lf_relationship import (
     RelationshipState,
     apply_interaction,
@@ -12,6 +14,7 @@ from lf_relationship import (
     stage_after_action,
     transition_stage,
 )
+from lf_relationship import engine as engine_module
 
 
 def test_help_builds_trust_asymmetrically():
@@ -111,6 +114,80 @@ def test_state_roundtrips_json():
     state = apply_interaction(RelationshipState(), "action.help", "incoming").state
     canonical = state.to_json()
     assert RelationshipState.from_json(canonical).to_json() == canonical
+
+
+# --- reason 계약 — 사람 문장 (발원지 정화) ------------------------------------
+# reason은 리시트(projector 타임라인)·이야기 사슬(feed-api)·LLM 컨텍스트에 그대로
+# 실린다. 계약: 이벤트 타입 토큰·방향 표기·수치·원시 id 금지, 결정적.
+
+_TYPE_TOKEN = re.compile(r"[a-z_]+\.[a-z_.]+")  # 점 표기 기계 토큰 (player.dm.sent 등)
+_RAW_ID = re.compile(r"\b[apw]_[A-Za-z0-9_]+")  # 원시 식별자 (p_/a_/w_ 접두)
+
+
+def _assert_human(reason: str) -> None:
+    assert reason, "발행되는 변화의 reason은 빈 문장일 수 없다"
+    assert not re.search(r"\d", reason), f"수치 유출: {reason!r}"
+    assert _TYPE_TOKEN.search(reason) is None, f"타입 토큰 유출: {reason!r}"
+    assert _RAW_ID.search(reason) is None, f"원시 id 유출: {reason!r}"
+    for token in ("incoming", "outgoing", "received", "sent"):
+        assert token not in reason, f"방향 표기 유출: {reason!r}"
+
+
+def test_interaction_reason_is_human_sentence():
+    result = apply_interaction(RelationshipState(), "player.comment.posted", "incoming")
+    assert result.reason == "댓글 한 마디를 받았다"
+    helped = apply_interaction(RelationshipState(), "action.help", "outgoing")
+    assert helped.reason == "손을 내밀어 도왔다"
+    # 결정성 — 같은 입력, 같은 문장 (리플레이 재현성)
+    assert result.reason == apply_interaction(
+        RelationshipState(), "player.comment.posted", "incoming"
+    ).reason
+
+
+def test_interaction_reasons_are_human_for_all_configured_kinds():
+    """params의 모든 (사건, 방향) 조합이 사람 문장을 얻는다 — 기계 표기 전수 검사."""
+    params = default_params()
+    for kind, directions in params["interaction_effects"].items():
+        for direction in directions:
+            result = apply_interaction(RelationshipState(), kind, direction, params=params)
+            _assert_human(result.reason)
+            assert kind not in result.reason
+
+
+def test_novel_interaction_kind_falls_back_to_human_sentence():
+    """params에 새 사건이 늘어도 reason은 사람 문장으로 남는다 (전방 호환)."""
+    params = {
+        **default_params(),
+        "interaction_effects": {"action.hug": {"incoming": {"intimacy": 0.05}}},
+    }
+    result = apply_interaction(RelationshipState(), "action.hug", "incoming", params=params)
+    _assert_human(result.reason)
+    assert "action.hug" not in result.reason
+
+
+def test_consolidation_reason_is_human_sentence():
+    result = consolidate_emotion(RelationshipState(), "gratitude", 0.5)
+    assert result.reason == "그 사람과의 사이에 고마움이 쌓였다"
+    _assert_human(result.reason)
+    # 강도는 수치가 아니라 문장의 세기로만 — 임계(0.7) 이상만 '깊이'
+    strong = consolidate_emotion(RelationshipState(), "anger", 0.8)
+    assert strong.reason == "그 사람과의 사이에 노여움이 깊이 쌓였다"
+    _assert_human(strong.reason)
+    assert "깊이" not in consolidate_emotion(RelationshipState(), "anger", 0.3).reason
+
+
+def test_consolidation_vocab_covers_all_configured_emotions():
+    """emotion_consolidation의 전 감정 코드에 한국어 어휘가 있다 — 폴백은 미지 코드 전용."""
+    params = default_params()
+    assert set(params["emotion_consolidation"]) <= set(engine_module._EMOTION_WORDS)
+    for code in params["emotion_consolidation"]:
+        result = consolidate_emotion(RelationshipState(), code, 0.6, params=params)
+        _assert_human(result.reason)
+        assert code not in result.reason  # 감정 코드는 구조 필드의 몫, 문장엔 어휘만
+
+
+def test_insight_reason_is_human_sentence():
+    _assert_human(consolidate_insight(RelationshipState(), 0.9).reason)
 
 
 def _edge(

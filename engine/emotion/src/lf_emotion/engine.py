@@ -34,8 +34,73 @@ class AppraisalResult:
     state: EmotionState
     #: 발행 임계를 넘는 변화였나 (actor.emotion.shifted 대상)
     significant: bool
-    #: 사람이 읽는 원인 한 줄 (이벤트 payload의 reason)
+    #: 사람이 읽는 원인 한 줄 (이벤트 payload의 reason) — 아래 reason 계약 참조
     reason: str
+
+
+# ── reason 계약 — 사람 문장 (발원지 정화) ─────────────────────────────────
+# reason은 리시트(projector 타임라인)·이야기 사슬(feed-api story)·LLM 컨텍스트에
+# 그대로 실리는 화면 문장이다. 계약: 이벤트 타입 토큰·수치·원시 id 금지,
+# 결정적(같은 입력 → 같은 문장 — 리플레이 원칙). 판정용 구조 정보(감정 코드·
+# 강도·대상)는 payload.emotions[]와 봉투 causation_id가 이미 나른다 —
+# reason은 사람 몫, 판정은 구조 필드 몫 (이원화).
+
+#: 감정 코드 → 한국어 어휘(주격 조사 포함) — projector 리시트·feed-api 이야기
+#: 사슬의 한국어 감정 어휘와 같은 결. params가 만들 수 있는 전 코드를 덮는다.
+_EMOTION_WORDS: dict[str, str] = {
+    "joy": "기쁨이",
+    "gratitude": "고마움이",
+    "distress": "괴로움이",
+    "anger": "화가",
+}
+
+#: 미지 감정 코드의 폴백 — params에 새 유형이 늘어도 문장은 사람 말로 남는다
+_FALLBACK_EMOTION_WORD = "낯선 감정이"
+
+#: 상호작용 타입 → 원인 구절 — 이벤트 타입 토큰을 화면 문장에 싣지 않는다
+_INTERACTION_PHRASES: dict[str, str] = {
+    "player.reaction.added": "좋아요에",
+    "player.comment.posted": "댓글 한 마디에",
+    "player.dm.sent": "DM 한 통에",
+}
+
+_FALLBACK_INTERACTION_PHRASE = "건네받은 마음에"
+
+#: 목표 결과 → 문장 틀 ({word} 자리에 감정 어휘) — 완주는 그 자체로 큰 문장이다
+_GOAL_TEMPLATES: dict[str, str] = {
+    "goal.advanced": "하려던 일이 한 걸음 나아가 {word} 번졌다",
+    "goal.achieved": "마음먹은 일을 이뤄내 {word} 크게 차올랐다",
+    "goal.frustrated": "하려던 일이 막혀 {word} 밀려왔다",
+}
+
+#: 피드 글 감흥 채널 → 문장 틀 — 작성자는 구조 필드(emotions[].target_id)의 몫이다
+_POST_TEMPLATES: dict[str, str] = {
+    "warm": "아끼는 사람의 글에 {word} 잔잔히 번졌다",
+    "sore": "마음 불편한 상대의 글에 {word} 일었다",
+}
+
+#: '크게'가 붙는 강도 문턱 — 수치는 문장에 싣지 않고 세기로만 남긴다 (남발 금지)
+_STRONG_INTENSITY = 0.7
+
+
+def _emotion_word(emotion_type: str) -> str:
+    return _EMOTION_WORDS.get(emotion_type, _FALLBACK_EMOTION_WORD)
+
+
+def _interaction_reason(interaction_type: str, emotion_type: str, intensity: float) -> str:
+    phrase = _INTERACTION_PHRASES.get(interaction_type, _FALLBACK_INTERACTION_PHRASE)
+    strength = "크게 " if intensity >= _STRONG_INTENSITY else ""
+    return f"{phrase} {_emotion_word(emotion_type)} {strength}번졌다"
+
+
+def _goal_reason(kind: str, emotion_type: str) -> str:
+    template = _GOAL_TEMPLATES.get(kind, "{word} 마음에 번졌다")
+    return template.format(word=_emotion_word(emotion_type))
+
+
+def _post_reason(channel: str, emotion_type: str) -> str:
+    template = _POST_TEMPLATES.get(channel, "그 사람의 글에 {word} 번졌다")
+    return template.format(word=_emotion_word(emotion_type))
 
 
 def _sensitivity(big_five: dict[str, float], params: dict[str, Any]) -> float:
@@ -102,8 +167,7 @@ def appraise_interaction(
     return AppraisalResult(
         state=EmotionState(mood=mood, emotions=emotions),
         significant=significant,
-        reason=f"{interaction['type']} — {rule['type']} {intensity:.2f} "
-        f"(플레이어 {payload['player_id']})",
+        reason=_interaction_reason(interaction["type"], rule["type"], intensity),
     )
 
 
@@ -154,7 +218,7 @@ def appraise_goal(
     return AppraisalResult(
         state=EmotionState(mood=mood, emotions=emotions),
         significant=significant,
-        reason=f"{kind} — {rule['type']} {intensity:.2f}",
+        reason=_goal_reason(kind, rule["type"]),
     )
 
 
@@ -217,7 +281,7 @@ def appraise_post(
     return AppraisalResult(
         state=EmotionState(mood=mood, emotions=emotions),
         significant=significant,
-        reason=f"feed.post — {rule['type']} {intensity:.2f} ({author_id}의 글)",
+        reason=_post_reason(channel, rule["type"]),
     )
 
 

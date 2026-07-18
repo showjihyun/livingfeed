@@ -31,7 +31,65 @@ class UpdateResult:
     #: 발행 임계를 넘었나 — True면 호출자가 relationship.state.changed를 적재하고
     #: consume_pending()으로 누적분을 비운다
     publish: bool
+    #: 사람이 읽는 변화 원인 한 줄 — 아래 reason 계약 참조
     reason: str
+
+
+# ── reason 계약 — 사람 문장 (발원지 정화) ─────────────────────────────────
+# reason은 리시트(projector 타임라인)·이야기 사슬(feed-api story)·LLM 컨텍스트에
+# 그대로 실리는 화면 문장이다. 계약: 이벤트 타입 토큰·방향 표기(incoming 등)·
+# 수치·원시 id 금지, 결정적(같은 입력 → 같은 문장 — 리플레이 원칙). 판정용
+# 구조 정보(차원·델타·stage·salience)는 payload의 구조 필드가 이미 나른다 —
+# reason은 사람 몫, 판정은 구조 필드 몫 (이원화).
+
+#: (사건, 방향) → 원인 문장 — params interaction_effects의 전 조합을 덮는다.
+#: 리시트 본문이 "{reason} — {정성 문장}."으로 조립되므로 문장 하나로 완결돼야 한다.
+_INTERACTION_REASONS: dict[tuple[str, str], str] = {
+    ("player.dm.sent", "incoming"): "DM 한 통을 받았다",
+    ("player.comment.posted", "incoming"): "댓글 한 마디를 받았다",
+    ("player.reaction.added", "incoming"): "좋아요로 마음을 건네받았다",
+    ("action.speak", "outgoing"): "먼저 말을 건넸다",
+    ("action.speak", "incoming"): "말을 건네받았다",
+    ("action.help", "outgoing"): "손을 내밀어 도왔다",
+    ("action.help", "incoming"): "도움의 손길을 받았다",
+    ("action.confront", "outgoing"): "따져 물었다",
+    ("action.confront", "incoming"): "따가운 말을 마주했다",
+    ("action.confess", "outgoing"): "마음을 고백했다",
+    ("action.confess", "incoming"): "고백을 받았다",
+    ("action.sever", "outgoing"): "관계를 끊어냈다",
+    ("action.sever", "incoming"): "관계가 끊겼다",
+}
+
+#: 미지 사건의 방향별 폴백 — params에 새 사건이 늘어도 문장은 사람 말로 남는다
+_FALLBACK_INTERACTION_REASONS: dict[str, str] = {
+    "incoming": "마음을 건네받았다",
+    "outgoing": "마음을 건넸다",
+}
+
+#: 감정 코드 → 한국어 어휘(주격 조사 포함) — emotion_consolidation의 전 코드를
+#: 덮는다. projector 리시트·feed-api 이야기 사슬의 한국어 감정 어휘와 같은 결.
+_EMOTION_WORDS: dict[str, str] = {
+    "gratitude": "고마움이",
+    "joy": "기쁨이",
+    "anger": "노여움이",
+    "distress": "괴로움이",
+}
+
+_FALLBACK_EMOTION_WORD = "일렁인 마음이"
+
+#: '깊이'가 붙는 강도 문턱 — 수치는 문장에 싣지 않고 세기로만 남긴다 (남발 금지)
+_STRONG_INTENSITY = 0.7
+
+
+def _interaction_reason(source_kind: str, direction: Direction) -> str:
+    fallback = _FALLBACK_INTERACTION_REASONS.get(direction, "마음이 오갔다")
+    return _INTERACTION_REASONS.get((source_kind, direction), fallback)
+
+
+def _consolidation_reason(emotion_type: str, intensity: float) -> str:
+    word = _EMOTION_WORDS.get(emotion_type, _FALLBACK_EMOTION_WORD)
+    depth = "깊이 " if intensity >= _STRONG_INTENSITY else ""
+    return f"그 사람과의 사이에 {word} {depth}쌓였다"
 
 
 def _apply_deltas(
@@ -70,7 +128,7 @@ def apply_interaction(
     return _apply_deltas(
         state, deltas,
         salience_delta=effect.get("salience", 0.0),
-        reason=f"{source_kind} ({direction})",
+        reason=_interaction_reason(source_kind, direction),
         params=params,
     )
 
@@ -94,7 +152,7 @@ def consolidate_emotion(
     return _apply_deltas(
         state, deltas,
         salience_delta=0.02 * intensity,  # 감정이 일었던 상대는 삶에서 비중이 는다
-        reason=f"감정 응고: {emotion_type} {intensity:.2f}",
+        reason=_consolidation_reason(emotion_type, intensity),
         params=params,
     )
 
@@ -118,7 +176,9 @@ def consolidate_insight(
         salience=min(1.0, state.salience + delta),
         pending=state.pending,
     )
-    return UpdateResult(state=new_state, publish=False, reason="인물 통찰 — 비중이 는다")
+    return UpdateResult(
+        state=new_state, publish=False, reason="그 사람 생각이 마음속 자리를 넓혔다"
+    )
 
 
 def decay(
