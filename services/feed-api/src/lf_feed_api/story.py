@@ -123,6 +123,20 @@ SELECT actor_id, name FROM read.actors
 WHERE world_id = %s AND actor_id = ANY(%s)
 """
 
+# 개입 사슬이 낳은 후속 포스트 — 판정은 loop_health의 '드라마 재생산'과 동일:
+# 개입 correlation(플레이어 댓글·좋아요의 correlation_id = post_id, gateway 규약)을
+# 승계한 feed.post.published가 2차 사건이다. 사슬 뿌리(원 포스트) 자신은 제외.
+# 요약만 나른다(개수 + 최신 1건) — 전체 사슬은 기존 /story가 정본이다.
+_DERIVED_SQL = """
+SELECT count(*) OVER () AS total,
+       event_id, actor_id, payload->>'title' AS title, occurred_at
+FROM es.events
+WHERE world_id = %s AND correlation_id = %s
+  AND type = 'feed.post.published' AND event_id != %s
+ORDER BY global_seq DESC
+LIMIT 1
+"""
+
 
 class StoryReads:
     """읽기 전용 사슬 질의 — pool은 psycopg_pool.AsyncConnectionPool(또는 테스트 대역)."""
@@ -172,6 +186,32 @@ class StoryReads:
             "items": items,
             "origin": origin,
             "started_by_you": started_by_you,
+        }
+
+    async def derived_posts(self, world_id: str, correlation_id: str) -> dict[str, Any]:
+        """이 사슬(correlation)이 낳은 후속 포스트 요약 — "이 대화가 낳은 이야기".
+
+        댓글 스레드에서 2차 사건의 존재를 알리는 배지 재료다 (plan/03 실세 단계:
+        "이 사건, 내가 만들었다"). 최신 1건의 제목·저자 표시 이름만 동봉한다 —
+        원시 id는 사슬 화면 진입 좌표(correlation)로만 쓰이고 문장에 실리지 않는다.
+        """
+        async with self._pool.connection() as conn:
+            row = await (await conn.execute(
+                _DERIVED_SQL, (world_id, correlation_id, correlation_id)
+            )).fetchone()
+        if row is None:
+            return {"count": 0, "latest": None}
+        total, event_id, actor_id, title, occurred_at = row
+        names = await self._actor_names(world_id, {actor_id} if actor_id else set())
+        return {
+            "count": total,
+            "latest": {
+                "post_id": event_id,
+                "title": title,
+                # 이름 그라운딩 — 액터는 read.actors, 주체 없는 사건은 '세계'
+                "author": display_actor(actor_id, {}, names=names, requester=None),
+                "occurred_at": occurred_at,
+            },
         }
 
     async def _actor_names(self, world_id: str, actor_ids: set[str]) -> dict[str, str]:

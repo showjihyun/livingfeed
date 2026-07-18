@@ -29,6 +29,12 @@ interface CommentDoc {
   in_reply_to: string | null;
 }
 
+/** feed-api 댓글 응답의 파생 요약 — 개입 사슬을 승계한 후속 포스트 (es 미가용이면 null) */
+interface DerivedDoc {
+  count: number;
+  latest: { post_id: string; title: string | null; author: string } | null;
+}
+
 /** 포스트에 달린 댓글 하나 — 표시 문장은 호출측이 이름으로 그라운딩한다 */
 export interface PostComment {
   eventId: string;
@@ -38,26 +44,55 @@ export interface PostComment {
   text: string;
   /** 이 관찰자(나)의 댓글 — 자기표시('나')와 말풍선 색의 근거 */
   isMine: boolean;
-  /** 다른 댓글에 대한 답장 (in_reply_to ≠ post_id) — 스레드 들여쓰기 근거 */
-  isReply: boolean;
+  /** 답장 대상 event id — 부모 댓글 밑에 중첩시키는 근거 (최상위는 null/post id) */
+  inReplyTo: string | null;
 }
 
-export async function fetchPostComments(postId: string): Promise<PostComment[] | null> {
+/** "이 대화가 낳은 이야기" — 이 스레드의 개입 사슬을 승계한 후속 포스트 요약.
+ * 사슬 화면 진입 좌표는 포스트 자신(correlation = post_id, gateway 규약)이다. */
+export interface DerivedStories {
+  count: number;
+  /** 가장 최근 후속 포스트의 제목 — 배지의 사람 문장 재료 (없으면 null) */
+  latestTitle: string | null;
+  /** 그 포스트 저자의 표시 이름 (BE display_actor 그라운딩 — 원시 id 아님) */
+  latestAuthor: string | null;
+}
+
+export interface PostThread {
+  comments: PostComment[];
+  /** 파생 요약 — BE es 미가용이면 null (배지 숨김 — 조용한 강등) */
+  derived: DerivedStories | null;
+}
+
+export async function fetchPostComments(postId: string): Promise<PostThread | null> {
   try {
     const response = await fetch(
       `${FEED_API_URL}/posts/${postId}/comments?world_id=${WORLD_ID}&limit=${COMMENTS_LIMIT}`,
     );
     if (!response.ok) throw new Error(`feed-api ${response.status}`);
-    const body = (await response.json()) as { items: CommentDoc[] };
-    return body.items.map((c) => ({
-      eventId: c.event_id,
-      authorKind: c.author_kind,
-      authorId: c.author_id,
-      authorName: c.author_name,
-      text: c.text,
-      isMine: c.author_kind === "player" && c.author_id === PLAYER_ID,
-      isReply: c.in_reply_to !== null && c.in_reply_to !== postId,
-    }));
+    const body = (await response.json()) as {
+      items: CommentDoc[];
+      derived_posts?: DerivedDoc | null;
+    };
+    const derived = body.derived_posts ?? null;
+    return {
+      comments: body.items.map((c) => ({
+        eventId: c.event_id,
+        authorKind: c.author_kind,
+        authorId: c.author_id,
+        authorName: c.author_name,
+        text: c.text,
+        isMine: c.author_kind === "player" && c.author_id === PLAYER_ID,
+        inReplyTo: c.in_reply_to,
+      })),
+      derived: derived
+        ? {
+            count: derived.count,
+            latestTitle: derived.latest?.title ?? null,
+            latestAuthor: derived.latest?.author ?? null,
+          }
+        : null,
+    };
   } catch {
     return null;
   }

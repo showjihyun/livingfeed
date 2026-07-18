@@ -18,10 +18,12 @@ export interface FeedComment {
   text: string;
   bg: string;
   avatarBg: string;
-  /** read.messages 행의 event id — 되읽기(REST)와 라이브(WS) 합류 시 중복 제거 키 (방금 보낸 내 댓글은 없음) */
+  /** read.messages 행의 event id — 되읽기(REST)와 라이브(WS) 합류 시 중복 제거 키 (ack 전의 내 댓글은 없음) */
   eventId?: string;
-  /** 다른 댓글에 대한 답장 (in_reply_to ≠ post_id) — 스레드 들여쓰기 근거 */
-  isReply?: boolean;
+  /** 답장 대상 event id (in_reply_to) — 부모 댓글 밑에 중첩시키는 근거 (최상위는 null/post id) */
+  inReplyTo?: string | null;
+  /** 전송 커맨드 seq — ack(event id 부여) 전의 내 댓글을 식별하는 임시 키 */
+  localSeq?: number;
 }
 
 export interface DmMessage {

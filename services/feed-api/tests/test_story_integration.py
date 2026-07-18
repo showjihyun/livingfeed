@@ -30,9 +30,8 @@ class OneConnPool:
         yield self._conn
 
 
-async def _append_sample(pg, principal: str, name: str, *, head: int) -> None:
-    """샘플 봉투를 원래 event_id·correlation_id 그대로 es에 적재한다."""
-    env = sample(name)
+async def _append_env(pg, principal: str, env: dict, *, head: int) -> None:
+    """봉투 하나를 event_id·correlation_id 그대로 es에 적재한다."""
     key = env.get("actor_id") or env["payload"].get("player_id") or "k"
     await append(
         pg, principal,
@@ -44,6 +43,11 @@ async def _append_sample(pg, principal: str, name: str, *, head: int) -> None:
         )],
         expected_head=head,
     )
+
+
+async def _append_sample(pg, principal: str, name: str, *, head: int) -> None:
+    """샘플 봉투를 원래 모습 그대로 es에 적재한다."""
+    await _append_env(pg, principal, sample(name), head=head)
 
 
 async def seed_chain(pg) -> None:
@@ -141,3 +145,93 @@ async def test_unknown_chain_is_empty_not_error(pg):
     assert body["items"] == []
     assert body["origin"] is None
     assert body["started_by_you"] is False
+
+
+# ── 파생 포스트 요약 — "이 대화가 낳은 이야기" (댓글 스레드 배지 재료) ────
+
+
+async def seed_derived_chain(pg) -> str:
+    """원 포스트 F에 대한 개입 사슬(correlation = F, gateway 규약)과 그 사슬을
+    승계한 후속 포스트 2건을 적재한다. 판정은 loop_health 드라마 재생산과 동일.
+
+    반환: 사슬 좌표(원 포스트 event_id).
+    """
+    await pg.execute("DROP SCHEMA IF EXISTS es CASCADE")
+    await migrate(pg)
+    post = sample("feed.post.published")
+    post_id = post["event_id"]  # …F
+    # 원 포스트 — 자기 뿌리 사슬(correlation = 자기 자신)로 적재해 자기 제외를 실측
+    await _append_env(pg, "engine.feed", dict(post, correlation_id=post_id), head=0)
+    # 플레이어 댓글 — 개입 correlation = post_id (gateway 규약)
+    comment = sample("player.comment.posted")
+    await _append_env(
+        pg, "services.gateway", dict(comment, correlation_id=post_id), head=0
+    )
+    base = post_id[:-1]
+    # 사슬을 승계한 2차 사건 — 아리(선언된 이름)의 후속 포스트
+    await _append_env(pg, "engine.feed", dict(
+        post, event_id=base + "X", correlation_id=post_id,
+        payload=dict(post["payload"], title="김아리, 그 말을 오래 생각하다"),
+    ), head=1)
+    # 가장 최근의 2차 사건 — 이름 미선언 액터 (표시 이름 '누군가' 폴백 실측)
+    await _append_env(pg, "engine.feed", dict(
+        post, event_id=base + "Y", actor_id="a_junho_park", correlation_id=post_id,
+        payload=dict(post["payload"], title="준호, 답을 내놓다"),
+    ), head=0)
+    return post_id
+
+
+async def test_derived_posts_counts_and_surfaces_latest(pg):
+    post_id = await seed_derived_chain(pg)
+    await seed_names(pg)  # 김아리만 선언 — 준호는 미선언
+    summary = await StoryReads(OneConnPool(pg)).derived_posts(WORLD, post_id)
+    # 원 포스트 자신은 세지 않는다 — 사슬이 '낳은' 포스트만 (댓글도 포스트가 아니다)
+    assert summary["count"] == 2
+    latest = summary["latest"]
+    assert latest["post_id"] == post_id[:-1] + "Y"  # 적재 순 마지막
+    assert latest["title"] == "준호, 답을 내놓다"
+    # 이름 그라운딩 — 미선언 액터는 '누군가' 폴백 (원시 id를 문장에 싣지 않는다)
+    assert latest["author"] == "누군가"
+    assert latest["occurred_at"] is not None
+
+
+async def test_derived_posts_grounds_declared_actor_name(pg):
+    post_id = await seed_derived_chain(pg)
+    await seed_names(pg)
+    pool = OneConnPool(pg)
+    # 최신 1건이 선언된 액터라면 read.actors의 이름이 실린다
+    await pg.execute(
+        "DELETE FROM es.events WHERE event_id = %s", (post_id[:-1] + "Y",)
+    )
+    summary = await StoryReads(pool).derived_posts(WORLD, post_id)
+    assert summary["count"] == 1
+    assert summary["latest"]["author"] == "김아리"
+    assert summary["latest"]["title"] == "김아리, 그 말을 오래 생각하다"
+
+
+async def test_derived_posts_empty_chain_is_zero_not_error(pg):
+    await seed_derived_chain(pg)
+    summary = await StoryReads(OneConnPool(pg)).derived_posts(
+        WORLD, "01JZK7Q3W000000000000000ZZ"[:26]
+    )
+    assert summary == {"count": 0, "latest": None}
+
+
+async def test_derived_posts_join_existing_story_surface(pg):
+    """합류 검증 — 배지가 가리키는 곳은 기존 /story 사슬이다 (신규 화면 없음).
+
+    같은 correlation으로 timeline을 조회하면 개입(플레이어 댓글)이 시작점이고
+    2차 사건(후속 포스트)이 같은 사슬 위에 보인다.
+    """
+    post_id = await seed_derived_chain(pg)
+    await seed_names(pg)
+    body = await StoryReads(OneConnPool(pg)).timeline(
+        WORLD, post_id, player_id=PLAYER, limit=50
+    )
+    types = [i["type"] for i in body["items"]]
+    assert types == [
+        "feed.post.published",  # 원 포스트(자기 뿌리 사슬)
+        "player.comment.posted", "feed.post.published", "feed.post.published",
+    ]
+    # 후속 포스트의 요약은 제목 — 사람 문장이 사슬에 실린다
+    assert body["items"][-1]["summary"] == "준호, 답을 내놓다"

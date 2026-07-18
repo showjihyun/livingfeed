@@ -9,6 +9,7 @@
 
 import { useEffect, useState, type KeyboardEvent } from "react";
 
+import type { DerivedStories } from "@/lib/comments";
 import { PLAYER_ID } from "@/lib/config";
 import { ICON } from "@/lib/data";
 import type { LivePost, LiveStatus } from "@/lib/live-feed";
@@ -36,6 +37,57 @@ function avatarColor(seed: string): string {
 /** 세계 사건(작성 액터 없음) 포스트는 댓글 대상이 아니다 — 실제 액터 포스트만 */
 function isCommentable(post: LivePost): boolean {
   return post.authorId.startsWith("a_");
+}
+
+interface ThreadedComment {
+  comment: FeedComment;
+  /** 원 배열 인덱스 — event id 없는 로컬 댓글(ack 전)의 안정 키 */
+  index: number;
+  depth: 0 | 1;
+}
+
+/**
+ * 평평한 시간순 목록 → 깊이 1 스레드. 답장(in_reply_to가 목록의 다른 댓글을
+ * 가리킴)을 그 중첩 뿌리 바로 아래로 모은다 — "나 → 액터가 나에게"의 왕복이
+ * 시간 순서에 흩어지지 않고 한 묶음으로 읽힌다. 답글의 답글은 최상위 조상
+ * 밑에 붙인다(깊이 1 평탄화 — 라우터의 깊이 1 규약과 같은 결). 부모가 목록에
+ * 없는 답장(되읽기 창 밖·좋아요 인사처럼 댓글 아닌 원인)은 최상위로 남긴다.
+ */
+export function threadComments(comments: FeedComment[], postId: string): ThreadedComment[] {
+  const byEventId = new Map<string, number>();
+  comments.forEach((c, i) => {
+    if (c.eventId) byEventId.set(c.eventId, i);
+  });
+  const rootOf = (start: number): number => {
+    let at = start;
+    const seen = new Set<number>([at]);
+    for (;;) {
+      const target = comments[at].inReplyTo;
+      if (!target || target === postId) return at; // 최상위(포스트 직속)
+      const parent = byEventId.get(target);
+      if (parent === undefined || seen.has(parent)) return at; // 부모 미상·순환 방어
+      seen.add(parent);
+      at = parent;
+    }
+  };
+  const tops: number[] = [];
+  const repliesByRoot = new Map<number, number[]>();
+  comments.forEach((_, i) => {
+    const root = rootOf(i);
+    if (root === i) {
+      tops.push(i);
+      return;
+    }
+    const siblings = repliesByRoot.get(root);
+    if (siblings) siblings.push(i);
+    else repliesByRoot.set(root, [i]);
+  });
+  return tops.flatMap((top): ThreadedComment[] => [
+    { comment: comments[top], index: top, depth: 0 },
+    ...(repliesByRoot.get(top) ?? []).map(
+      (i): ThreadedComment => ({ comment: comments[i], index: i, depth: 1 }),
+    ),
+  ]);
 }
 
 function Avatar({ seed, label, size }: { seed: string; label: string; size: number }) {
@@ -206,6 +258,7 @@ function LivePostCard({
   liked,
   onLike,
   comments,
+  derived,
   typing,
   onComment,
   authorLabel,
@@ -214,6 +267,8 @@ function LivePostCard({
   liked: boolean;
   onLike: (post: LivePost) => void;
   comments: FeedComment[];
+  /** "이 대화가 낳은 이야기" — 이 스레드의 개입 사슬을 승계한 후속 포스트 요약 */
+  derived?: DerivedStories;
   typing: boolean;
   onComment: (post: LivePost, text: string) => void;
   authorLabel: string;
@@ -232,6 +287,14 @@ function LivePostCard({
   const [storyOpen, setStoryOpen] = useState(false);
   // 사슬이 1건뿐이면 따라갈 이야기가 없다 — 어포던스를 만들지 않는다
   const canFollowStory = story !== null && story.items.length > 1;
+
+  // 이 대화가 낳은 이야기 — 스레드의 개입 사슬(correlation = 포스트 자신)이 낳은
+  // 2차 사건이 있을 때만 사슬을 실측한다. 화면은 기존 /story 사슬 표면과 합류한다
+  // (plan/03 실세 단계: "이 사건, 내가 만들었다" — 신규 화면 발명 금지).
+  const dialogueStory = useStory(derived ? post.id : undefined);
+  const [dialogueOpen, setDialogueOpen] = useState(false);
+  const canFollowDialogue =
+    derived !== undefined && dialogueStory !== null && dialogueStory.items.length > 0;
 
   const submit = () => {
     const text = draft.trim();
@@ -388,22 +451,54 @@ function LivePostCard({
             {storyOpen ? "이야기 접기" : "이야기 따라가기"}
           </div>
         )}
+        {canFollowDialogue && (
+          // 2차 사건의 존재 — 이 스레드의 대화가 세계에 후속 이야기를 낳았다
+          <div
+            onClick={() => setDialogueOpen((open) => !open)}
+            title={
+              derived?.latestTitle
+                ? `가장 최근: ${derived.latestTitle}`
+                : undefined
+            }
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "6px 13px",
+              background: dialogueOpen ? STORY_VIOLET : "#F4EFFC",
+              color: dialogueOpen ? "#fff" : STORY_VIOLET,
+              borderRadius: 9999,
+              fontSize: 13,
+              fontWeight: 800,
+              cursor: "pointer",
+              userSelect: "none",
+            }}
+          >
+            <Icon d={ICON.sparkles} size={14} />{" "}
+            {dialogueOpen
+              ? "낳은 이야기 접기"
+              : derived && derived.count > 1
+                ? `이 대화가 낳은 이야기 · ${derived.count}`
+                : "이 대화가 낳은 이야기"}
+          </div>
+        )}
       </div>
 
       {storyOpen && story && <StoryThread story={story} />}
+      {dialogueOpen && dialogueStory && <StoryThread story={dialogueStory} />}
 
-      {comments.map((cm, i) => (
+      {threadComments(comments, post.id).map(({ comment: cm, index, depth }) => (
         <div
-          // 되읽은 댓글은 event id가 안정 키 — 방금 쓴 내 댓글(id 미부여)만 순번
-          key={cm.eventId ?? `local-${i}`}
+          // 되읽은 댓글은 event id가 안정 키 — ack 전의 내 댓글만 순번
+          key={cm.eventId ?? `local-${index}`}
           style={{
             display: "flex",
             gap: 10,
             padding: "12px 14px",
             background: cm.bg,
             borderRadius: 14,
-            // 답장(in_reply_to ≠ post_id)은 살짝 들여쓴다 — 깊이 1 스레드의 결
-            marginLeft: cm.isReply ? 26 : 0,
+            // 답장은 부모 바로 아래에 들여쓴다 — 깊이 1 스레드의 결
+            marginLeft: depth ? 26 : 0,
           }}
         >
           <Avatar seed={cm.author} label={cm.author} size={28} />
@@ -461,6 +556,7 @@ export function LivePosts({
   liked,
   onLike,
   commentsByPost,
+  derivedByPost,
   typingPosts,
   onComment,
   authorName,
@@ -470,6 +566,8 @@ export function LivePosts({
   liked: ReadonlySet<string>;
   onLike: (post: LivePost) => void;
   commentsByPost: Record<string, FeedComment[]>;
+  /** 포스트별 "이 대화가 낳은 이야기" 요약 — 없으면 배지도 없다 */
+  derivedByPost: Record<string, DerivedStories>;
   typingPosts: ReadonlySet<string>;
   onComment: (post: LivePost, text: string) => void;
   authorName: (actorId: string) => string;
@@ -526,6 +624,7 @@ export function LivePosts({
           liked={liked.has(post.id)}
           onLike={onLike}
           comments={commentsByPost[post.id] ?? []}
+          derived={derivedByPost[post.id]}
           typing={typingPosts.has(post.id)}
           onComment={onComment}
           authorLabel={authorName(post.authorId)}

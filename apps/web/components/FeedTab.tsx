@@ -1,3 +1,4 @@
+import type { DerivedStories } from "@/lib/comments";
 import type { LivePost, LiveStatus } from "@/lib/live-feed";
 import type { FeedComment } from "@/lib/types";
 
@@ -12,6 +13,8 @@ interface FeedTabProps {
   onLikeLive: (post: LivePost) => void;
   /** 포스트별 댓글·타이핑·작성 핸들러 — 댓글은 실제 라이브 포스트에 붙는다 */
   commentsByPost: Record<string, FeedComment[]>;
+  /** 포스트별 "이 대화가 낳은 이야기" — 개입 사슬을 승계한 후속 포스트 요약 */
+  derivedByPost: Record<string, DerivedStories>;
   typingPosts: ReadonlySet<string>;
   onComment: (post: LivePost, text: string) => void;
   /** actor_id → 표시 이름 (라이브 identity, 하드코딩 금지) */
@@ -26,6 +29,7 @@ export function FeedTab({
   likedLive,
   onLikeLive,
   commentsByPost,
+  derivedByPost,
   typingPosts,
   onComment,
   authorName,
@@ -145,6 +149,7 @@ export function FeedTab({
           liked={likedLive}
           onLike={onLikeLive}
           commentsByPost={commentsByPost}
+          derivedByPost={derivedByPost}
           typingPosts={typingPosts}
           onComment={onComment}
           authorName={authorName}

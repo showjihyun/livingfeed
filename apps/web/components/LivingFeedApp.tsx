@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { TOAST_DURATION_MS, WORLD_MIN_START, formatWorldTime } from "@/lib/data";
 import { useActorDirectory } from "@/lib/actors";
+import type { DerivedStories } from "@/lib/comments";
 import { fetchPostComments } from "@/lib/comments";
 import { FOCUS_ACTOR_ID, PLAYER_NAME } from "@/lib/config";
 import { useRelationshipGraph } from "@/lib/graph";
@@ -58,6 +59,8 @@ export function LivingFeedApp() {
   // 라이브 포스트별 댓글 — 댓글은 특정 데모 카드가 아니라 실제 포스트에 붙는다
   const [commentsByPost, setCommentsByPost] = useState<Record<string, FeedComment[]>>({});
   const [typingPosts, setTypingPosts] = useState<ReadonlySet<string>>(new Set());
+  // 포스트별 "이 대화가 낳은 이야기" 요약 — 개입 사슬을 승계한 후속 포스트 (plan/03)
+  const [derivedByPost, setDerivedByPost] = useState<Record<string, DerivedStories>>({});
 
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [selectedActor, setSelectedActor] = useState<string | null>(null);
@@ -73,6 +76,9 @@ export function LivingFeedApp() {
   tabRef.current = tab;
   const openDmActorRef = useRef(openDmActor);
   openDmActorRef.current = openDmActor;
+
+  // 적재 확인을 기다리는 댓글 커맨드 — seq → post id (ack가 오면 event id를 채운다)
+  const pendingCommentAcks = useRef<Map<number, string>>(new Map());
 
   const after = useCallback((ms: number, fn: () => void) => {
     timers.current.push(window.setTimeout(fn, ms));
@@ -143,10 +149,16 @@ export function LivingFeedApp() {
       if (commentsRequested.current.has(post.id)) continue;
       commentsRequested.current.add(post.id);
       void fetchPostComments(post.id).then((loaded) => {
-        if (!loaded || loaded.length === 0) return;
+        if (!loaded) return;
+        // 파생 요약 — 이 대화가 낳은 후속 포스트의 존재 (배지·사슬 어포던스 재료)
+        if (loaded.derived && loaded.derived.count > 0) {
+          const derived = loaded.derived;
+          setDerivedByPost((prev) => ({ ...prev, [post.id]: derived }));
+        }
+        if (loaded.comments.length === 0) return;
         mergeLoadedComments(
           post.id,
-          loaded.map((c) => ({
+          loaded.comments.map((c) => ({
             // 이름 그라운딩: 액터는 BE 동봉 이름(없으면 디렉터리→'누군가'), 나는 자기표시
             author: c.isMine
               ? MY_COMMENT_AUTHOR
@@ -155,7 +167,7 @@ export function LivingFeedApp() {
                 : "다른 관찰자",
             text: c.text,
             eventId: c.eventId,
-            isReply: c.isReply,
+            inReplyTo: c.inReplyTo,
             ...(c.isMine ? ME_COMMENT : ACTOR_COMMENT),
           })),
         );
@@ -280,6 +292,8 @@ export function LivingFeedApp() {
                   author: authorName(reply.actorId),
                   text: reply.text,
                   eventId: reply.eventId,
+                  // 답장 좌표 — 내 댓글(ack로 event id를 받은) 밑에 중첩된다
+                  inReplyTo: reply.inReplyTo,
                   ...ACTOR_COMMENT,
                 },
               ],
@@ -287,6 +301,21 @@ export function LivingFeedApp() {
           });
         });
       }
+    },
+    // 댓글 커맨드의 적재 확인 — 방금 쓴 내 댓글에 event id를 채운다.
+    // 이게 있어야 액터의 라이브 답장(in_reply_to = 내 댓글 id)이 내 말 밑에 붙는다.
+    onAck: (seq, eventId) => {
+      const postId = pendingCommentAcks.current.get(seq);
+      if (!postId) return; // 댓글이 아닌 커맨드(좋아요·팔로우)의 ack
+      pendingCommentAcks.current.delete(seq);
+      setCommentsByPost((prev) => {
+        const current = prev[postId];
+        if (!current) return prev;
+        return {
+          ...prev,
+          [postId]: current.map((c) => (c.localSeq === seq ? { ...c, eventId } : c)),
+        };
+      });
     },
   });
 
@@ -311,18 +340,22 @@ export function LivingFeedApp() {
     (post: LivePost, text: string) => {
       const trimmed = text.trim();
       if (!trimmed) return;
+      // 실세계 경로 — player.comment.posted 적재, 응답은 onReply(channel=comment)로 온다.
+      // 오프라인이면 답장은 오지 않는다 (세계가 살아있을 때만 반응이 있다).
+      const seq = session.sendComment(post.authorId, post.id, trimmed);
+      if (seq !== null) pendingCommentAcks.current.set(seq, post.id);
       setCommentsByPost((prev) => ({
         ...prev,
         [post.id]: [
           ...(prev[post.id] ?? []),
-          { author: MY_COMMENT_AUTHOR, text: trimmed, ...ME_COMMENT },
+          // localSeq — ack(event id)가 오면 이 댓글이 답장 중첩의 부모가 된다
+          { author: MY_COMMENT_AUTHOR, text: trimmed, ...ME_COMMENT,
+            ...(seq !== null ? { localSeq: seq } : {}) },
         ],
       }));
       setInterventions((n) => n + 1);
       setCoachDismissed(true);
-      // 실세계 경로 — player.comment.posted 적재, 응답은 onReply(channel=comment)로 온다.
-      // 오프라인이면 답장은 오지 않는다 (세계가 살아있을 때만 반응이 있다).
-      if (session.sendComment(post.authorId, post.id, trimmed)) {
+      if (seq !== null) {
         setTypingPosts((prev) => new Set(prev).add(post.id));
         toast({
           icon: "check",
@@ -445,6 +478,7 @@ export function LivingFeedApp() {
             likedLive={likedLive}
             onLikeLive={likeLivePost}
             commentsByPost={commentsByPost}
+            derivedByPost={derivedByPost}
             typingPosts={typingPosts}
             onComment={commentOnPost}
             authorName={authorName}

@@ -272,10 +272,24 @@ def create_app(
 
         라이브(SSE/WS)로 본 댓글이 새로고침에도 남게 하는 되읽기 경로다 —
         도파민 루프(개입→반응 확인)의 영속 화면. PG 미가용이면 503 (격리 규약).
+
+        derived_posts: 이 스레드의 개입 사슬(correlation_id = post_id, gateway
+        규약)을 승계한 후속 feed.post.published 요약 — "이 대화가 낳은 이야기"
+        배지 재료 (plan/03, loop_health 드라마 재생산과 같은 판정). 사슬 요약은
+        장식이다 — es 미가용이 댓글 되읽기를 죽이면 안 된다 (null 강등).
         """
-        return await _reads().post_comments(
+        result = await _reads().post_comments(
             world_id, post_id, limit=min(limit, cfg.max_limit)
         )
+        story = getattr(app.state, "story", None)
+        derived = None
+        if story is not None:
+            try:
+                derived = await story.derived_posts(world_id, post_id)
+            except Exception as e:
+                logger.warning("파생 포스트 요약 실패(배지 생략): %s", e)
+        result["derived_posts"] = derived
+        return result
 
     @app.get("/messages/threads")
     async def message_threads(

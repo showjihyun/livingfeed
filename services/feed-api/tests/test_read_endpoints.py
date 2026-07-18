@@ -43,6 +43,22 @@ class FakeReads:
         return {"post_id": post_id, "items": []}
 
 
+class FakeStory:
+    """댓글 엔드포인트가 합성하는 파생 요약(derived_posts) 대역 — /story 본편의
+    계약은 test_story_endpoint가 맡는다."""
+
+    def __init__(self, derived: dict | None = None, *, error: bool = False) -> None:
+        self.calls: list[tuple] = []
+        self.derived = derived if derived is not None else {"count": 0, "latest": None}
+        self.error = error
+
+    async def derived_posts(self, world_id, correlation_id):
+        self.calls.append(("derived_posts", world_id, correlation_id))
+        if self.error:
+            raise RuntimeError("es down")
+        return self.derived
+
+
 class FakeTimelineRedis:
     """캐시 겸 타임라인 대역 — /feed가 쓰는 get/setex와 zrevrange만 구현한다."""
 
@@ -66,10 +82,13 @@ def entry(event_id: str, visibility: str) -> dict:
     return {"event_id": event_id, "visibility": visibility, "title": "t"}
 
 
-def make_client() -> tuple[TestClient, FakeReads, FakeTimelineRedis]:
+def make_client(story: FakeStory | None = None) -> tuple[TestClient, FakeReads, FakeTimelineRedis]:
     reads, cache = FakeReads(), FakeTimelineRedis()
     cfg = Config(opensearch_url="http://unused", redis_url="redis://unused")
-    app = create_app(cfg=cfg, search=object(), cache=cache, reads=reads)  # search는 안 닿는다
+    app = create_app(  # search는 안 닿는다 — story는 댓글의 파생 요약 합성에 닿는다
+        cfg=cfg, search=object(), cache=cache, reads=reads,
+        story=story if story is not None else FakeStory(),
+    )
     return TestClient(app), reads, cache
 
 
@@ -141,8 +160,47 @@ def test_post_comments_delegates_with_clamped_limit():
     client, reads, _ = make_client()
     resp = client.get(f"/posts/{CURSOR}/comments", params={"limit": 500})
     assert resp.status_code == 200
-    assert resp.json() == {"post_id": CURSOR, "items": []}
+    assert resp.json() == {
+        "post_id": CURSOR, "items": [],
+        "derived_posts": {"count": 0, "latest": None},
+    }
     assert reads.calls[-1] == ("post_comments", "w_main", CURSOR, 100)
+
+
+def test_post_comments_composes_derived_summary():
+    """댓글 응답에 파생 요약이 실린다 — "이 대화가 낳은 이야기" 배지 재료.
+
+    사슬 좌표는 post_id 자신이다 (gateway 규약: 개입 correlation = post_id).
+    """
+    derived = {
+        "count": 2,
+        "latest": {"post_id": "01JZK7Q3W0000000000000000Z", "title": "아리, 응답하다",
+                   "author": "김아리", "occurred_at": "2026-07-11T09:20:00Z"},
+    }
+    story = FakeStory(derived)
+    client, _, _ = make_client(story)
+    body = client.get(f"/posts/{CURSOR}/comments").json()
+    assert body["derived_posts"] == derived
+    assert story.calls == [("derived_posts", "w_main", CURSOR)]
+
+
+def test_post_comments_survive_derived_failure():
+    """파생 요약은 장식이다 — es 미가용이 댓글 되읽기를 죽이면 안 된다 (null 강등)."""
+    client, reads, _ = make_client(FakeStory(error=True))
+    resp = client.get(f"/posts/{CURSOR}/comments")
+    assert resp.status_code == 200
+    assert resp.json()["derived_posts"] is None
+    assert reads.calls[-1][0] == "post_comments"  # 댓글 본문은 그대로 나간다
+
+
+def test_post_comments_derived_null_when_story_down():
+    """story 경로가 통째로 내려앉아도(PG es 미가용) 댓글은 산다 — 격리 규약."""
+    cfg = Config(opensearch_url="http://unused", redis_url="redis://unused")
+    app = create_app(cfg=cfg, search=object(), cache=FakeTimelineRedis(), reads=FakeReads())
+    app.state.story = None  # lifespan이 PG 실패로 내려놓은 상태를 재현
+    resp = TestClient(app).get(f"/posts/{CURSOR}/comments")
+    assert resp.status_code == 200
+    assert resp.json()["derived_posts"] is None
 
 
 def test_post_comments_rejects_bad_post_id():

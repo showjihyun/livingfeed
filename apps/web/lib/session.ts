@@ -32,15 +32,20 @@ export interface ActorReply {
   postId: string | null;
   /** 봉투 event_id — 되읽은 댓글(read.messages)과의 중복 제거 키 */
   eventId: string;
+  /** 답장 대상 event id — 내 댓글 밑에 중첩시키는 근거 (최상위 댓글은 post id) */
+  inReplyTo: string | null;
 }
 
 export function useActorSession(opts: {
   enabled: boolean;
   onReply: (reply: ActorReply) => void;
+  /** 커맨드 적재 확인 — seq는 sendComment가 반환한 값, eventId는 적재된 봉투의 id */
+  onAck?: (seq: number, eventId: string) => void;
 }): {
   status: SessionStatus;
   sendDm: (targetActorId: string, text: string) => boolean;
-  sendComment: (targetActorId: string, postId: string, text: string) => boolean;
+  /** 반환: 커맨드 seq(ack 대응 키) — 오프라인이면 null (호출측이 데모로 폴백) */
+  sendComment: (targetActorId: string, postId: string, text: string) => number | null;
   addReaction: (targetActorId: string, postId: string) => boolean;
   setFollow: (targetActorId: string, following: boolean) => boolean;
 } {
@@ -49,6 +54,8 @@ export function useActorSession(opts: {
   const liveRef = useRef(false);
   const onReplyRef = useRef(opts.onReply);
   onReplyRef.current = opts.onReply;
+  const onAckRef = useRef(opts.onAck);
+  onAckRef.current = opts.onAck;
 
   useEffect(() => {
     if (!opts.enabled) return;
@@ -63,8 +70,11 @@ export function useActorSession(opts: {
           text: p.text,
           postId: p.post_id,
           eventId: envelope.event_id,
+          inReplyTo: p.in_reply_to,
         });
       },
+      // 적재 확인 — 방금 쓴 내 댓글에 event id를 채워 답장 중첩의 부모가 되게 한다
+      onAck: (seq, eventId) => onAckRef.current?.(seq, eventId),
       onStatus: (s) => {
         if (s === "open") {
           sawOpen = true;
@@ -95,9 +105,9 @@ export function useActorSession(opts: {
     return true;
   }, []);
   const sendComment = useCallback((targetActorId: string, postId: string, text: string) => {
-    if (!liveRef.current || !handleRef.current) return false;
-    handleRef.current.sendComment(targetActorId, postId, text);
-    return true;
+    if (!liveRef.current || !handleRef.current) return null;
+    // seq를 흘려보낸다 — ack(event id)와 짝지어 내 댓글이 스레드의 부모가 된다
+    return handleRef.current.sendComment(targetActorId, postId, text);
   }, []);
   const addReaction = useCallback((targetActorId: string, postId: string) => {
     if (!liveRef.current || !handleRef.current) return false;
