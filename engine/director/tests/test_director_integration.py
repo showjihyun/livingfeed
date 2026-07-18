@@ -449,6 +449,9 @@ async def test_review_season_folds_previous_day_as_log(conn):
     assert report["tick_range"] == [0, 360]
     assert report["interventions"]["total"] == 2
     assert report["interventions"]["by_selector"] == {"rule": 2}
+    # 루프 헬스 동봉 (plan/02 §측정) — 플레이어 개입 없는 날의 우아한 영값
+    assert report["loop_health"]["interventions"]["total"] == 0
+    assert report["loop_health"]["responses"]["response_rate"] is None
     # day 1은 조용했다 — 빈 리포트도 리포트다
     quiet = await director.review_season(conn, 1)
     assert quiet["interventions"]["total"] == 0

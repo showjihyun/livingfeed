@@ -25,6 +25,7 @@ from psycopg import AsyncConnection
 
 from lf_director.client import DirectorAiClient
 from lf_director.config import Config
+from lf_director.loop_health import loop_health
 from lf_director.planner import (
     ARC_SYSTEM,
     DIRECTOR_SYSTEM,
@@ -311,6 +312,14 @@ class Director:
         except Exception:
             logger.exception("시즌 회고 실패 — 연출은 계속된다 (day=%d)", day)
             return None
+        # 루프 헬스 — 도파민 루프의 서버측 프록시 (plan/02 §측정). 회고 로그에
+        # 동봉하되, 실패해도 회고·연출은 계속된다 (회고는 눈이지 손이 아니다)
+        try:
+            report["loop_health"] = await loop_health(
+                conn, self._cfg.world_id, day, interval_ticks=self._cfg.season_interval_ticks
+            )
+        except Exception:
+            logger.exception("루프 헬스 계측 실패 — 회고는 계속된다 (day=%d)", day)
         logger.info(
             "시즌 회고 day=%d: %s", day, json.dumps(report, ensure_ascii=False)
         )
