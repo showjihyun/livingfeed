@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/actor.identity.retired.schema.json",
+  "title": "ActorIdentityRetired",
+  "description": "페르소나가 세계에서 은퇴한다 — 스튜디오 삭제(DELETE)의 이벤트화. es는 불변이라 삭제도 역사의 한 사건이다: gateway가 적재하고, read 모델(pg/os/kuzu/redis 프로젝터)이 이 이벤트를 소비해 그 액터의 글·댓글·관계·프로필의 소멸을 집행한다. 리플레이(--rebuild --from-es)해도 같은 소멸이 재생성된다 (ADR-003 계약 3 — 파생물 원칙).",
+  "type": "object",
+  "properties": {
+    "actor_id": {
+      "type": "string",
+      "description": "은퇴하는 액터 — 봉투 actor_id/stream_key와 동일 (소비측 소멸 키)",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "description": "은퇴 시점의 표시 이름 — read 모델이 이미 지워진 뒤의 서사·로그 재료",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "retired_by": {
+      "type": "string",
+      "description": "은퇴를 결정한 플레이어 (페르소나 스튜디오) — 저자성의 마지막 표식",
+      "pattern": "^p_[a-z0-9_]+$"
+    }
+  },
+  "required": ["actor_id", "name", "retired_by"],
+  "additionalProperties": false
+}

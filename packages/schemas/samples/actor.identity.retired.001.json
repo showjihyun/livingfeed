@@ -1,0 +1,17 @@
+{
+  "event_id": "01JZK7Q3W2000000000000000R",
+  "stream": "actor",
+  "type": "actor.identity.retired",
+  "schema_version": 1,
+  "world_id": "w_main",
+  "actor_id": "a_aria_kim",
+  "tick": 0,
+  "occurred_at": "2026-07-18T09:00:00Z",
+  "causation_id": null,
+  "correlation_id": "01JZK7Q3W2000000000000000R",
+  "payload": {
+    "actor_id": "a_aria_kim",
+    "name": "김아리",
+    "retired_by": "p_observer_0417"
+  }
+}

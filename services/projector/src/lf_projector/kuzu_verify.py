@@ -7,6 +7,10 @@
 기대 집합: es의 relationship 스트림 키("from|to") 전부 — state.changed와
 milestone 어느 쪽이든 첫 이벤트가 그래프 엣지를 만든다 (graph.py HANDLERS).
 비교는 엣지 존재 집합 수준이다 — 차원 값의 드리프트 검증은 후속.
+
+은퇴(actor.identity.retired)도 원천의 일부다: 끝점의 은퇴가 그 키의 마지막
+관계 이벤트보다 나중이면 간선은 소멸했다 (apply_retired의 양방향 소멸과 동형,
+event_id ULID 비교 — ADR-002) — 은퇴 액터 때문에 어긋나지 않는다.
 """
 
 from __future__ import annotations
@@ -22,8 +26,12 @@ logger = logging.getLogger("lf.projector.kuzu_verify")
 
 #: read-only 원천 질의 — lf_eventstore에 스트림 키 열거 API가 없어 직접 SELECT한다
 _EXPECTED_SQL = (
-    "SELECT DISTINCT stream_key FROM es.events "
-    "WHERE world_id = %s AND stream = 'relationship'"
+    "SELECT stream_key, max(event_id) FROM es.events "
+    "WHERE world_id = %s AND stream = 'relationship' GROUP BY stream_key"
+)
+_RETIRED_SQL = (
+    "SELECT actor_id, max(event_id) FROM es.events "
+    "WHERE world_id = %s AND type = 'actor.identity.retired' GROUP BY actor_id"
 )
 _WORLDS_SQL = "SELECT DISTINCT world_id FROM es.events WHERE stream = 'relationship'"
 
@@ -42,13 +50,23 @@ def compare(expected: set[tuple[str, str]], actual: set[tuple[str, str]]) -> dic
 
 
 async def expected_edges(conn: AsyncConnection, world_id: str) -> set[tuple[str, str]]:
-    """원천에서 파생되는 기대 엣지 집합 — relationship 스트림 키가 곧 방향 엣지다."""
+    """원천에서 파생되는 기대 엣지 집합 — relationship 스트림 키가 곧 방향 엣지다.
+
+    끝점의 은퇴가 그 키의 마지막 관계 이벤트보다 나중이면 간선은 소멸했다
+    (apply_retired와 동형). 은퇴 뒤의 새 관계 이벤트는 간선을 되살린다.
+    """
     rows = await (await conn.execute(_EXPECTED_SQL, (world_id,))).fetchall()
+    retired: dict[str, str] = dict(
+        await (await conn.execute(_RETIRED_SQL, (world_id,))).fetchall()
+    )
     edges: set[tuple[str, str]] = set()
-    for (stream_key,) in rows:
+    for stream_key, last_event in rows:
         from_id, _, to_id = stream_key.partition("|")
-        if to_id:  # 형식 밖 키는 엣지가 아니다 (전방 호환 무시)
-            edges.add((from_id, to_id))
+        if not to_id:  # 형식 밖 키는 엣지가 아니다 (전방 호환 무시)
+            continue
+        if last_event <= retired.get(from_id, "") or last_event <= retired.get(to_id, ""):
+            continue  # 은퇴가 마지막 관계 이벤트 이후다 — 소멸한 간선
+        edges.add((from_id, to_id))
     return edges
 
 

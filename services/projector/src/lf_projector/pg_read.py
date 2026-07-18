@@ -15,6 +15,10 @@
   (ADR-013/plan-08, 프로필 "인생의 장"). 다음 계획이 자리를 덮어쓴다
 - actor_arc_history: 같은 이벤트의 append-only 연대기 — 장의 흐름이 남는다
   (프로필 "인생의 연대기"). 한 이벤트가 두 테이블에 프로젝션되는 첫 사례
+
+소멸도 프로젝션이다: actor.identity.retired(스튜디오 삭제)가 그 액터의 행과
+그의 포스트 스레드를 지운다 — es는 불변, read 모델이 이벤트를 소비해 집행한다
+(_RETIRE_SQLS/_RETIRE_THREADS_SQL — 리플레이해도 같은 소멸이 재생성된다).
 """
 
 from __future__ import annotations
@@ -176,6 +180,45 @@ VALUES (%s, %s, %s, %s, %s, %s::timestamptz)
 ON CONFLICT (event_id) DO NOTHING
 """
 
+#: 은퇴 소멸 — 스튜디오 삭제(actor.identity.retired)의 read 스키마 집행
+RETIRED_TYPE = "actor.identity.retired"
+
+#: 그 액터의 행 전부. event_id(ULID) < 은퇴 이벤트 가드가 재전달·순서 뒤집힘을
+#: 흡수한다 — 은퇴 뒤에 도착한(더 큰 ULID) 재선언·새 사건은 살아남는다 (신념
+#: 가드와 같은 좌표계, ADR-002). 신념은 그가 품은 것(actor_id)과 그를 향한
+#: 것(about_id) 양쪽을 지운다 — kuzu의 양방향 간선 소멸과 동형 (매달린 참조 방지).
+_RETIRE_SQLS: tuple[str, ...] = (
+    "DELETE FROM read.actors"
+    " WHERE world_id = %(w)s AND actor_id = %(a)s AND event_id < %(e)s",
+    "DELETE FROM read.actor_episodes"
+    " WHERE world_id = %(w)s AND actor_id = %(a)s AND event_id < %(e)s",
+    "DELETE FROM read.actor_beliefs"
+    " WHERE world_id = %(w)s AND (actor_id = %(a)s OR about_id = %(a)s)"
+    " AND event_id < %(e)s",
+    "DELETE FROM read.actor_arcs"
+    " WHERE world_id = %(w)s AND actor_id = %(a)s AND event_id < %(e)s",
+    "DELETE FROM read.actor_arc_history"
+    " WHERE world_id = %(w)s AND actor_id = %(a)s AND event_id < %(e)s",
+    # ① 그 액터가 쓴 메시지 — DM 답장·댓글 전부 (남의 포스트에 단 것 포함).
+    # 플레이어가 쓴 메시지(sender='player')는 플레이어의 역사라 남는다 — 단
+    # 그의 포스트 스레드에 속한 것은 ②가 함께 지운다
+    "DELETE FROM read.messages"
+    " WHERE world_id = %(w)s AND actor_id = %(a)s AND sender = 'actor'"
+    " AND event_id < %(e)s",
+)
+
+#: ② 그 액터의 포스트에 달린 스레드 전체 — 부모(포스트)가 사라지는데 댓글만
+#: 남으면 고아다. 그의 포스트 post_id 집합은 은퇴 봉투로는 알 수 없다: 같은
+#: PG에 사는 es(SoT)에서 역추적한다 — replay/verify와 같은 원천이라 리플레이
+#: 시점에도 같은 집합이 나온다 (결정적). es가 없는 DB면 지울 스레드도 없다.
+_RETIRE_THREADS_SQL = """
+DELETE FROM read.messages m
+WHERE m.world_id = %(w)s AND m.event_id < %(e)s AND m.post_id IN (
+    SELECT event_id FROM es.events
+    WHERE world_id = %(w)s AND type = 'feed.post.published' AND actor_id = %(a)s
+)
+"""
+
 #: 정체성은 (world, actor) 자리 단위 upsert — 재선언(재시작 등)은 최신 ULID가 이긴다
 _ACTOR_SQL = """
 INSERT INTO read.actors
@@ -295,9 +338,29 @@ class ReadStore:
 
     async def apply(self, envelope: dict[str, Any]) -> bool:
         """봉투 하나를 반영한다 (타입에 걸린 전 테이블). 반환: 프로젝션 대상이었는가."""
+        if envelope["type"] == RETIRED_TYPE:
+            await self._retire(envelope)
+            return True
         projections = PROJECTIONS.get(envelope["type"])
         if projections is None:
             return False
         for sql, params in projections:
             await self._conn.execute(sql, params(envelope))
         return True
+
+    async def _retire(self, envelope: dict[str, Any]) -> None:
+        """은퇴 소멸 — 그 액터의 행 + 그의 포스트 스레드 (재실행은 무연산 — 멱등)."""
+        params = {
+            "w": envelope["world_id"],
+            "a": envelope["payload"]["actor_id"],
+            "e": envelope["event_id"],
+        }
+        if await self._has_es():
+            await self._conn.execute(_RETIRE_THREADS_SQL, params)
+        for sql in _RETIRE_SQLS:
+            await self._conn.execute(sql, params)
+
+    async def _has_es(self) -> bool:
+        """es(SoT)가 같은 DB에 있는가 — 은퇴 스레드 역추적의 전제 (없으면 생략)."""
+        row = await (await self._conn.execute("SELECT to_regclass('es.events')")).fetchone()
+        return row[0] is not None

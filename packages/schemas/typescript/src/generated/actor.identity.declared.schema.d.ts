@@ -28,4 +28,8 @@ export interface ActorIdentityDeclared {
     description: string;
     priority: number;
   }[];
+  /**
+   * 이 인물을 빚은 플레이어 (페르소나 스튜디오) — 저자성 표식의 원천. 시스템 태생이면 null/생략 (하위 호환)
+   */
+  created_by?: string | null;
 }

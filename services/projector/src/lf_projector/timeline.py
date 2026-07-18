@@ -277,6 +277,27 @@ class TimelineStore:
             return
         await self.push(envelope["world_id"], envelope["payload"]["to_id"], doc)
 
+    async def retire_actor(self, world_id: str, actor_id: str) -> int:
+        """은퇴 소멸 (actor.identity.retired) — 그 액터의 흔적을 타임라인에서 걷는다.
+
+        ① 팔로워 인덱스·거부 마커 키 삭제 — 사라진 액터는 팬아웃 대상이 아니다.
+        ② 플레이어 타임라인의 그 액터 발신 엔트리 삭제 — 모든 엔트리 doc은
+           actor_id(발신 주체: 포스트 작성자·답장 액터·리시트의 마음 주인)를
+           지니므로 발신분 식별이 완전하다. 한계(수용): participants에만 낀
+           남의 포스트는 남는다 — 남의 글은 남의 역사다 (os-projector와 동일).
+        재실행은 지울 것이 없어 무연산이다 (자연 멱등). 반환: 지운 엔트리 수.
+        """
+        await self._redis.delete(
+            self.follower_key(world_id, actor_id), self.unfollow_key(world_id, actor_id)
+        )
+        removed = 0
+        async for key in self._redis.scan_iter(match=f"lf:tl:{world_id}:*"):
+            members = await self._redis.zrange(key, 0, -1)
+            doomed = [m for m in members if json.loads(m).get("actor_id") == actor_id]
+            if doomed:
+                removed += await self._redis.zrem(key, *doomed)
+        return removed
+
     async def drop_all(self) -> None:
         """재구축용 파괴 (ADR-003 계약 3) — 타임라인·팔로워 인덱스·거부 마커 전부."""
         async for key in self._redis.scan_iter(match="lf:tl:*"):

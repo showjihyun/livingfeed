@@ -19,12 +19,13 @@ from psycopg import AsyncConnection
 #: kind → 소비 타입 술어 — 각 프로젝터의 NATS filter subject와 동형 (".>"는 접두).
 #: 리터럴로 둔다: 프로젝터 모듈을 import하면 순환이 생기고, 동형성은 테스트가 고정한다.
 PATTERNS: dict[str, tuple[str, ...]] = {
-    "os": ("feed.post.published",),
-    "kuzu": ("relationship.>",),
+    "os": ("feed.post.published", "actor.identity.retired"),
+    "kuzu": ("relationship.>", "actor.identity.retired"),
     "pg": ("actor.>", "player.>", "system.>"),
     "redis": (
         "relationship.>", "player.follow.changed",
         "feed.post.published", "actor.message.sent",
+        "actor.identity.retired",
     ),
 }
 

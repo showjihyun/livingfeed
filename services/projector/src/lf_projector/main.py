@@ -36,6 +36,7 @@ from lf_projector.kuzu_projector import KuzuProjector
 from lf_projector.kuzu_verify import verify_worlds
 from lf_projector.lag import LagMetrics
 from lf_projector.os_index import OpenSearchIndex, envelope_to_doc
+from lf_projector.os_projector import RETIRED_TYPE as OS_RETIRED_TYPE
 from lf_projector.os_projector import OsProjector
 from lf_projector.pg_projector import PgProjector
 from lf_projector.pg_read import ReadStore
@@ -124,8 +125,16 @@ async def run_from_es(kind: str) -> int:
                 await index.ensure()
                 fed, docs = 0, []
                 async for envelope in replay_envelopes(conn, PATTERNS["os"]):
-                    docs.append(envelope_to_doc(envelope))
                     fed += 1
+                    if envelope["type"] == OS_RETIRED_TYPE:
+                        # 순서가 곧 결정성이다 — 쌓인 색인을 먼저 밀고 소멸을 집행한다
+                        await index.bulk_upsert(docs)
+                        docs = []
+                        await index.delete_by_actor(
+                            envelope["world_id"], envelope["payload"]["actor_id"]
+                        )
+                        continue
+                    docs.append(envelope_to_doc(envelope))
                     if len(docs) >= 500:
                         await index.bulk_upsert(docs)
                         docs = []

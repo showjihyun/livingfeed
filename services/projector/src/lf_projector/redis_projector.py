@@ -7,11 +7,12 @@
 4. 단방향 — 도메인 이벤트를 발행하지 않는다
 5. 격리 — 다른 프로젝터와 consumer 독립
 
-소스 넷이 곧 팬아웃 파이프라인이다:
-- relationship.*        → 팔로워 인덱스 stand-in + 변화 리시트 (액터→플레이어 Private)
-- player.follow.changed → 명시 팔로우/철회 (진짜 팔로우 모델 — 철회가 이긴다)
-- feed.post.published   → 팔로워 타임라인으로 fan-out-on-write
-- actor.message.sent    → 수신 플레이어 타임라인 (Private 단독 배달)
+소스 다섯이 곧 팬아웃 파이프라인이다:
+- relationship.*          → 팔로워 인덱스 stand-in + 변화 리시트 (액터→플레이어 Private)
+- player.follow.changed   → 명시 팔로우/철회 (진짜 팔로우 모델 — 철회가 이긴다)
+- feed.post.published     → 팔로워 타임라인으로 fan-out-on-write
+- actor.message.sent      → 수신 플레이어 타임라인 (Private 단독 배달)
+- actor.identity.retired  → 은퇴 소멸 — 팔로워 인덱스와 타임라인의 발신분을 걷는다
 """
 
 from __future__ import annotations
@@ -38,6 +39,8 @@ logger = logging.getLogger("lf.projector.redis")
 REPLY_TYPE = "actor.message.sent"
 POST_TYPE = "feed.post.published"
 FOLLOW_TYPE = "player.follow.changed"
+#: 은퇴 소멸 — 스튜디오 삭제의 이벤트화. 타임라인의 그 액터 발신분을 걷는다
+RETIRED_TYPE = "actor.identity.retired"
 
 
 class RedisProjector:
@@ -50,13 +53,21 @@ class RedisProjector:
 
     def _sources(
         self, store: TimelineStore
-    ) -> tuple[tuple[str, str, Callable[[dict[str, Any]], Awaitable[None]]], ...]:
-        """(스트림, filter subject 조각, 핸들러) — durable은 스트림 이름에서 파생된다."""
+    ) -> tuple[tuple[str, str, str, Callable[[dict[str, Any]], Awaitable[None]]], ...]:
+        """(스트림, durable, filter subject 조각, 핸들러).
+
+        durable은 스트림 이름에서 파생되지만, LF_ACTOR를 두 filter로 나눠 듣는
+        은퇴 소스만은 접미사(-retire)로 갈라선다 — 같은 durable에 다른 filter를
+        걸 수 없다 (consumer 독립, ADR-003 계약 5).
+        """
         return (
-            ("LF_REL", "relationship.>", self._apply_relationship(store)),
-            ("LF_PLAYER", FOLLOW_TYPE, self._apply_follow(store)),
-            ("LF_FEED", POST_TYPE, self._apply_post(store)),
-            ("LF_ACTOR", REPLY_TYPE, self._apply_reply(store)),
+            ("LF_REL", self._durable("LF_REL"), "relationship.>",
+             self._apply_relationship(store)),
+            ("LF_PLAYER", self._durable("LF_PLAYER"), FOLLOW_TYPE, self._apply_follow(store)),
+            ("LF_FEED", self._durable("LF_FEED"), POST_TYPE, self._apply_post(store)),
+            ("LF_ACTOR", self._durable("LF_ACTOR"), REPLY_TYPE, self._apply_reply(store)),
+            ("LF_ACTOR", f"{self._cfg.redis_durable}-retire", RETIRED_TYPE,
+             self._apply_retired(store)),
         )
 
     def _apply_relationship(self, store: TimelineStore):
@@ -93,11 +104,18 @@ class RedisProjector:
             await store.push_reply(envelope)
         return apply
 
+    def _apply_retired(self, store: TimelineStore):
+        async def apply(envelope: dict[str, Any]) -> None:
+            actor_id = envelope["payload"]["actor_id"]
+            removed = await store.retire_actor(envelope["world_id"], actor_id)
+            logger.info("은퇴 소멸 — actor=%s 타임라인 엔트리 %d건", actor_id, removed)
+        return apply
+
     def replay_apply(
         self, store: TimelineStore
     ) -> Callable[[dict[str, Any]], Awaitable[None]]:
         """from-es 리플레이 어댑터 — _sources와 같은 술어로 적용자를 고른다."""
-        routes = tuple((segment, apply) for _, segment, apply in self._sources(store))
+        routes = tuple((segment, apply) for _, _, segment, apply in self._sources(store))
 
         async def apply(envelope: dict[str, Any]) -> None:
             for pattern, fn in routes:
@@ -114,6 +132,7 @@ class RedisProjector:
         self,
         nc: nats.NATS,
         stream: str,
+        durable: str,
         segment: str,
         apply: Callable[[dict[str, Any]], Awaitable[None]],
         stop: asyncio.Event,
@@ -122,11 +141,9 @@ class RedisProjector:
         cfg = self._cfg
         js = nc.jetstream()
         filter_subject = f"lf.{cfg.env}.*.{segment}"
-        psub = await js.pull_subscribe(
-            filter_subject, durable=self._durable(stream), stream=stream
-        )
+        psub = await js.pull_subscribe(filter_subject, durable=durable, stream=stream)
         logger.info(
-            "redis-projector 대기 — filter=%s durable=%s", filter_subject, self._durable(stream)
+            "redis-projector 대기 — filter=%s durable=%s", filter_subject, durable
         )
         async for msgs in batches(
             psub, batch_size=cfg.batch_size, timeout_s=cfg.fetch_timeout_s, stop=stop, once=once
@@ -177,15 +194,15 @@ class RedisProjector:
             if rebuild:
                 logger.info("재구축 — 타임라인 키와 durable 파괴")
                 await store.drop_all()
-                for stream, _, _ in sources:
+                for stream, durable, _, _ in sources:
                     try:
-                        await nc.jetstream().delete_consumer(stream, self._durable(stream))
+                        await nc.jetstream().delete_consumer(stream, durable)
                     except NotFoundError:
                         pass
             await asyncio.gather(
                 *(
-                    self._consume(nc, stream, segment, apply, stop, once)
-                    for stream, segment, apply in sources
+                    self._consume(nc, stream, durable, segment, apply, stop, once)
+                    for stream, durable, segment, apply in sources
                 )
             )
         finally:

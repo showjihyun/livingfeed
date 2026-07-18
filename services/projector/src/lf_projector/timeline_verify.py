@@ -1,7 +1,8 @@
 """redis 팔로워 인덱스 무결성 검사 — 원천(es) 대비 (ADR-014 후속).
 
 기대 집합은 두 원천의 fold다 (timeline.py의 쓰기 규칙과 동형):
-관계 유래(액터↔플레이어 관계 스트림 키) ∪ 명시 팔로우 − 명시 철회(이긴다).
+관계 유래(액터↔플레이어 관계 스트림 키) ∪ 명시 팔로우 − 명시 철회(이긴다)
+− 은퇴 액터(actor.identity.retired — retire_actor가 인덱스 키를 걷는다).
 타임라인(lf:tl) 자체는 상한·최종 일관성 때문에 개수 비교가 무의미해 검사하지
 않는다 — 인덱스가 맞으면 다음 포스트부터의 팬아웃이 맞는다.
 """
@@ -26,6 +27,10 @@ _FOLLOW_SQL = (
     "SELECT payload FROM es.events"
     " WHERE world_id = %s AND type = 'player.follow.changed' ORDER BY event_id"
 )
+_RETIRED_SQL = (
+    "SELECT DISTINCT actor_id FROM es.events"
+    " WHERE world_id = %s AND type = 'actor.identity.retired'"
+)
 _WORLDS_SQL = (
     "SELECT DISTINCT world_id FROM es.events"
     " WHERE stream = 'relationship' OR type = 'player.follow.changed'"
@@ -33,12 +38,16 @@ _WORLDS_SQL = (
 
 
 def fold_followers(
-    rel_keys: list[str], follow_payloads: list[dict[str, Any]]
+    rel_keys: list[str],
+    follow_payloads: list[dict[str, Any]],
+    retired: frozenset[str] | set[str] = frozenset(),
 ) -> dict[str, set[str]]:
     """원천 → 기대 팔로워 (순수 fold — timeline.py 쓰기 규칙과 동형).
 
     관계 키("from|to")의 액터↔플레이어 쌍이 stand-in으로 들어가고, 명시
     선언은 (player, actor)당 마지막이 이긴다 — 철회면 stand-in도 밀어낸다.
+    은퇴 액터는 통째로 빠진다 (retire_actor가 인덱스 키를 걷는다 — 은퇴는
+    관계·선언보다 항상 나중이라는 전제, 은퇴 뒤 이벤트는 세계에 없다).
     """
     followers: dict[str, set[str]] = {}
     for key in rel_keys:
@@ -60,7 +69,11 @@ def fold_followers(
             bucket.add(player)
         else:
             bucket.discard(player)
-    return {actor: players for actor, players in followers.items() if players}
+    return {
+        actor: players
+        for actor, players in followers.items()
+        if players and actor not in retired
+    }
 
 
 async def verify_timeline_world(
@@ -73,7 +86,10 @@ async def verify_timeline_world(
     follows = [
         r[0] for r in await (await conn.execute(_FOLLOW_SQL, (world_id,))).fetchall()
     ]
-    expected = fold_followers(rel_keys, follows)
+    retired = {
+        r[0] for r in await (await conn.execute(_RETIRED_SQL, (world_id,))).fetchall()
+    }
+    expected = fold_followers(rel_keys, follows, retired)
 
     store = TimelineStore(redis)
     actual: dict[str, set[str]] = {}

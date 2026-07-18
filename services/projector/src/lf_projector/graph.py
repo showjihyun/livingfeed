@@ -93,6 +93,9 @@ _TENSION = (
     "ORDER BY r.resentment DESC LIMIT $limit"
 )
 
+#: 은퇴 소멸 — 노드와 그에 닿은 양방향 간선 전부 (없으면 무연산 — 자연 멱등)
+_RETIRE_NODE = "MATCH (a:Actor {id: $id}) DETACH DELETE a"
+
 _ALL_EDGES = "MATCH (a:Actor)-[r:RELATES]->(b:Actor) RETURN a.id, b.id"
 
 _WORLD_EDGES = (
@@ -171,6 +174,16 @@ class RelGraph:
                     "stage": p["stage"], "tick": int(envelope["tick"]),
                 },
             )
+
+    def apply_retired(self, world_id: str, envelope: dict[str, Any]) -> None:
+        """actor.identity.retired → 노드 + 양방향 간선 소멸 (스튜디오 삭제의 집행).
+
+        상대 노드와 상대의 다른 관계는 남는다 — 남의 역사는 남의 것이다.
+        노드가 이미 없으면 무연산 (재전달·리플레이 멱등, ADR-003 계약 1).
+        """
+        self._conn(world_id).execute(
+            _RETIRE_NODE, {"id": envelope["payload"]["actor_id"]}
+        )
 
     def all_edges(self, world_id: str) -> set[tuple[str, str]]:
         """세계의 전체 방향 엣지 (from, to) — 무결성 검사(kuzu_verify)의 실측값."""

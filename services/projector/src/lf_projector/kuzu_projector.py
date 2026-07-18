@@ -32,9 +32,13 @@ from lf_projector.lag import KindMetrics, LagAggregator, observe
 
 logger = logging.getLogger("lf.projector.kuzu")
 
+#: 은퇴 소멸 — 스튜디오 삭제의 이벤트화. 노드 + 양방향 간선을 지운다
+RETIRED_TYPE = "actor.identity.retired"
+
 HANDLERS = {
     "relationship.state.changed": RelGraph.apply_state_changed,
     "relationship.milestone.reached": RelGraph.apply_milestone,
+    RETIRED_TYPE: RelGraph.apply_retired,
 }
 
 
@@ -52,10 +56,18 @@ class KuzuProjector:
         return self._graph
 
     def project(self, envelope: dict[str, Any]) -> None:
-        """봉투 하나를 그래프에 반영한다. 모르는 relationship.* 타입은 무시(전방 호환)."""
+        """봉투 하나를 그래프에 반영한다. 목록 밖 타입은 무시(전방 호환)."""
         handler = HANDLERS.get(envelope["type"])
         if handler is not None:
             handler(self._graph, envelope["world_id"], envelope)
+
+    def _sources(self) -> tuple[tuple[str, str, str], ...]:
+        """(스트림, filter 조각, durable) — 은퇴는 LF_ACTOR에서 따로 온다 (소멸 집행)."""
+        cfg = self._cfg
+        return (
+            ("LF_REL", "relationship.>", cfg.kuzu_durable),
+            ("LF_ACTOR", RETIRED_TYPE, f"{cfg.kuzu_durable}-retire"),
+        )
 
     def replay_apply(self) -> Callable[[dict[str, Any]], Awaitable[None]]:
         """from-es 리플레이 어댑터 — NATS 대신 es 봉투를 같은 project에 먹인다."""
@@ -63,16 +75,17 @@ class KuzuProjector:
             self.project(envelope)
         return apply
 
-    async def _consume(self, nc: nats.NATS, stop: asyncio.Event, once: bool) -> None:
+    async def _consume(
+        self, nc: nats.NATS, stream: str, segment: str, durable: str,
+        stop: asyncio.Event, once: bool,
+    ) -> None:
         cfg = self._cfg
         js = nc.jetstream()
-        filter_subject = f"lf.{cfg.env}.*.relationship.>"
-        psub = await js.pull_subscribe(
-            filter_subject, durable=cfg.kuzu_durable, stream="LF_REL"
-        )
+        filter_subject = f"lf.{cfg.env}.*.{segment}"
+        psub = await js.pull_subscribe(filter_subject, durable=durable, stream=stream)
         logger.info(
             "kuzu-projector 대기 — filter=%s durable=%s dir=%s",
-            filter_subject, cfg.kuzu_durable, cfg.kuzu_dir,
+            filter_subject, durable, cfg.kuzu_dir,
         )
         async for msgs in batches(
             psub, batch_size=cfg.batch_size, timeout_s=cfg.fetch_timeout_s, stop=stop, once=once
@@ -81,8 +94,16 @@ class KuzuProjector:
                 await self._handle(msg, js)
         # pull 구독을 남기면 nc.drain()이 타임아웃(30s)까지 매달린다 — 명시 해지
         await psub.unsubscribe()
+
+    async def _consume_all(self, nc: nats.NATS, stop: asyncio.Event, once: bool) -> None:
+        await asyncio.gather(
+            *(
+                self._consume(nc, stream, segment, durable, stop, once)
+                for stream, segment, durable in self._sources()
+            )
+        )
         if once:
-            stop.set()  # 드레인이 끝나면 나란히 도는 graph API도 내린다
+            stop.set()  # 두 소스가 모두 드레인되면 나란히 도는 graph API도 내린다
 
     async def _handle(self, msg: Any, js: Any) -> None:
         cfg = self._cfg
@@ -123,13 +144,14 @@ class KuzuProjector:
             if rebuild:
                 logger.info("재구축 — Kuzu %s 와 durable %s 파괴", cfg.kuzu_dir, cfg.kuzu_durable)
                 self._graph.drop_all()
-                try:
-                    await nc.jetstream().delete_consumer("LF_REL", cfg.kuzu_durable)
-                except NotFoundError:
-                    pass
+                for stream, _, durable in self._sources():
+                    try:
+                        await nc.jetstream().delete_consumer(stream, durable)
+                    except NotFoundError:
+                        pass
             # 소비 루프와 질의 API가 한 프로세스에서 나란히 돈다 (임베디드 중재)
             await asyncio.gather(
-                self._consume(nc, stop, once),
+                self._consume_all(nc, stop, once),
                 serve_graph_api(nc, self._graph, cfg.env, stop=stop),
             )
         finally:

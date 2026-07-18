@@ -51,6 +51,10 @@ export interface FeedPostPublished {
    */
   tags: string[];
   /**
+   * 포스트 주인공을 빚은 플레이어 (데뷔 포스트, 페르소나 스튜디오) — '당신이 빚은 인물' 저자성 표식의 원천. 해당 없으면 null/생략 (하위 호환)
+   */
+  created_by?: string | null;
+  /**
    * 미디어 슬롯 (ADR-014) — MVP는 빈 배열
    */
   media: {

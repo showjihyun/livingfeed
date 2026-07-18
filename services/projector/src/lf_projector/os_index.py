@@ -75,6 +75,23 @@ def envelope_to_doc(envelope: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def retire_query(world_id: str, actor_id: str) -> dict[str, Any]:
+    """은퇴 소멸 질의 — actor_id(작성자) 일치 문서만 겨눈다 (actor.identity.retired).
+
+    participants에만 낀 남의 포스트는 남는다 — 남의 글은 남의 역사다.
+    """
+    return {
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {"world_id": world_id}},
+                    {"term": {"actor_id": actor_id}},
+                ]
+            }
+        }
+    }
+
+
 def bulk_body(index: str, docs: list[dict[str, Any]]) -> str:
     """_bulk NDJSON — index 액션은 같은 _id를 덮어쓴다 (자연 멱등, ADR-003 계약 1)."""
     lines: list[str] = []
@@ -119,6 +136,22 @@ class OpenSearchIndex:
                 if item.get("index", {}).get("error")
             ]
             raise RuntimeError(f"bulk 색인 실패 {len(failed)}건: {failed[:3]}")
+
+    async def delete_by_actor(self, world_id: str, actor_id: str) -> int:
+        """은퇴 액터의 포스트 문서 소멸 — _delete_by_query (자연 멱등: 재실행은 0건).
+
+        선행 refresh가 방금 색인된(아직 미가시) 문서까지 소멸 범위에 넣는다 —
+        delete_by_query는 검색 스냅샷 기반이라 refresh 없이는 그것들을 놓친다.
+        은퇴는 드문 사건이라 refresh 비용은 수용한다. 반환: 지운 문서 수.
+        """
+        (await self._client.post(f"/{self._index}/_refresh")).raise_for_status()
+        r = await self._client.post(
+            f"/{self._index}/_delete_by_query",
+            params={"conflicts": "proceed", "refresh": "true"},
+            json=retire_query(world_id, actor_id),
+        )
+        r.raise_for_status()
+        return int(r.json().get("deleted", 0))
 
     async def drop(self) -> None:
         """재구축용 파괴 (ADR-003 계약 3). 없는 인덱스는 무시한다."""

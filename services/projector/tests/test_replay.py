@@ -38,11 +38,13 @@ def test_split_patterns_separates_prefix_and_exact():
 
 def test_patterns_mirror_consumer_filters():
     # kind별 술어가 각 프로젝터의 NATS filter와 동형이어야 정직한 리플레이다
-    assert PATTERNS["kuzu"] == ("relationship.>",)
-    assert PATTERNS["os"] == ("feed.post.published",)
+    assert PATTERNS["kuzu"] == ("relationship.>", "actor.identity.retired")
+    assert PATTERNS["os"] == ("feed.post.published", "actor.identity.retired")
     assert set(PATTERNS["pg"]) == {"actor.>", "player.>", "system.>"}
     assert "relationship.>" in PATTERNS["redis"]
     assert "player.follow.changed" in PATTERNS["redis"]
+    # 은퇴 소멸은 pg 밖 세 kind가 별도 소스로 듣는다 (pg는 actor.> 가 이미 덮는다)
+    assert "actor.identity.retired" in PATTERNS["redis"]
 
 
 # ── 통합 — 봉투 동일성 + 순서 + kind별 from-es 사이클 (NATS 불요) ──────

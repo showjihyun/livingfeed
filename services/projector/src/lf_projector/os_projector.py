@@ -27,6 +27,8 @@ from lf_projector.os_index import OpenSearchIndex, envelope_to_doc
 logger = logging.getLogger("lf.projector.os")
 
 FEED_POST_TYPE = "feed.post.published"
+#: 은퇴 소멸 — 스튜디오 삭제의 이벤트화. 그 액터의 포스트 문서를 인덱스에서 지운다
+RETIRED_TYPE = "actor.identity.retired"
 
 
 class OsProjector:
@@ -77,6 +79,41 @@ class OsProjector:
             await msg.ack()
         return len(docs)
 
+    async def retire_batch(
+        self, msgs: list[Any], index: OpenSearchIndex, js: Any
+    ) -> int:
+        """은퇴 봉투 배치 — 액터별 delete_by_query 소멸. 반환: 집행한 은퇴 수.
+
+        소멸은 자연 멱등(재실행 0건)이라 재전달이 안전하다. participants에만
+        낀 남의 포스트는 남긴다 (retire_query — 남의 글은 남의 역사).
+        """
+        done = 0
+        for msg in msgs:
+            try:
+                envelope = json.loads(msg.data)
+                deleted = await index.delete_by_actor(
+                    envelope["world_id"], envelope["payload"]["actor_id"]
+                )
+            except (json.JSONDecodeError, KeyError, TypeError) as e:
+                if msg.metadata.num_delivered >= self._cfg.max_deliver:
+                    await self._to_dlq(msg, js, reason=repr(e))
+                else:
+                    await msg.nak(delay=self._cfg.nak_delay_s)
+            except Exception:
+                if msg.metadata.num_delivered >= self._cfg.max_deliver:
+                    await self._to_dlq(msg, js, reason="소멸 반복 실패")
+                else:
+                    await msg.nak(delay=self._cfg.nak_delay_s)
+            else:
+                logger.info(
+                    "은퇴 소멸 — actor=%s 문서 %d건",
+                    envelope["payload"]["actor_id"], deleted,
+                )
+                observe(self._lag, envelope, logger, metrics=self._metrics)
+                await msg.ack()
+                done += 1
+        return done
+
     async def _to_dlq(self, msg: Any, js: Any, *, reason: str) -> None:
         # 조용한 유실 금지 (ADR-017 §4). 도메인 발행이 아니라 인프라 이동이다 —
         # 프로젝터의 발행 금지 계약(ADR-003 계약 4)은 outbox/도메인 스트림에 적용된다.
@@ -88,42 +125,61 @@ class OsProjector:
         logger.warning("DLQ 이동 — subject=%s 사유=%s", subj, reason)
         await msg.ack()
 
+    def _sources(self) -> tuple[tuple[str, str, str, Any], ...]:
+        """(스트림, filter 조각, durable, 배치 핸들러) — 은퇴는 LF_ACTOR에서 따로 온다."""
+        cfg = self._cfg
+        return (
+            (cfg.stream, FEED_POST_TYPE, cfg.durable, self.project_batch),
+            ("LF_ACTOR", RETIRED_TYPE, f"{cfg.durable}-retire", self.retire_batch),
+        )
+
+    async def _consume(
+        self, nc: nats.NATS, index: OpenSearchIndex, stream: str, segment: str,
+        durable: str, handler: Any, stop: asyncio.Event, once: bool,
+    ) -> None:
+        cfg = self._cfg
+        js = nc.jetstream()
+        filter_subject = f"lf.{cfg.env}.*.{segment}"
+        psub = await js.pull_subscribe(filter_subject, durable=durable, stream=stream)
+        logger.info(
+            "os-projector 대기 — filter=%s durable=%s index=%s",
+            filter_subject, durable, cfg.index,
+        )
+        async for msgs in batches(
+            psub, batch_size=cfg.batch_size, timeout_s=cfg.fetch_timeout_s,
+            stop=stop, once=once,
+        ):
+            projected = await handler(msgs, index, js)
+            if projected:
+                logger.info("반영 %d건 — filter=%s", projected, filter_subject)
+        # pull 구독을 남기면 nc.drain()이 타임아웃(30s)까지 매달린다 — 명시 해지
+        await psub.unsubscribe()
+
     async def run(
         self, *, stop: asyncio.Event | None = None, rebuild: bool = False, once: bool = False
     ) -> None:
         stop = stop or asyncio.Event()
         cfg = self._cfg
-        filter_subject = f"lf.{cfg.env}.*.{FEED_POST_TYPE}"
-
         index = OpenSearchIndex(cfg.opensearch_url, cfg.index)
         nc = await nats.connect(cfg.nats_url)
         try:
             js = nc.jetstream()
+            sources = self._sources()
             if rebuild:
                 logger.info("재구축 — 인덱스 %s 와 durable %s 파괴", cfg.index, cfg.durable)
                 await index.drop()
-                try:
-                    await js.delete_consumer(cfg.stream, cfg.durable)
-                except NotFoundError:
-                    pass
+                for stream, _, durable, _ in sources:
+                    try:
+                        await js.delete_consumer(stream, durable)
+                    except NotFoundError:
+                        pass
             await index.ensure()
-
-            psub = await js.pull_subscribe(
-                filter_subject, durable=cfg.durable, stream=cfg.stream
+            await asyncio.gather(
+                *(
+                    self._consume(nc, index, stream, segment, durable, handler, stop, once)
+                    for stream, segment, durable, handler in sources
+                )
             )
-            logger.info(
-                "os-projector 대기 — filter=%s durable=%s index=%s",
-                filter_subject, cfg.durable, cfg.index,
-            )
-            async for msgs in batches(
-                psub, batch_size=cfg.batch_size, timeout_s=cfg.fetch_timeout_s,
-                stop=stop, once=once,
-            ):
-                projected = await self.project_batch(msgs, index, js)
-                if projected:
-                    logger.info("색인 %d건", projected)
-            # pull 구독을 남기면 nc.drain()이 타임아웃(30s)까지 매달린다 — 명시 해지
-            await psub.unsubscribe()
         finally:
             await nc.drain()
             await index.close()
