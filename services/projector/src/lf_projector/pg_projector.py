@@ -28,7 +28,7 @@ from psycopg import AsyncConnection
 
 from lf_projector.config import Config
 from lf_projector.consume import batches
-from lf_projector.lag import LagAggregator, observe
+from lf_projector.lag import KindMetrics, LagAggregator, observe
 from lf_projector.pg_read import ReadStore
 
 logger = logging.getLogger("lf.projector.pg")
@@ -44,10 +44,12 @@ SOURCES: tuple[tuple[str, str], ...] = (
 
 
 class PgProjector:
-    def __init__(self, cfg: Config) -> None:
+    def __init__(self, cfg: Config, metrics: KindMetrics | None = None) -> None:
         self._cfg = cfg
         #: 프로젝션 lag 계측 — 예산 <2s의 관찰 수단, 세 스트림 공용 (ADR-020 §1)
         self._lag = LagAggregator()
+        #: Prometheus 지표 손잡이 — LF_METRICS_PORT 옵트인 시에만 주입된다
+        self._metrics = metrics
 
     def _durable(self, stream: str) -> str:
         return f"{self._cfg.pg_durable}-{stream.removeprefix('LF_').lower()}"
@@ -90,7 +92,7 @@ class PgProjector:
         else:
             if applied:
                 logger.debug("반영 — %s", msg.subject)
-            observe(self._lag, envelope, logger)
+            observe(self._lag, envelope, logger, metrics=self._metrics)
             await msg.ack()
 
     async def _to_dlq(self, msg: Any, js: Any, *, reason: str) -> None:

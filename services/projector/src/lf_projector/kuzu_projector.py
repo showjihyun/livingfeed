@@ -28,7 +28,7 @@ from lf_projector.config import Config
 from lf_projector.consume import batches
 from lf_projector.graph import RelGraph
 from lf_projector.graph_api import serve_graph_api
-from lf_projector.lag import LagAggregator, observe
+from lf_projector.lag import KindMetrics, LagAggregator, observe
 
 logger = logging.getLogger("lf.projector.kuzu")
 
@@ -39,11 +39,13 @@ HANDLERS = {
 
 
 class KuzuProjector:
-    def __init__(self, cfg: Config) -> None:
+    def __init__(self, cfg: Config, metrics: KindMetrics | None = None) -> None:
         self._cfg = cfg
         self._graph = RelGraph(Path(cfg.kuzu_dir))
         #: 프로젝션 lag 계측 — 예산 <2s의 관찰 수단 (ADR-020 §1)
         self._lag = LagAggregator()
+        #: Prometheus 지표 손잡이 — LF_METRICS_PORT 옵트인 시에만 주입된다
+        self._metrics = metrics
 
     @property
     def graph(self) -> RelGraph:
@@ -108,7 +110,7 @@ class KuzuProjector:
                 logger.exception("반영 일시 오류 — 재전달 예약")
                 await msg.nak(delay=cfg.nak_delay_s)
         else:
-            observe(self._lag, envelope, logger)
+            observe(self._lag, envelope, logger, metrics=self._metrics)
             await msg.ack()
 
     async def run(

@@ -91,6 +91,30 @@ uv run --package lf-projector python -m lf_projector.main --kind pg --verify [--
 - 소비 지연은 배치가 아니라 상시 로그로 본다: 각 프로젝터가
   `projection_lag_seconds max=… avg=… count=…`를 주기 발화한다 (ADR-020 §1, 예산 <2s).
 
+### Prometheus 지표 (옵트인, ADR-020 §1 후속)
+
+`LF_METRICS_PORT`를 주면 프로젝터가 `/metrics`를 함께 노출한다 — 미설정이
+기본(로그만). 지표는 `projection_lag_seconds{kind}` 히스토그램(버킷
+0.05/0.1/0.25/0.5/1/2/5/10/30 — 예산 2s가 경계 버킷)과
+`projection_events_total{kind}` 카운터. 한 호스트에 프로젝터 넷이 뜨므로
+kind별 포트를 나눠 준다:
+
+| kind | 포트(예) | 기동 |
+|------|----------|------|
+| os | 9101 | `$env:LF_METRICS_PORT='9101'; uv run --package lf-projector python -m lf_projector.main --kind os` |
+| kuzu | 9102 | `--kind kuzu` (LF_METRICS_PORT=9102) |
+| pg | 9103 | `--kind pg` (LF_METRICS_PORT=9103) |
+| redis | 9104 | `--kind redis` (LF_METRICS_PORT=9104) |
+
+수집기(Prometheus 서버)는 compose에 없다 — 운영 환경의 몫. 스크레이프 예시:
+
+```yaml
+scrape_configs:
+  - job_name: lf-projector
+    static_configs:
+      - targets: ["host:9101", "host:9102", "host:9103", "host:9104"]
+```
+
 ## 구성 메모
 
 - **initdb/**: 첫 기동 시 `es`/`read` 스키마 생성. 볼륨이 이미 있으면 실행되지 않는다 (`down -v` 후 재기동).

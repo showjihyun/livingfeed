@@ -2,6 +2,8 @@
 
 경계의 중심: TZ 정규화(Z/오프셋/결손), 빈 집계의 침묵, 발화 주기(건수·시간)의 리셋.
 배선 스모크는 프로젝터마다 하나: 성공 경로가 observe를 지나 ack에 닿는가.
+Prometheus 지표면(옵트인)은 격리 CollectorRegistry로 검증한다 — 히스토그램 축적,
+예산 버킷 경계, 포트 미설정 시 서버 미기동.
 """
 
 import json
@@ -9,12 +11,21 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from lf_projector import main as projector_main
 from lf_projector.config import Config
 from lf_projector.kuzu_projector import KuzuProjector
-from lf_projector.lag import LagAggregator, lag_seconds
+from lf_projector.lag import (
+    LAG_BUCKETS,
+    KindMetrics,
+    LagAggregator,
+    LagMetrics,
+    lag_seconds,
+    observe,
+)
 from lf_projector.os_projector import OsProjector
 from lf_projector.pg_projector import PgProjector
 from lf_projector.redis_projector import RedisProjector
+from prometheus_client import CollectorRegistry
 
 from .conftest import sample
 
@@ -184,3 +195,118 @@ async def test_os_batch_records_lag(caplog):
     assert indexed == 1
     assert msg.acked
     assert "count=1" in _lag_line(caplog)
+
+
+# ── Prometheus 지표면 — 옵트인 히스토그램/카운터 (ADR-020 §1 후속) ──────
+
+QUIET = logging.getLogger("lf.test.lag")
+
+
+def kind_metrics(kind: str) -> tuple[CollectorRegistry, KindMetrics]:
+    """격리 registry에 실린 kind 손잡이 — 전역 REGISTRY 오염 없이 표본을 센다."""
+    registry = CollectorRegistry()
+    return registry, LagMetrics(registry=registry).for_kind(kind)
+
+
+def lag_count(registry: CollectorRegistry, kind: str) -> float | None:
+    return registry.get_sample_value("projection_lag_seconds_count", {"kind": kind})
+
+
+def test_metrics_histogram_and_counter_accumulate():
+    registry, metrics = kind_metrics("pg")
+    envelope = {"occurred_at": datetime.now(UTC).isoformat()}
+    observe(LagAggregator(), envelope, QUIET, metrics=metrics)
+    observe(LagAggregator(), envelope, QUIET, metrics=metrics)
+    assert lag_count(registry, "pg") == 2.0
+    assert registry.get_sample_value("projection_events_total", {"kind": "pg"}) == 2.0
+
+
+def test_metrics_budget_boundary_bucket():
+    # 예산 2s(ADR-020)가 버킷 경계다 — 큰 위반은 2.0 이하 버킷에 잡히지 않아야 한다
+    assert 2.0 in LAG_BUCKETS
+    registry, metrics = kind_metrics("pg")
+    observe(LagAggregator(), {"occurred_at": "2020-01-01T00:00:00Z"}, QUIET, metrics=metrics)
+    bucket = {"kind": "pg", "le": "2.0"}
+    assert registry.get_sample_value("projection_lag_seconds_bucket", bucket) == 0.0
+    bucket["le"] = "+Inf"
+    assert registry.get_sample_value("projection_lag_seconds_bucket", bucket) == 1.0
+
+
+def test_metrics_count_events_even_when_lag_unmeasurable():
+    # 처리 건수는 occurred_at 결손과 무관하다 — 히스토그램만 표본을 거른다
+    registry, metrics = kind_metrics("pg")
+    observe(LagAggregator(), {}, QUIET, metrics=metrics)
+    assert registry.get_sample_value("projection_events_total", {"kind": "pg"}) == 1.0
+    assert lag_count(registry, "pg") == 0.0
+
+
+# ── 지표 배선 스모크 — 주입된 손잡이가 각 프로젝터의 성공 경로에서 표본을 받는다 ──
+
+
+async def test_pg_handle_feeds_histogram():
+    registry, metrics = kind_metrics("pg")
+    proj = PgProjector(Config(nats_url="", opensearch_url="", env="test"), metrics=metrics)
+    await proj._handle(StubMsg(sample("actor.memory.consolidated")), StubStore(), js=None)
+    assert lag_count(registry, "pg") == 1.0
+    assert registry.get_sample_value("projection_events_total", {"kind": "pg"}) == 1.0
+
+
+async def test_redis_handle_feeds_histogram():
+    registry, metrics = kind_metrics("redis")
+    proj = RedisProjector(Config(nats_url="", opensearch_url="", env="test"), metrics=metrics)
+
+    async def apply(envelope: dict) -> None:
+        pass
+
+    await proj._handle(StubMsg(sample("feed.post.published")), apply, js=None)
+    assert lag_count(registry, "redis") == 1.0
+
+
+async def test_kuzu_handle_feeds_histogram(tmp_path):
+    registry, metrics = kind_metrics("kuzu")
+    proj = KuzuProjector(
+        Config(nats_url="", opensearch_url="", env="test", kuzu_dir=str(tmp_path / "kuzu")),
+        metrics=metrics,
+    )
+    try:
+        await proj._handle(StubMsg(sample("relationship.state.changed")), js=None)
+    finally:
+        proj.graph.close()
+    assert lag_count(registry, "kuzu") == 1.0
+
+
+async def test_os_batch_feeds_histogram():
+    registry, metrics = kind_metrics("os")
+    proj = OsProjector(Config(nats_url="", opensearch_url="", env="test"), metrics=metrics)
+    indexed = await proj.project_batch(
+        [StubMsg(sample("feed.post.published"))], StubIndex(), js=None
+    )
+    assert indexed == 1
+    assert lag_count(registry, "os") == 1.0
+
+
+# ── 지표 서버 옵트인 — LF_METRICS_PORT 없으면 아무것도 켜지 않는다 ──────
+
+
+def test_metrics_server_off_without_port(monkeypatch):
+    monkeypatch.delenv("LF_METRICS_PORT", raising=False)
+    calls: list = []
+    monkeypatch.setattr(projector_main, "start_http_server", lambda *a, **k: calls.append(a))
+    assert projector_main.start_metrics_server(CollectorRegistry()) is None
+    assert calls == []  # dev 기본 — 로그만, HTTP 서버 미기동
+
+
+def test_metrics_server_starts_when_port_given(monkeypatch):
+    monkeypatch.setenv("LF_METRICS_PORT", "9101")
+    calls: list = []
+    monkeypatch.setattr(
+        projector_main, "start_http_server",
+        lambda port, registry=None: calls.append((port, registry)),
+    )
+    registry = CollectorRegistry()
+    metrics = projector_main.start_metrics_server(registry)
+    assert metrics is not None
+    assert calls == [(9101, registry)]
+    # 반환된 지표면이 노출 registry에 실려 있다 — 스크레이프가 곧 이 표본을 본다
+    metrics.for_kind("os").events.inc()
+    assert registry.get_sample_value("projection_events_total", {"kind": "os"}) == 1.0

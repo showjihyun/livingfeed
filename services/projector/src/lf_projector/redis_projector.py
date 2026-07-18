@@ -29,7 +29,7 @@ from redis.asyncio import Redis
 
 from lf_projector.config import Config
 from lf_projector.consume import batches
-from lf_projector.lag import LagAggregator, observe
+from lf_projector.lag import KindMetrics, LagAggregator, observe
 from lf_projector.replay import matches
 from lf_projector.timeline import TimelineStore, follower_pair
 
@@ -41,10 +41,12 @@ FOLLOW_TYPE = "player.follow.changed"
 
 
 class RedisProjector:
-    def __init__(self, cfg: Config) -> None:
+    def __init__(self, cfg: Config, metrics: KindMetrics | None = None) -> None:
         self._cfg = cfg
         #: 프로젝션 lag 계측 — 예산 <2s의 관찰 수단, 네 소스 공용 (ADR-020 §1)
         self._lag = LagAggregator()
+        #: Prometheus 지표 손잡이 — LF_METRICS_PORT 옵트인 시에만 주입된다
+        self._metrics = metrics
 
     def _sources(
         self, store: TimelineStore
@@ -150,7 +152,7 @@ class RedisProjector:
                 logger.exception("반영 일시 오류 — 재전달 예약")
                 await msg.nak(delay=cfg.nak_delay_s)
         else:
-            observe(self._lag, envelope, logger)
+            observe(self._lag, envelope, logger, metrics=self._metrics)
             await msg.ack()
 
     async def _to_dlq(self, msg: Any, js: Any, *, reason: str) -> None:

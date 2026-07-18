@@ -14,6 +14,8 @@ dependencies = [
     "lf-schemas",
     # 메시징 토폴로지(subject/stream/DLQ 규칙)의 유일 구현을 재사용한다 (ADR-017 §3)
     "lf-dispatcher",
+    # 프로젝션 lag 히스토그램 — LF_METRICS_PORT 옵트인 노출 (ADR-020 §1 후속)
+    "prometheus-client>=0.20",
 ]
 
 [tool.uv.sources]

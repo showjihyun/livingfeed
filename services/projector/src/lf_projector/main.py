@@ -9,7 +9,9 @@
     uv run --package lf-projector python -m lf_projector.main --kind pg --rebuild --from-es
     uv run --package lf-projector python -m lf_projector.main --kind kuzu --verify [--world w_x]
 설정: NATS_URL, OPENSEARCH_URL, LF_KUZU_DIR, LF_DATABASE_URL, REDIS_URL, LF_ENV
-(config.py 참고). qdrant 프로젝터는 자신의 로드맵 단계에서 추가된다.
+(config.py 참고). LF_METRICS_PORT를 주면 Prometheus 지표(/metrics)를 함께
+노출한다 — 미설정이 기본(로그만). qdrant 프로젝터는 자신의 로드맵 단계에서
+추가된다.
 """
 
 from __future__ import annotations
@@ -19,10 +21,12 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import signal
 import sys
 from pathlib import Path
 
+from prometheus_client import REGISTRY, CollectorRegistry, start_http_server
 from psycopg import AsyncConnection
 from redis.asyncio import Redis
 
@@ -30,6 +34,7 @@ from lf_projector.config import Config
 from lf_projector.graph import RelGraph
 from lf_projector.kuzu_projector import KuzuProjector
 from lf_projector.kuzu_verify import verify_worlds
+from lf_projector.lag import LagMetrics
 from lf_projector.os_index import OpenSearchIndex, envelope_to_doc
 from lf_projector.os_projector import OsProjector
 from lf_projector.pg_projector import PgProjector
@@ -39,6 +44,8 @@ from lf_projector.redis_projector import RedisProjector
 from lf_projector.replay import PATTERNS, replay_envelopes, replay_into
 from lf_projector.timeline import TimelineStore
 from lf_projector.timeline_verify import verify_timeline
+
+logger = logging.getLogger("lf.projector.main")
 
 KINDS = ("os", "kuzu", "pg", "redis")
 
@@ -50,6 +57,23 @@ PROJECTORS = {
 }
 
 
+def start_metrics_server(registry: CollectorRegistry | None = None) -> LagMetrics | None:
+    """LF_METRICS_PORT가 있을 때만 Prometheus 지표 서버를 켠다 — dev 기본은 로그만.
+
+    한 호스트에 프로젝터 넷이 뜨므로 kind별 포트는 운영자가 나눠 준다
+    (infra/compose/README.md 포트 표, 예: 9101~9104). 수집기(Prometheus 서버)는
+    운영 환경의 몫이다. registry 주입은 테스트 격리용.
+    """
+    port = os.environ.get("LF_METRICS_PORT")
+    if not port:
+        return None
+    registry = REGISTRY if registry is None else registry
+    metrics = LagMetrics(registry=registry)  # 서버보다 먼저 — 첫 스크레이프부터 지표면이 있다
+    start_http_server(int(port), registry=registry)
+    logger.info("metrics 노출 — :%d/metrics", int(port))
+    return metrics
+
+
 async def run(kind: str, rebuild: bool, once: bool) -> None:
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -57,7 +81,9 @@ async def run(kind: str, rebuild: bool, once: bool) -> None:
         with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, stop.set)
     cfg = Config.from_env()
-    await PROJECTORS[kind](cfg).run(stop=stop, rebuild=rebuild, once=once)
+    metrics = start_metrics_server()
+    kind_metrics = None if metrics is None else metrics.for_kind(kind)
+    await PROJECTORS[kind](cfg, metrics=kind_metrics).run(stop=stop, rebuild=rebuild, once=once)
 
 
 async def run_from_es(kind: str) -> int:

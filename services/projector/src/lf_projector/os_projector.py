@@ -21,7 +21,7 @@ from nats.js.errors import NotFoundError
 
 from lf_projector.config import Config
 from lf_projector.consume import batches
-from lf_projector.lag import LagAggregator, observe
+from lf_projector.lag import KindMetrics, LagAggregator, observe
 from lf_projector.os_index import OpenSearchIndex, envelope_to_doc
 
 logger = logging.getLogger("lf.projector.os")
@@ -30,10 +30,12 @@ FEED_POST_TYPE = "feed.post.published"
 
 
 class OsProjector:
-    def __init__(self, cfg: Config) -> None:
+    def __init__(self, cfg: Config, metrics: KindMetrics | None = None) -> None:
         self._cfg = cfg
         #: 프로젝션 lag 계측 — 예산 <2s의 관찰 수단 (ADR-020 §1)
         self._lag = LagAggregator()
+        #: Prometheus 지표 손잡이 — LF_METRICS_PORT 옵트인 시에만 주입된다
+        self._metrics = metrics
 
     async def project_batch(
         self, msgs: list[Any], index: OpenSearchIndex, js: Any
@@ -71,7 +73,7 @@ class OsProjector:
                     await msg.nak(delay=self._cfg.nak_delay_s)
             return 0
         for msg, envelope in zip(good, envelopes, strict=True):
-            observe(self._lag, envelope, logger)
+            observe(self._lag, envelope, logger, metrics=self._metrics)
             await msg.ack()
         return len(docs)
 
