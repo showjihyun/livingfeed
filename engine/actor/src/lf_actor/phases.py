@@ -1,4 +1,4 @@
-"""tick 파이프라인의 Actor Runtime 구현 (ADR-011/012).
+﻿"""tick 파이프라인의 Actor Runtime 구현 (ADR-011/012).
 
 인지 루프의 Phase 절단면:
   perceive(메일박스 drain) → (appraise/emotion은 ADR-015 단계에서)
@@ -11,6 +11,7 @@ decide는 Context Fabric 조립 → AI Runtime 호출, 실패 시 규칙 폴백 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from lf_eventstore import NewEvent, append, current_head
@@ -171,10 +172,19 @@ class ActorPhases:
         decay_ledger: DecayLedger | None = None,
         promote_intensity: float = HIGH_INTENSITY,
         outreach: OutreachLedger | None = None,
+        shard_select: Callable[[Persona], bool] | None = None,
     ) -> None:
         if not personas:
             raise ValueError("액터가 없다 — 최소 1명의 페르소나가 필요하다")
-        self._personas = {p.id: p for p in personas}
+        #: 세계 전체 명부(id→이름) — 이름 그라운딩·유효 대상·관계 서술의 원천.
+        #: 샤드 분할(ADR-012 Phase 2)과 무관하게 언제나 전체다: 타 샤드 액터도
+        #: 말 걸 수 있는 실존 인물이고, 화면엔 실명이 나가야 한다
+        self._roster: dict[str, str] = {p.id: p.name for p in personas}
+        #: 실행 집합 — 이 워커(샤드)가 tick마다 움직이는 액터들. 솔로는 전체
+        self._shard_select = shard_select
+        self._personas = {
+            p.id: p for p in personas if shard_select is None or shard_select(p)
+        }
         self._ai = ai
         self._memory = memory
         #: Director의 인생 아크 저장 — 있으면 decide 컨텍스트에 방향을 주입한다 (ADR-013)
@@ -248,7 +258,14 @@ class ActorPhases:
         """
         if not personas:
             raise ValueError("액터가 없다 — 최소 1명의 페르소나가 필요하다")
-        incoming = {p.id: p for p in personas}
+        # 로스터는 전체, 실행 집합은 샤드 필터 후 (ADR-012 Phase 2) — 타 샤드의
+        # 신인도 이름·유효 대상으로는 곧장 실존한다
+        self._roster = {p.id: p.name for p in personas}
+        incoming = {
+            p.id: p
+            for p in personas
+            if self._shard_select is None or self._shard_select(p)
+        }
         added = sorted(set(incoming) - set(self._personas))
         removed = sorted(set(self._personas) - set(incoming))
         self._personas = incoming
@@ -359,7 +376,7 @@ class ActorPhases:
             if not items:
                 continue  # 승격 신호는 기억·감정·목표에 들어가지 않는다 (메타 제어)
             self._inbox[actor_id] = items
-            names = {p.id: p.name for p in self._personas.values()}
+            names = dict(self._roster)
             for envelope in items:
                 await self._memory.add(
                     ctx.world_id, actor_id, describe_interaction(envelope, names)
@@ -430,7 +447,7 @@ class ActorPhases:
                 if payload is None:
                     payload = fallback_action(self._personas[actor_id], ctx.tick, trace_id)
                 # LLM이 지어낸 대상을 소스에서 끊는다 — 피드·관계·그래프로 번지기 전에
-                payload = sanitize_target(payload, set(self._personas), actor_id)
+                payload = sanitize_target(payload, set(self._roster), actor_id)
                 self._intents.append((actor_id, tier.value, payload))
                 decided[tier.value] += 1
 
@@ -477,7 +494,7 @@ class ActorPhases:
             # 아크(있으면)가 일과의 결이 된다 — 잠든 삶도 방향이 있다 (ADR-013/plan-08)
             arc = await self._arc_of(ctx.world_id, actor_id)
             payload = routine_action(persona, ctx.tick, f"cold-{actor_id}-{ctx.tick}", arc=arc)
-            payload = sanitize_target(payload, set(self._personas), actor_id)
+            payload = sanitize_target(payload, set(self._roster), actor_id)
             self._intents.append((actor_id, Tier.COLD.value, payload))
             decided["cold"] += 1
 
@@ -495,7 +512,7 @@ class ActorPhases:
             )
             if payload is None:
                 continue  # 머뭇거림 — 포스팅 모먼트는 지나가면 그만이다
-            payload = sanitize_target(payload, set(self._personas), actor_id)
+            payload = sanitize_target(payload, set(self._roster), actor_id)
             self._intents.append((actor_id, "rhythm", payload))
             # tick.completed의 actors_decided는 hot/warm/cold로 닫힌 스키마다
             # (packages/schemas) — 리듬 분은 warm에 합산하고 로그로만 구분한다
@@ -665,8 +682,7 @@ class ActorPhases:
     def _post_line(self, envelope: dict[str, Any]) -> str:
         """본 글 한 줄 — [post_id] 작성자: "제목" — 본문 일부 (comment 경로의 좌표)."""
         author = envelope.get("actor_id") or "?"
-        persona = self._personas.get(author)
-        name = persona.name if persona is not None else author
+        name = self._roster.get(author, author)
         p = envelope["payload"]
         return f"[{envelope['event_id']}] {name}: \"{p['title']}\" — {p['body'][:100]}"
 
@@ -711,7 +727,7 @@ class ActorPhases:
         """
         if self._relationship is None:
             return None
-        names = {p.id: p.name for p in self._personas.values()}
+        names = dict(self._roster)
         return await self._relationship.summary(world_id, actor_id, names)
 
     async def _hydrate_ledger(self, world_id: str) -> None:
@@ -885,8 +901,7 @@ class ActorPhases:
             )
             if envelope["type"] == MESSAGE_TYPE:
                 commenter = envelope["actor_id"]
-                persona = self._personas.get(commenter)
-                who = persona.name if persona is not None else commenter
+                who = self._roster.get(commenter, commenter)
                 memo = f"tick {ctx.tick}: 나는 {who}의 댓글에 답했다 — \"{text}\""
             else:
                 player = envelope["payload"]["player_id"]
@@ -924,8 +939,7 @@ class ActorPhases:
                 self._comment_event(ctx, actor_id, post, text)
             )
             author = post["actor_id"]
-            persona = self._personas.get(author)
-            name = persona.name if persona is not None else author
+            name = self._roster.get(author, author)
             memos.setdefault(actor_id, []).append(
                 f"tick {ctx.tick}: 나는 {name}의 글에 댓글을 남겼다 — \"{text}\""
             )
@@ -1168,7 +1182,7 @@ class ActorPhases:
         """
         if self._emotion is None or self._relationship is None or self._ledger is None:
             return
-        names = {p.id: p.name for p in self._personas.values()}
+        names = dict(self._roster)
         for actor_id in sorted(decay_plan):
             emotion_state = await self._emotion.load(ctx.world_id, actor_id)
             edges = {}
@@ -1205,7 +1219,7 @@ class ActorPhases:
         working = await self._memory.recent(ctx.world_id, actor_id)
         if not working:
             return None
-        known = sorted(counterparts | (set(self._personas) - {actor_id}))
+        known = sorted(counterparts | (set(self._roster) - {actor_id}))
         roster = ", ".join(f"{names.get(a, a)}({a})" for a in known) or "(없음)"
         world = WorldContext(world_id=ctx.world_id, tick=ctx.tick, world_time=ctx.world_time)
         bundle = build(
@@ -1274,7 +1288,7 @@ class ActorPhases:
         actions_by_actor = {actor_id: env for actor_id, env in self._resolved_actions}
         # 목표를 진행시킨 행동은 대상이 없어도 기억할 일이다 ("사이드 프로젝트를 진행했다")
         actions_by_actor.update(goal_actions)
-        names = {p.id: p.name for p in self._personas.values()}
+        names = dict(self._roster)
         peaks: dict[str, float] = {}
         for shift in self._resolved_shifts:
             intensity = float(shift.instance.get("intensity", 0.0))

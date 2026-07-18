@@ -45,7 +45,11 @@ class PersonaReloader:
         self._fingerprint: Fingerprint | None = None
 
     def load(self) -> list[Persona]:
-        """최초 로드 — 지문을 굳히고 전체를 읽는다 (워커 시작 시 1회)."""
+        """최초 로드 — 지문을 굳히고 전체를 읽는다 (워커 시작 시 1회).
+
+        샤드 분할(ADR-012 Phase 2)은 여기가 아니라 ActorPhases의 몫이다 —
+        실행 집합은 샤드별이지만 이름·유효 대상·팬아웃 명부는 세계 전체다.
+        """
         self._fingerprint = scan_fingerprint(self._dir)
         return load_personas(self._dir)
 
