@@ -12,6 +12,18 @@ interaction_effects:
     incoming: { trust: 0.03, intimacy: 0.03, salience: 0.06 }
   player.reaction.added:
     incoming: { intimacy: 0.01, salience: 0.03 }
+  # 액터끼리 오간 말 (actor.message.sent 중 target_actor_id 분 — 갱신 규칙 1c).
+  # 댓글은 액터의 일상이라 player.comment.posted(드문 외부 개입)보다 약하게 —
+  # 매 교환이 우정이 되면 세계 전원이 절친이 되어 관계가 서사를 잃는다.
+  # incoming > outgoing: 받은 말이 더 남는다 (help·confess의 incoming 우위 관례).
+  # 성장 어림 (과열 가드): 댓글 쿨다운 5tick·액터당 tick당 1건 + 작성자 답장
+  # 1건이 상한이라, 최빈 쌍의 수신 엣지도 교환(5tick)당 trust +0.025가 최대 —
+  # '믿고 가까운' 임계(trust 0.25)까지 연속 교환 10회(≈50tick)가 하한이고,
+  # 실제로는 이웃 분산(fanout 3)·LLM의 댓글 선택으로 수백 tick이다. intimacy는
+  # 감쇠(0.0003/tick)가 있어 교환이 끊기면 도로 식는다 — 균형 유지
+  actor.message.sent:
+    outgoing: { trust: 0.01, intimacy: 0.01, salience: 0.04 }
+    incoming: { trust: 0.015, intimacy: 0.02, salience: 0.05 }
   # 액터 행동 (actor.action.performed의 action_kind) — 양방향
   action.speak:
     outgoing: { intimacy: 0.03, trust: 0.02, salience: 0.05 }

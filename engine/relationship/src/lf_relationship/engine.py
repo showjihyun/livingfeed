@@ -48,6 +48,10 @@ _INTERACTION_REASONS: dict[tuple[str, str], str] = {
     ("player.dm.sent", "incoming"): "DM 한 통을 받았다",
     ("player.comment.posted", "incoming"): "댓글 한 마디를 받았다",
     ("player.reaction.added", "incoming"): "좋아요로 마음을 건네받았다",
+    # 액터끼리 오간 말 (규칙 1c) — 플레이어 댓글("받았다")과 어휘를 살짝 달리해
+    # 리시트에서 출처의 결이 구분된다 (둘 다 사람 문장, 기계 토큰 없음)
+    ("actor.message.sent", "outgoing"): "댓글로 말을 건넸다",
+    ("actor.message.sent", "incoming"): "댓글 한 마디가 건너왔다",
     ("action.speak", "outgoing"): "먼저 말을 건넸다",
     ("action.speak", "incoming"): "말을 건네받았다",
     ("action.help", "outgoing"): "손을 내밀어 도왔다",

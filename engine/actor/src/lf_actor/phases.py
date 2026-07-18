@@ -247,6 +247,8 @@ class ActorPhases:
         #: RESOLVE가 남기는 이번 tick의 응고 재료 — CONSOLIDATE의 관계·기억 입력 (ADR-008/016)
         self._resolved_actions: list[tuple[str, dict[str, Any]]] = []  # 대상 있는 행동 (관계용)
         self._resolved_action_all: list[tuple[str, dict[str, Any]]] = []  # 전 행동 (목표용)
+        #: 적재 확정된 액터→액터 메시지 (규칙 1c 송신측 재료) — 유실분은 관계가 아니다
+        self._resolved_messages: list[tuple[str, dict[str, Any]]] = []
         self._resolved_shifts: list[PendingShift] = []
         self._resolved_replies: list[tuple[str, dict[str, Any], str]] = []
         #: 액터별 감쇠가 적용된 마지막 tick — Cold 배치의 장부 (ADR-012 §Cold 티어 처리).
@@ -1022,6 +1024,7 @@ class ActorPhases:
         """
         self._resolved_actions = []
         self._resolved_action_all = []
+        self._resolved_messages = []
         events_by_actor: dict[str, list[NewEvent]] = {}
         memos: dict[str, list[str]] = {}
 
@@ -1147,6 +1150,13 @@ class ActorPhases:
                     # 대상 있는 행동은 관계 응고의 재료다 (CONSOLIDATE, ADR-016 규칙 1)
                     if env["payload"].get("target_actor_id"):
                         self._resolved_actions.append((actor_id, env))
+                elif env["type"] == MESSAGE_TYPE:
+                    # 액터에게 건넨 말(댓글·답글)도 관계 응고의 재료다 (규칙 1c 송신측).
+                    # 적재 확정 봉투만 모은다 — 유실된 말이 관계가 되면 안 된다.
+                    # 플레이어 대상 응답·선제 DM(target_player_id)은 이 규칙 밖이다
+                    target = env["payload"].get("target_actor_id")
+                    if target and target != actor_id:
+                        self._resolved_messages.append((actor_id, env))
             for memo in memos[actor_id]:
                 # 자기 행동/응답 → Working Memory 유입 (지각의 최소 형태, ADR-008)
                 await self._memory.add(ctx.world_id, actor_id, memo)
@@ -1506,12 +1516,33 @@ class ActorPhases:
         # 세계 사건 지각은 관계 갱신이 아니다 — 간접 효과(소문)는 후속 (ADR-016 규칙 3)
         for actor_id in sorted(self._inbox):
             for envelope in self._inbox[actor_id]:
-                if not envelope["type"].startswith("player."):
-                    continue
-                pending += await rel.record_interaction(
-                    ctx.world_id, actor_id, envelope["payload"]["player_id"],
-                    envelope["type"], "incoming", cause=envelope,
-                )
+                if envelope["type"].startswith("player."):
+                    pending += await rel.record_interaction(
+                        ctx.world_id, actor_id, envelope["payload"]["player_id"],
+                        envelope["type"], "incoming", cause=envelope,
+                    )
+                elif envelope["type"] == MESSAGE_TYPE:
+                    # 규칙 1c(수신측): 오간 말도 관계다 — 이웃의 댓글이 내게 닿았다.
+                    # inbox의 actor.message.sent는 라우터가 나를 겨눠 배달한 최상위
+                    # 댓글뿐이다 (comment_targets — target_actor_id=나, 깊이 1 차단).
+                    # 소셜 루프의 가장 흔한 관계 행위인데 어느 규칙에도 안 타서
+                    # 액터↔액터 간선이 0이었다 (2026-07-18 실측 공백)
+                    sender = envelope.get("actor_id")
+                    if sender and sender != actor_id:
+                        pending += await rel.record_interaction(
+                            ctx.world_id, actor_id, sender,
+                            envelope["type"], "incoming", cause=envelope,
+                        )
+
+        # 규칙 1c(송신측): 적재 확정된 액터→액터 메시지 → 발신자→수신자 엣지.
+        # 수신자 쪽 엣지는 배달·지각(다음 tick inbox의 수신측 1c)이 만든다 —
+        # 지각 전의 말은 상대의 마음을 못 바꾼다 (규칙 1b의 즉시 양방향과 다른 결).
+        # 델타 크기·성장 속도 어림은 lf_relationship params.yaml 주석이 원천이다
+        for actor_id, envelope in self._resolved_messages:
+            pending += await rel.record_interaction(
+                ctx.world_id, actor_id, envelope["payload"]["target_actor_id"],
+                envelope["type"], "outgoing", cause=envelope,
+            )
 
         # 규칙 1b: 대상 있는 액터 행동 → 양방향 엣지 (비대칭 델타)
         for actor_id, envelope in self._resolved_actions:

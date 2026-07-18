@@ -7,6 +7,7 @@ PG+Redis 필요 (conftest 게이트).
 
 from datetime import UTC, datetime
 
+import pytest
 from lf_actor.emotion import EmotionAdapter
 from lf_actor.mailbox import Mailbox
 from lf_actor.memory import WorkingMemory
@@ -16,6 +17,7 @@ from lf_actor.relationship import RelationshipAdapter
 from lf_actor.social import comment_targets
 from lf_eventstore import new_ulid, read_stream
 from lf_relationship import RelationshipState
+from lf_relationship import default_params as relationship_params
 from lf_tick.clock import TickClock
 from lf_tick.engine import run_tick
 from lf_tick.lod import ActorLod, Tier
@@ -359,6 +361,179 @@ async def test_post_author_replies_exactly_once_without_waking(conn, redis):
     recent = await WorkingMemory(redis).recent(WORLD, WRITER)
     assert any("읽는이" in m and "댓글을 남겼다" in m for m in recent)
     assert any("답했다" in m for m in recent)
+
+
+# --- 규칙 1c: 오간 말도 관계다 — 액터끼리의 댓글·답장이 관계 엣지로 응고된다 ----
+
+
+async def test_actor_comment_consolidates_both_sides_of_the_exchange(conn, redis):
+    """규칙 1c: 받은 댓글(incoming)과 적재 확정된 내 답글(outgoing)이 수신자→
+    발신자 엣지에 응고되고, 교환이 쌓이면 relationship.state.changed로 발행된다.
+
+    실측 공백의 재현: 소셜 댓글 1,500+건에 액터↔액터 간선 0 — 댓글은
+    action.performed가 아니고(규칙 1b 밖), inbox 규칙(1a)은 player.*만 걸렀다.
+    """
+    reader, writer = make_reader(), make_writer()
+    mailbox = Mailbox(redis)
+    phases = ActorPhases(
+        [reader, writer], ai=_SilentAi(), memory=WorkingMemory(redis), mailbox=mailbox,
+        relationship=RelationshipAdapter(redis),
+    )
+
+    post = feed_post()
+    comment = actor_comment(post)
+    await mailbox.push(WORLD, WRITER, comment)
+    head = await run_tick(conn, phases, CLOCK, WORLD, tick=8, head=0)
+
+    edge_key = f"{WRITER}|{READER}"
+    events = [s.envelope for s in await read_stream(conn, WORLD, "relationship", edge_key)]
+    assert events, "받은 댓글이 관계 엣지를 만들었어야 한다"
+    milestone = events[0]
+    assert milestone["type"] == "relationship.milestone.reached"
+    assert milestone["payload"]["milestone"] == "first_met"
+    assert milestone["causation_id"] == comment["event_id"]  # 원인은 받은 댓글 봉투
+    assert "오간 말" in milestone["payload"]["note"]
+
+    # incoming(받은 댓글) + outgoing(적재 확정된 내 답글)이 한 엣지에 쌓였다 —
+    # trust는 감쇠가 없어 정확히 두 몫의 합이다
+    effects = relationship_params()["interaction_effects"]["actor.message.sent"]
+    state = await RelationshipAdapter(redis).load(WORLD, WRITER, READER)
+    assert state is not None
+    assert state.dimensions["trust"] == pytest.approx(
+        effects["incoming"]["trust"] + effects["outgoing"]["trust"]
+    )
+
+    # 한 번의 교환은 침묵한다 (발행 임계 미달) — 일상이 곧장 세계 기록이면 소음이다
+    assert not [e for e in events if e["type"] == "relationship.state.changed"]
+
+    # 교환이 쌓이면 임계를 넘어 세계에 기록된다 — 그래프 간선의 재료
+    post2 = feed_post(title="글쓴이, 두 번째 이야기")
+    await mailbox.push(WORLD, WRITER, actor_comment(post2))
+    await run_tick(conn, phases, CLOCK, WORLD, tick=9, head=head)
+
+    events = [s.envelope for s in await read_stream(conn, WORLD, "relationship", edge_key)]
+    changed = [e for e in events if e["type"] == "relationship.state.changed"]
+    assert changed, "쌓인 오간 말이 relationship.state.changed로 발행됐어야 한다"
+    payload = changed[0]["payload"]
+    assert payload["deltas"]["trust"] > 0
+    assert "actor.message.sent" not in payload["reason"]  # reason 계약 — 사람 문장
+
+
+async def test_spontaneous_comment_records_outgoing_from_stored_envelope(conn, redis):
+    """규칙 1c 송신측 — 자발 댓글이 '적재 확정된 봉투'를 원인으로 발신자→작성자
+    엣지를 만든다. 수신자 쪽 엣지는 여기서 만들지 않는다: 받은 쪽 마음은
+    배달·지각(다음 tick의 inbox)이 바꾼다 — 규칙 1b(양방향)와 다른 결이다.
+    """
+    reader, writer = make_reader(), make_writer()
+    mailbox = Mailbox(redis)
+    post = feed_post()
+    await mailbox.push(WORLD, READER, post)
+
+    phases = ActorPhases(
+        [reader, writer], ai=_CommentingAi(), memory=WorkingMemory(redis), mailbox=mailbox,
+        relationship=RelationshipAdapter(redis),
+    )
+    phases._lods[WRITER] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
+    await run_tick(conn, phases, CLOCK, WORLD, tick=5, head=0)
+
+    events = [s.envelope for s in await read_stream(conn, WORLD, "actor", READER)]
+    [comment] = [e for e in events if e["type"] == "actor.message.sent"]
+
+    rel_events = [
+        s.envelope
+        for s in await read_stream(conn, WORLD, "relationship", f"{READER}|{WRITER}")
+    ]
+    assert rel_events, "적재 확정된 댓글이 발신자 엣지를 만들었어야 한다"
+    milestone = rel_events[0]
+    assert milestone["payload"]["milestone"] == "first_met"
+    assert milestone["causation_id"] == comment["event_id"]  # 적재 확정 봉투가 원인
+    assert milestone["correlation_id"] == post["correlation_id"]  # 글의 사슬 승계
+
+    effects = relationship_params()["interaction_effects"]["actor.message.sent"]
+    state = await RelationshipAdapter(redis).load(WORLD, READER, WRITER)
+    assert state is not None
+    assert state.dimensions["trust"] == pytest.approx(effects["outgoing"]["trust"])
+
+    # 받은 쪽 엣지는 아직 없다 — 지각 전의 말은 상대의 마음을 못 바꾼다
+    assert await RelationshipAdapter(redis).load(WORLD, WRITER, READER) is None
+
+
+def player_dm(text: str = "기사 잘 읽고 있어요") -> dict:
+    """플레이어 개입 봉투 — 규칙 1a의 재료이자 규칙 1c 경계 검증의 대조군."""
+    event_id = new_ulid()
+    return {
+        "event_id": event_id, "stream": "player", "type": "player.dm.sent",
+        "schema_version": 1, "world_id": WORLD, "actor_id": None, "tick": 7,
+        "occurred_at": "2026-03-01T00:28:00Z", "causation_id": None,
+        "correlation_id": event_id,
+        "payload": {"player_id": "p_probe_fan", "target_actor_id": WRITER, "text": text},
+    }
+
+
+async def test_player_reply_stays_outside_rule_1c(conn, redis):
+    """경계 — 플레이어 대상 응답(target_player_id)은 규칙 1c 밖이다.
+
+    액터→플레이어 엣지는 규칙 1a(받은 개입)만 만든다: 내 답장까지 한 몫을
+    얹으면 플레이어 관계가 이중 응고된다 (그 응고 경로는 이미 있다).
+    """
+    reader, writer = make_reader(), make_writer()
+    mailbox = Mailbox(redis)
+    dm = player_dm()
+    await mailbox.push(WORLD, WRITER, dm)
+
+    phases = ActorPhases(
+        [reader, writer], ai=_SilentAi(), memory=WorkingMemory(redis), mailbox=mailbox,
+        relationship=RelationshipAdapter(redis),
+    )
+    await run_tick(conn, phases, CLOCK, WORLD, tick=7, head=0)
+
+    events = [s.envelope for s in await read_stream(conn, WORLD, "actor", WRITER)]
+    [reply] = [e for e in events if e["type"] == "actor.message.sent"]
+    assert reply["payload"]["target_player_id"] == "p_probe_fan"
+
+    edge_key = f"{WRITER}|p_probe_fan"
+    rel_events = [s.envelope for s in await read_stream(conn, WORLD, "relationship", edge_key)]
+    assert rel_events, "규칙 1a — 받은 DM은 여전히 엣지를 만든다"
+    assert all(e["causation_id"] == dm["event_id"] for e in rel_events)  # 답장은 원인이 아니다
+
+    state = await RelationshipAdapter(redis).load(WORLD, WRITER, "p_probe_fan")
+    assert state is not None
+    assert state.dimensions["trust"] == pytest.approx(
+        relationship_params()["interaction_effects"]["player.dm.sent"]["incoming"]["trust"]
+    )
+
+
+async def test_unstored_comment_never_becomes_relationship(conn, redis, monkeypatch):
+    """적재가 실패한 말은 관계가 되지 않는다 — 조용한 유실 금지의 역방향.
+
+    관계의 재료는 '적재 확정 봉투'뿐이다: 의도(_pending_comments)를 재료로
+    쓰면 유실된 댓글이 유령 엣지를 남긴다.
+    """
+    import lf_actor.phases as phases_module
+
+    reader, writer = make_reader(), make_writer()
+    mailbox = Mailbox(redis)
+    await mailbox.push(WORLD, READER, feed_post())
+    phases = ActorPhases(
+        [reader, writer], ai=_CommentingAi(), memory=WorkingMemory(redis), mailbox=mailbox,
+        relationship=RelationshipAdapter(redis),
+    )
+    phases._lods[WRITER] = ActorLod(tier=Tier.COLD, last_interest_tick=0)
+
+    real_append = phases_module.append
+
+    async def failing_append(conn_, principal, events, *, expected_head):
+        if any(e.type == "actor.message.sent" for e in events):
+            raise RuntimeError("적재 실패 주입 — CAS 충돌의 재현")
+        return await real_append(conn_, principal, events, expected_head=expected_head)
+
+    monkeypatch.setattr(phases_module, "append", failing_append)
+    with pytest.raises(RuntimeError):
+        await run_tick(conn, phases, CLOCK, WORLD, tick=5, head=0)
+
+    # 실패한 댓글은 관계의 재료가 아니다 — 응고 대기도, 엣지도 없다
+    assert phases._resolved_messages == []
+    assert await RelationshipAdapter(redis).load(WORLD, READER, WRITER) is None
 
 
 async def test_feed_post_from_stranger_leaves_memory_but_no_emotion(conn, redis):

@@ -33,6 +33,39 @@ def test_confront_raises_resentment_only_for_target():
     assert actor.state.dimensions["resentment"] == 0  # 비대칭 — 내가 따진 건 원한이 아니다
 
 
+def test_actor_message_is_everyday_and_asymmetric():
+    """오간 말(규칙 1c) — 액터끼리의 댓글·답글은 일상이라 결이 약하다.
+
+    크기 상한: 플레이어 댓글(드문 외부 개입) 이하 — 매 교환이 우정이 되면
+    세계 전원이 절친이 되어 관계가 서사를 잃는다. 비대칭: 받은 말이 보낸
+    말보다 남는다 (help·confess의 incoming 우위 관례). 한 번의 교환은 발행
+    임계를 못 넘는다 — 일상은 침묵하고, 쌓여야 세계에 기록된다 (reaction 관례).
+    """
+    params = default_params()
+    received = apply_interaction(
+        RelationshipState(), "actor.message.sent", "incoming", params=params
+    )
+    sent = apply_interaction(
+        RelationshipState(), "actor.message.sent", "outgoing", params=params
+    )
+    # 양방향 모두 온기가 남는다 — 오간 말이 관계가 된다
+    assert received.state.dimensions["intimacy"] > 0
+    assert sent.state.dimensions["intimacy"] > 0
+    # 비대칭 — 받은 말이 더 남는다
+    assert received.state.dimensions["intimacy"] > sent.state.dimensions["intimacy"]
+    assert received.state.salience > sent.state.salience
+    # 일상의 크기 — 플레이어 댓글보다 차원마다 약하거나 같다
+    player = params["interaction_effects"]["player.comment.posted"]["incoming"]
+    mine = params["interaction_effects"]["actor.message.sent"]["incoming"]
+    assert all(mine[k] <= player[k] for k in mine)
+    # 한 번의 교환은 침묵한다 — 발행 임계 미달
+    assert not received.publish and not sent.publish
+    # reason 계약 — 사람 문장 (전수 검사는 별도 테스트가 하고, 여기선 어휘의 결만)
+    _assert_human(received.reason)
+    _assert_human(sent.reason)
+    assert "댓글" in received.reason and "댓글" in sent.reason
+
+
 def test_repeated_anger_accumulates_resentment():
     """반복 anger → resentment 누적 (ADR-016 핵심 서사 장치)."""
     state = RelationshipState()
