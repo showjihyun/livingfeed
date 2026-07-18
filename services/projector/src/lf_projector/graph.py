@@ -27,6 +27,23 @@ def strength(trust: float, intimacy: float, salience: float) -> float:
     return round(min(1.0, 0.5 * intimacy + 0.3 * max(trust, 0.0) + 0.2 * salience), 4)
 
 
+#: 세계 뷰 표시 가중치 — 유대(strength)와 긴장(resentment⁺) 중 큰 쪽.
+#: strength는 애증을 더하지도 깎지도 않는다 — 적대 관계는 strength가 0에 가깝지만
+#: 세계 관계망에서는 가장 또렷한 간선일 수 있으므로 표시 가중치는 둘의 max다.
+def display_weight(
+    trust: float, intimacy: float, salience: float, resentment: float
+) -> float:
+    return round(max(strength(trust, intimacy, salience), min(1.0, max(resentment, 0.0))), 4)
+
+
+#: 세계 관계망 바닥값 기본 — 실측 근거(2026-07-18 dev w_main 조사): 유의미 간선의
+#: 최소 가중치는 0.059였고, 그 아래는 마일스톤 직후의 중립(전차원 0) 간선뿐이었다.
+#: 0.02는 그 중립 간선만 걸러내고 이른 세계의 옅은 인연은 남긴다 (털뭉치는 cap의 몫).
+WORLD_MIN_WEIGHT = 0.02
+#: 세계 관계망 간선 상한 기본 — 17명 규모 완전 그래프(방향 272)도 상위만 남는다
+WORLD_EDGE_CAP = 80
+
+
 _SCHEMA = (
     "CREATE NODE TABLE IF NOT EXISTS Actor("
     "id STRING, name STRING, archetype STRING, PRIMARY KEY(id))",
@@ -77,6 +94,12 @@ _TENSION = (
 )
 
 _ALL_EDGES = "MATCH (a:Actor)-[r:RELATES]->(b:Actor) RETURN a.id, b.id"
+
+_WORLD_EDGES = (
+    "MATCH (a:Actor)-[r:RELATES]->(b:Actor) "
+    "RETURN a.id, b.id, r.trust, r.intimacy, r.respect, r.attraction, "
+    "r.resentment, r.salience, r.stage, r.updated_tick"
+)
 
 
 class RelGraph:
@@ -183,6 +206,46 @@ class RelGraph:
         return {"player_id": player_id, "edges": sorted(
             edges.values(), key=lambda e: -e["strength"]
         )}
+
+    def world_graph(
+        self,
+        world_id: str,
+        *,
+        min_weight: float = WORLD_MIN_WEIGHT,
+        limit: int = WORLD_EDGE_CAP,
+    ) -> dict[str, Any]:
+        """세계 전체 관계망 — 액터↔액터 포함, 방향·5차원 그대로 (FE '세계의 관계' 탭).
+
+        바닥값(min_weight)이 약한 인연을 걸러 털뭉치를 막고, 표시 가중치
+        내림차순 limit이 상한을 건다. truncated=True는 상한에 잘렸음을 알린다.
+        노드는 살아남은 간선의 끝점만 — 이름 그라운딩은 FE 로스터(read.actors)의 몫.
+        """
+        result = self._conn(world_id).execute(_WORLD_EDGES)
+        edges: list[dict[str, Any]] = []
+        while result.has_next():
+            (a, b, trust, intimacy, respect, attraction,
+             resentment, salience, stage, tick) = result.get_next()
+            weight = display_weight(trust, intimacy, salience, resentment)
+            if weight < min_weight:
+                continue
+            edges.append({
+                "from_id": a,
+                "to_id": b,
+                "strength": strength(trust, intimacy, salience),
+                "weight": weight,
+                "stage": stage,
+                "dimensions": {
+                    "trust": trust, "intimacy": intimacy, "respect": respect,
+                    "attraction": attraction, "resentment": resentment,
+                },
+                "salience": salience,
+                "updated_tick": tick,
+            })
+        edges.sort(key=lambda e: -e["weight"])
+        truncated = len(edges) > limit
+        del edges[limit:]
+        nodes = sorted({e["from_id"] for e in edges} | {e["to_id"] for e in edges})
+        return {"nodes": nodes, "edges": edges, "truncated": truncated}
 
     def proximity(self, world_id: str, from_id: str, to_ids: list[str]) -> dict[str, float]:
         """관계 근접도 — 두 노드 사이 직접 엣지(양방향 max)의 strength (ADR-014 랭킹 항).

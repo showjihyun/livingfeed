@@ -227,6 +227,34 @@ def create_app(
             world_id, kinds, q=q, actor_ids=actor_ids, limit=min(limit, cfg.max_limit)
         )
 
+    @app.get("/graph/world")
+    async def graph_world(
+        world_id: str = Query("w_main", pattern=r"^w_[a-z0-9_]+$"),
+        min_weight: float | None = Query(
+            None, ge=0.0, le=1.0,
+            description="간선 표시 가중치 바닥값 — 미지정이면 프로젝터 기본 (약한 인연 필터)",
+        ),
+        limit: int | None = Query(
+            None, ge=1, le=500, description="간선 수 상한(cap) — 미지정이면 프로젝터 기본"
+        ),
+    ) -> dict:
+        """세계 전체 관계망 — 액터↔액터 포함, 방향·5차원 그대로 (FE '세계의 관계' 탭).
+
+        kuzu-projector의 graph query API 중재 (ADR-006). 그래프 미가용은 오류가
+        아니다(프로젝션은 최적화) — available=False로 강등하고 FE는 빈 상태를 보인다.
+        """
+        graph = getattr(app.state, "graph", None)
+        unavailable = {
+            "world_id": world_id, "nodes": [], "edges": [],
+            "truncated": False, "available": False,
+        }
+        if graph is None:
+            return unavailable
+        output = await graph.world_graph(world_id, min_weight=min_weight, limit=limit)
+        if output is None:
+            return unavailable
+        return {"world_id": world_id, **output, "available": True}
+
     def _reads() -> ProfileReads:
         reads = getattr(app.state, "reads", None)
         if reads is None:

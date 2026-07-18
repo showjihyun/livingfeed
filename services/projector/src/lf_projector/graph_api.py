@@ -41,6 +41,14 @@ async def serve_graph_api(
             world_id = request["world_id"]
             if op == "player_graph":
                 output = graph.player_graph(world_id, request["player_id"])
+            elif op == "world_graph":
+                # 바닥값·상한 기본은 RelGraph의 단일 정의 — 요청은 재정의만 싣는다
+                kwargs: dict[str, Any] = {}
+                if "min_weight" in request:
+                    kwargs["min_weight"] = min(max(float(request["min_weight"]), 0.0), 1.0)
+                if "limit" in request:
+                    kwargs["limit"] = min(max(int(request["limit"]), 1), 500)
+                output = graph.world_graph(world_id, **kwargs)
             elif op == "proximity":
                 output = {
                     "scores": graph.proximity(
@@ -57,7 +65,8 @@ async def serve_graph_api(
                 }
             else:
                 raise ValueError(
-                    f"알 수 없는 op: {op!r} (지원: player_graph, proximity, tension_pairs)"
+                    f"알 수 없는 op: {op!r} "
+                    "(지원: player_graph, world_graph, proximity, tension_pairs)"
                 )
             response = {"ok": True, "output": output}
         except Exception as e:  # 명시적 오류 응답 — 조용한 유실 금지
@@ -102,6 +111,24 @@ class GraphQueryClient:
         return await self._request(
             {"op": "player_graph", "world_id": world_id, "player_id": player_id}
         )
+
+    async def world_graph(
+        self,
+        world_id: str,
+        *,
+        min_weight: float | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any] | None:
+        """세계 전체 관계망 — None 파라미터는 프로젝터 기본(단일 정의)을 따른다.
+
+        미가용이면 None — 호출측은 available=False로 강등한다 (player_graph와 동일).
+        """
+        payload: dict[str, Any] = {"op": "world_graph", "world_id": world_id}
+        if min_weight is not None:
+            payload["min_weight"] = min_weight
+        if limit is not None:
+            payload["limit"] = limit
+        return await self._request(payload)
 
     async def proximity(
         self, world_id: str, from_id: str, to_ids: list[str]

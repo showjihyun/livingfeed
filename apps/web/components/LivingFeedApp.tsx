@@ -7,7 +7,7 @@ import { useActorDirectory } from "@/lib/actors";
 import type { DerivedStories } from "@/lib/comments";
 import { fetchPostComments } from "@/lib/comments";
 import { FOCUS_ACTOR_ID, PLAYER_NAME } from "@/lib/config";
-import { useRelationshipGraph } from "@/lib/graph";
+import { useRelationshipGraph, useWorldGraph } from "@/lib/graph";
 import { useHiddenFeed } from "@/lib/hidden";
 import type { LivePost } from "@/lib/live-feed";
 import { useLiveFeed } from "@/lib/live-feed";
@@ -108,6 +108,8 @@ export function LivingFeedApp() {
 
   // 관계 그래프 실측 (kuzu-projector, ADR-006) — 미가용이면 빈 상태
   const relGraph = useRelationshipGraph(screen === "app");
+  // 세계 전체 관계망 (액터↔액터 포함) — 그래프 탭을 볼 때만 폴링한다
+  const worldGraph = useWorldGraph(screen === "app" && tab === "graph");
 
   // Hidden Feed — 당신에게만 닿은 비공개 이야기 (private 타임라인, ADR-014).
   // 신뢰가 열어준다: 액터가 당신에게만 건넨 것이 하나라도 있으면 언락된다.
@@ -547,6 +549,7 @@ export function LivingFeedApp() {
           <GraphTab
             edges={relGraph.edges}
             available={relGraph.available}
+            world={worldGraph}
             nameOf={authorName}
             identityOf={identityOf}
             selected={selectedActor}
