@@ -33,6 +33,15 @@ PRINCIPAL = "engine.relationship"
 CHANGED_TYPE = "relationship.state.changed"
 MILESTONE_TYPE = "relationship.milestone.reached"
 
+#: first_met note의 원인 어휘 — 타입 토큰 대신 세계 안 말 (reason 계약)
+_FIRST_MET_CAUSES = {
+    "player.dm.sent": "건네온 말",
+    "player.comment.posted": "댓글 한 마디",
+    "player.reaction.added": "좋아요 하나",
+    "player.follow.changed": "눈길",
+    "actor.message.sent": "오간 말",
+}
+
 
 @dataclass(frozen=True)
 class PendingRelEvent:
@@ -109,7 +118,11 @@ class RelationshipAdapter:
                 "to_id": to_id,
                 "milestone": "first_met",
                 "stage": state.stage,
-                "note": f"{cause.get('type', '상호작용')}(으)로 처음 연결됐다"[:200],
+                # 원인 타입은 봉투 causation이 안다 — 문장에는 세계 어휘만 (reason 계약)
+                "note": (
+                    _FIRST_MET_CAUSES.get(cause.get("type"), "스치는 마주침")
+                    + "으로 처음 연결됐다"
+                )[:200],
             },
             causation_id=cause.get("event_id"),
             correlation_id=cause.get("correlation_id"),
