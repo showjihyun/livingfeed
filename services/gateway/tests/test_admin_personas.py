@@ -291,6 +291,175 @@ async def test_put_clamps_scores_into_unit_range(personas_dir):
     assert on_disk["big_five"]["openness"] == 0.0
 
 
+# ── 저장은 수기 주석을 지우지 않는다 — yaml이 SoT, 주석이 곧 설계 기록 ────────
+
+MUSE_YAML = """\
+# 합성 페르소나 — 주석 보존 검증용 (수기 설계 기록의 대역)
+# 구조: identity + OCEAN + needs/goals + secrets
+id: a_muse
+name: 뮤즈
+archetype: test_subject
+lifestyle: flexible
+active: true
+
+big_five:              # → baseline PAD 파생 (ADR-015)
+  openness: 0.82
+  conscientiousness: 0.55
+  extraversion: 0.71
+  agreeableness: 0.38
+  neuroticism: 0.64
+
+identity_core: |
+  주석 보존을 시험하기 위해 태어난 합성 인물.
+  두 번째 줄도 블록 그대로 남아야 한다.
+
+needs_bias:            # 욕구 가중 (docs/plan/06)
+  achievement: 0.90
+  belonging: 0.40
+  security: 0.30
+
+goals:                 # need = 이 목표가 걸린 욕구 축
+  - id: g_first
+    description: 첫 목표
+    priority: 0.9
+    need: achievement
+  - id: g_second        # 형제 항목 주석 — 교체에서 살아남아야 한다
+    description: 둘째 목표
+    priority: 0.5
+    need: belonging
+
+secrets:
+  - id: s_hidden
+    description: 감춰둔 것
+    severity: 4          # 1(사소) ~ 5(파멸적)
+"""
+
+
+@pytest.fixture
+def muse_dir(tmp_path: Path) -> Path:
+    (tmp_path / "muse.yaml").write_text(MUSE_YAML, encoding="utf-8")
+    return tmp_path
+
+
+async def test_put_noop_leaves_file_byte_identical(muse_dir):
+    # 아무것도 바꾸지 않은 저장은 파일을 훼손할 권리가 없다 — 왕복의 기준선
+    async with make_client(muse_dir) as client:
+        muse = (await client.get("/admin/personas/a_muse")).json()
+        resp = await client.put("/admin/personas/a_muse", json=muse)
+    assert resp.status_code == 200
+    assert (muse_dir / "muse.yaml").read_text(encoding="utf-8") == MUSE_YAML
+
+
+async def test_put_preserves_comments_order_and_block_scalar(muse_dir):
+    async with make_client(muse_dir) as client:
+        muse = (await client.get("/admin/personas/a_muse")).json()
+        muse["name"] = "뮤즈2"
+        muse["big_five"]["openness"] = 0.7  # 중첩 갱신
+        resp = await client.put("/admin/personas/a_muse", json=muse)
+        reread = (await client.get("/admin/personas/a_muse")).json()
+
+    assert resp.status_code == 200
+    path = muse_dir / "muse.yaml"
+    text = path.read_text(encoding="utf-8")
+
+    # ① 값 갱신
+    on_disk = load_yaml(path)
+    assert on_disk["name"] == "뮤즈2"
+    assert on_disk["big_five"]["openness"] == 0.7
+
+    # ② 주석 생존 — 머리 주석·키 옆 주석(칸 맞춤 포함)·중첩 항목 주석
+    assert text.startswith(
+        "# 합성 페르소나 — 주석 보존 검증용 (수기 설계 기록의 대역)\n"
+        "# 구조: identity + OCEAN + needs/goals + secrets\n"
+    )
+    assert "big_five:              # → baseline PAD 파생 (ADR-015)" in text
+    assert "needs_bias:            # 욕구 가중 (docs/plan/06)" in text
+    assert "goals:                 # need = 이 목표가 걸린 욕구 축" in text
+    assert "severity: 4          # 1(사소) ~ 5(파멸적)" in text
+
+    # ② 키 순서 생존 (safe_load dict 순서 = 파일 순서)
+    assert list(on_disk) == [
+        "id", "name", "archetype", "lifestyle", "active",
+        "big_five", "identity_core", "needs_bias", "goals", "secrets",
+    ]
+
+    # ③ 블록 스칼라 스타일 유지
+    assert "identity_core: |" in text
+    assert "두 번째 줄도 블록 그대로 남아야 한다." in text
+
+    # ④ 재로드 시 파싱 동일 — API가 돌려주는 값과 파일이 일치
+    assert reread["name"] == "뮤즈2"
+    assert reread["big_five"]["openness"] == 0.7
+    assert reread["identity_core"] == (
+        "주석 보존을 시험하기 위해 태어난 합성 인물.\n두 번째 줄도 블록 그대로 남아야 한다."
+    )
+
+
+async def test_put_goal_removal_keeps_sibling_comments(muse_dir):
+    # 항목 삭제 — 지운 항목만 사라지고, 남은 형제의 주석과 파일 결은 그대로
+    async with make_client(muse_dir) as client:
+        muse = (await client.get("/admin/personas/a_muse")).json()
+        muse["goals"] = [g for g in muse["goals"] if g["id"] != "g_first"]
+        resp = await client.put("/admin/personas/a_muse", json=muse)
+
+    assert resp.status_code == 200
+    path = muse_dir / "muse.yaml"
+    text = path.read_text(encoding="utf-8")
+    on_disk = load_yaml(path)  # 유효 yaml로 재파싱된다
+
+    assert [g["id"] for g in on_disk["goals"]] == ["g_second"]
+    assert "# 형제 항목 주석 — 교체에서 살아남아야 한다" in text
+    assert "goals:                 # need = 이 목표가 걸린 욕구 축" in text
+    assert text.startswith("# 합성 페르소나 —")
+
+
+async def test_put_list_replacement_keeps_matched_item_comments(muse_dir):
+    # 리스트 교체 — id가 살아남은 항목의 주석은 유지, 새 항목은 주석 없이 추가
+    async with make_client(muse_dir) as client:
+        muse = (await client.get("/admin/personas/a_muse")).json()
+        muse["goals"] = [
+            {"id": "g_second", "description": "둘째 목표(개정)",
+             "priority": 0.6, "need": "belonging"},
+            {"id": "g_third", "description": "셋째 목표",
+             "priority": 0.3, "need": "security"},
+        ]
+        resp = await client.put("/admin/personas/a_muse", json=muse)
+
+    assert resp.status_code == 200
+    path = muse_dir / "muse.yaml"
+    text = path.read_text(encoding="utf-8")
+    on_disk = load_yaml(path)
+
+    assert [g["id"] for g in on_disk["goals"]] == ["g_second", "g_third"]
+    assert on_disk["goals"][0]["description"] == "둘째 목표(개정)"
+    # 살아남은 항목(g_second)의 주석은 유지 — 값이 바뀌어도 id 줄 주석은 남는다
+    assert "# 형제 항목 주석 — 교체에서 살아남아야 한다" in text
+    # 파일 머리·형제 키 주석도 그대로
+    assert text.startswith("# 합성 페르소나 —")
+    assert "severity: 4          # 1(사소) ~ 5(파멸적)" in text
+
+
+async def test_put_legacy_file_gains_new_keys_without_losing_comments(muse_dir):
+    # active 키가 없는 구식 파일 — 저장이 키를 보태되 주석·순서를 흩뜨리지 않는다
+    legacy = MUSE_YAML.replace("active: true\n", "")
+    (muse_dir / "muse.yaml").write_text(legacy, encoding="utf-8")
+
+    async with make_client(muse_dir) as client:
+        muse = (await client.get("/admin/personas/a_muse")).json()
+        muse["active"] = False
+        resp = await client.put("/admin/personas/a_muse", json=muse)
+
+    assert resp.status_code == 200
+    path = muse_dir / "muse.yaml"
+    on_disk = load_yaml(path)
+    text = path.read_text(encoding="utf-8")
+
+    assert on_disk["active"] is False
+    assert text.startswith("# 합성 페르소나 —")
+    assert "big_five:              # → baseline PAD 파생 (ADR-015)" in text
+    assert "identity_core: |" in text
+
+
 # ── 게이트 — LF_ADMIN_TOKEN 설정 시 Bearer 일치(403), dev는 열림 ─────────────
 
 

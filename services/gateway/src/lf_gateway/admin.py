@@ -15,12 +15,16 @@
 from __future__ import annotations
 
 import hmac
+import io
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field, field_validator
+from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
+from ruamel.yaml.scalarstring import LiteralScalarString
 
 from lf_gateway.config import Config
 
@@ -200,6 +204,102 @@ def write_persona_file(path: Path, text: str) -> None:
         f.write(text)
 
 
+# ── 왕복 편집 — 기존 파일의 수기 주석·키 순서·블록 스칼라는 설계 기록이다 ─────
+#
+# yaml이 SoT(ADR-001/012)라 파일 속 주석이 곧 문서다. 저장이 재직렬화로
+# 그걸 지우면 안 되므로, 기존 파일은 ruamel round-trip으로 로드해
+# 변경 필드만 제자리 갱신한다. 한계: 교체·삭제된 리스트 항목에 붙어 있던
+# 주석은 항목과 함께 사라진다 — 파일 머리·형제 키 주석은 남는다.
+
+
+def _round_trip_yaml() -> YAML:
+    rt = YAML()  # round-trip 모드가 기본 — 주석·키 순서·스타일 보존
+    rt.preserve_quotes = True
+    rt.allow_duplicate_keys = True  # 수기 편집 실수로 저장이 죽지 않게 (뒤 값이 이긴다)
+    rt.width = 1000  # 현행 덤프와 동일 — 긴 문장을 접지 않는다
+    rt.indent(mapping=2, sequence=4, offset=2)  # `  - id: ...` — 기존 파일 결
+    return rt
+
+
+def _literal_block(value: str) -> LiteralScalarString:
+    """여러 줄 문자열의 블록 리터럴(|) 표기 — 기존 파일 결."""
+    return LiteralScalarString(value if value.endswith("\n") else value + "\n")
+
+
+def _fresh_node(value: Any) -> Any:
+    if isinstance(value, dict):
+        return CommentedMap((k, _fresh_node(v)) for k, v in value.items())
+    if isinstance(value, list):
+        return CommentedSeq(_fresh_node(v) for v in value)
+    if isinstance(value, str) and "\n" in value:
+        return _literal_block(value)
+    return value
+
+
+def _scalar_equal(old: Any, new: Any) -> bool:
+    if isinstance(old, str) and isinstance(new, str):
+        # 블록 스칼라의 꼬리 개행 등 표기 차이는 같음으로 친다 — 안 바뀐 값은 안 건드린다
+        return old.strip() == new.strip()
+    return bool(old == new)
+
+
+def _apply_sequence(target: CommentedSeq, desired: list[Any]) -> None:
+    """id가 같은 항목은 노드를 재사용한다 — 항목 안 주석(severity 등)이 산다."""
+    old_by_id = {
+        item["id"]: item
+        for item in target
+        if isinstance(item, CommentedMap) and "id" in item
+    }
+    rebuilt: list[Any] = []
+    for value in desired:
+        node = old_by_id.get(value.get("id")) if isinstance(value, dict) else None
+        if node is not None:
+            _apply_mapping(node, value)
+            rebuilt.append(node)
+        else:
+            rebuilt.append(_fresh_node(value))
+    while len(target):
+        target.pop()
+    target.extend(rebuilt)
+
+
+def _apply_mapping(target: CommentedMap, desired: dict[str, Any]) -> None:
+    """desired를 target에 제자리 반영 — 있던 키는 위치·주석 유지, 새 키는 이웃하게 삽입."""
+    for key in [k for k in target if k not in desired]:
+        del target[key]
+    prev_index = -1
+    for key, value in desired.items():
+        if key not in target:
+            target.insert(prev_index + 1, key, _fresh_node(value))
+        else:
+            old = target[key]
+            if isinstance(value, dict) and isinstance(old, CommentedMap):
+                _apply_mapping(old, value)
+            elif isinstance(value, list) and isinstance(old, CommentedSeq) and value and len(old):
+                _apply_sequence(old, value)
+            elif isinstance(value, dict | list) or isinstance(old, dict | list):
+                target[key] = _fresh_node(value)  # 형태가 바뀌면 새로 빚는다 (빈 리스트 포함)
+            elif not _scalar_equal(old, value):
+                literal = "\n" in value if isinstance(value, str) else False
+                if literal or isinstance(old, LiteralScalarString):
+                    target[key] = _literal_block(value)  # 블록 리터럴 결 유지
+                else:
+                    target[key] = value
+        prev_index = list(target).index(key)
+
+
+def update_persona_text(text: str, merged: dict[str, Any]) -> str:
+    """기존 yaml 텍스트에 merged 문서를 왕복 편집으로 반영한 새 텍스트."""
+    rt = _round_trip_yaml()
+    root = rt.load(text)
+    if not isinstance(root, CommentedMap):  # 비정형 파일 — 머리 주석만 살려 전체 재작성
+        return dump_persona_yaml(merged, leading_comment(text))
+    _apply_mapping(root, merged)
+    buf = io.StringIO()
+    rt.dump(root, buf)
+    return buf.getvalue()
+
+
 # ── 라우터 ───────────────────────────────────────────────────────────────────
 
 
@@ -233,17 +333,16 @@ def create_admin_router(cfg: Config) -> APIRouter:
             raise HTTPException(422, f"본문 id({doc.id})와 경로 id({persona_id})가 다르다")
         path = find_persona_file(cfg.personas_dir, persona_id)
         if path is None:
-            old = None
             path = new_persona_path(cfg.personas_dir, persona_id)
             if path.exists():  # 다른 id가 이미 쓰는 파일명 — 덮어쓰지 않는다
                 raise HTTPException(409, f"파일명이 이미 쓰인다: {path.name}")
-            header = f"# {doc.name} — Persona Studio\n"
+            merged = merged_yaml_doc(doc, None)
+            content = dump_persona_yaml(merged, f"# {doc.name} — Persona Studio\n")
         else:
             text = path.read_text(encoding="utf-8")
-            old = yaml.safe_load(text)
-            header = leading_comment(text)
-        merged = merged_yaml_doc(doc, old)
-        write_persona_file(path, dump_persona_yaml(merged, header))
+            merged = merged_yaml_doc(doc, yaml.safe_load(text))
+            content = update_persona_text(text, merged)  # 수기 주석·키 순서 보존
+        write_persona_file(path, content)
         return PersonaDoc.model_validate(merged)  # 저장본 — created_by 불변이 반영된 값
 
     return router

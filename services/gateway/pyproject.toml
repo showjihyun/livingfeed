@@ -10,6 +10,8 @@ dependencies = [
     "redis>=5.0",
     # 페르소나 스튜디오 관리 API — agents/personas yaml(SoT) 읽기/쓰기
     "pyyaml>=6",
+    # 기존 파일 저장은 왕복 편집 — 수기 주석·키 순서·블록 스칼라를 보존한다
+    "ruamel-yaml>=0.18",
     # 서사 푸시 발송 (plan/11 §D1) — VAPID 서명 Web Push. 동반 py-vapid의
     # `vapid` CLI로 키를 만든다 (config.py 주석 참고, 실키 커밋 금지)
     "pywebpush>=2.0",
