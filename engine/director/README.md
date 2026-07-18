@@ -50,3 +50,17 @@ uv run --package lf-director python -m lf_director.sentinel `
 1행: 5분마다 심장 박동·루프 헬스 상시 감시. 2행: 하루 한 번 프로젝션 lag까지
 전 점검. 3행: 주간 프로젝션 무결성 검사(`--verify`는 kuzu/pg/redis 각각 —
 sentinel과 별개의 깊은 검사, 어긋나면 `--rebuild` 판단 근거).
+
+### Windows 작업 스케줄러 (dev 호스트 정기 구동)
+
+```powershell
+.\infra\scripts\register-sentinel.ps1                     # 10분 간격 등록 (1분 뒤 첫 실행)
+.\infra\scripts\register-sentinel.ps1 -IntervalMinutes 5  # 간격 변경 (재등록)
+.\infra\scripts\register-sentinel.ps1 -Unregister         # 해제
+```
+
+러너(`infra/scripts/run-sentinel.ps1`)가 env 기본값(PG 5433·w_main)을 채우고
+`%LOCALAPPDATA%\LivingFeed\sentinel.log`에 결과를 누적한다 — 기설정 env가
+우선이므로 `LF_ALERT_WEBHOOK`(Slack incoming webhook 등)을 사용자 환경 변수로
+걸어두면 스케줄 실행에도 전파된다. 점검이 5분을 넘기면 강제 종료(행 방지),
+겹침은 무시된다.
