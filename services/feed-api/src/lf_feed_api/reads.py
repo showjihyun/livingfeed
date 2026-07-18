@@ -35,6 +35,7 @@ _EPISODES_SQL = """
 SELECT event_id, tick, occurred_at, summary, importance, factors, tags, source_event_ids
 FROM read.actor_episodes
 WHERE world_id = %s AND actor_id = %s AND (%s::text IS NULL OR event_id < %s)
+  AND (%s::bigint IS NULL OR tick >= %s)
 ORDER BY event_id DESC
 LIMIT %s
 """
@@ -82,11 +83,12 @@ LIMIT %s
 
 # 액터별 마지막 메시지 1건 → 최신 대화 순 — 인박스 목록의 좌표계도 event_id(ULID)다.
 # player_id 필터가 액터↔액터 대화(counterpart가 a_*)를 자연히 걸러낸다 (pg_read 참고).
+# tick(세계 시각, ADR-011)을 동봉한다 — FE '받은 것'의 조회 범위(오늘/주/월) 비교 좌표.
 _THREADS_SQL = """
-SELECT actor_id, sender, channel, text, event_id, occurred_at
+SELECT actor_id, sender, channel, text, event_id, tick, occurred_at
 FROM (
     SELECT DISTINCT ON (actor_id)
-           actor_id, sender, channel, text, event_id, occurred_at
+           actor_id, sender, channel, text, event_id, tick, occurred_at
     FROM read.messages
     WHERE world_id = %s AND player_id = %s
     ORDER BY actor_id, event_id DESC
@@ -113,10 +115,15 @@ class ProfileReads:
         return _rows_to_dicts(_IDENTITY_COLS, rows)
 
     async def actor_profile(
-        self, world_id: str, actor_id: str, *, episode_limit: int, episode_cursor: str | None
+        self, world_id: str, actor_id: str, *, episode_limit: int,
+        episode_cursor: str | None, episode_from_tick: int | None = None,
     ) -> dict[str, Any]:
         """정체성 + 신념(확신순) + 에피소드 페이지 + 인생 아크 — 액터의 겉과 속과 방향
-        (ADR-012/008/013)."""
+        (ADR-012/008/013).
+
+        episode_from_tick: 겪은 일의 조회 범위(오늘/이번 주/이번 달) tick 하한 —
+        커서 페이지네이션과 함께 걸린다 (같은 창 안에서 더 과거로).
+        """
         async with self._pool.connection() as conn:
             identity_row = await (await conn.execute(
                 _IDENTITY_SQL, (world_id, actor_id)
@@ -126,7 +133,8 @@ class ProfileReads:
             )).fetchall()
             episodes = await (await conn.execute(
                 _EPISODES_SQL,
-                (world_id, actor_id, episode_cursor, episode_cursor, episode_limit),
+                (world_id, actor_id, episode_cursor, episode_cursor,
+                 episode_from_tick, episode_from_tick, episode_limit),
             )).fetchall()
             arc_row = await (await conn.execute(
                 _ARC_SQL, (world_id, actor_id)
@@ -187,9 +195,11 @@ class ProfileReads:
                     "last_channel": channel,
                     "last_at": occurred_at,
                     "last_event_id": event_id,
+                    # 세계 tick — FE '받은 것' 조회 범위(오늘/주/월)의 비교 좌표
+                    "last_tick": tick,
                     "last_from_actor": sender == "actor",
                 }
-                for actor_id, sender, channel, text, event_id, occurred_at in rows
+                for actor_id, sender, channel, text, event_id, tick, occurred_at in rows
             ],
         }
 

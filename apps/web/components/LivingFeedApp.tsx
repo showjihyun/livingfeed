@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { TOAST_DURATION_MS, WORLD_MIN_START, formatWorldTime } from "@/lib/data";
 import { useActorDirectory } from "@/lib/actors";
@@ -14,8 +14,10 @@ import { useLiveFeed } from "@/lib/live-feed";
 import type { DmThread } from "@/lib/messages";
 import { fetchDmHistory, fetchDmThreads } from "@/lib/messages";
 import { useActorProfile } from "@/lib/profile";
+import { rangeTickBounds, type Range } from "@/lib/range";
 import { naturalDelayMs, useActorSession } from "@/lib/session";
 import type { DmMessage, FeedComment, Screen, Tab, Toast } from "@/lib/types";
+import { currentTick } from "@/lib/world-clock";
 
 import { Curating } from "./Curating";
 import { Digest } from "./Digest";
@@ -37,6 +39,11 @@ const MY_COMMENT_AUTHOR = `${PLAYER_NAME} (나)`;
 export function LivingFeedApp() {
   const [screen, setScreen] = useState<Screen>("onboarding");
   const [tab, setTab] = useState<Tab>("feed");
+  // 조회 범위(세계 시간, lib/range) — 탭마다 독립 선택, 기본은 전체(현행 화면)
+  const [feedRange, setFeedRange] = useState<Range>("all");
+  const [hiddenRange, setHiddenRange] = useState<Range>("all");
+  const [dmRange, setDmRange] = useState<Range>("all");
+  const [profileRange, setProfileRange] = useState<Range>("all");
   const [topics, setTopics] = useState<string[]>(["직장 드라마"]);
   const [worldMin, setWorldMin] = useState(WORLD_MIN_START);
   const [curateStep, setCurateStep] = useState(0);
@@ -103,8 +110,9 @@ export function LivingFeedApp() {
     [after],
   );
 
-  // 실 백엔드 라이브 피드 — 세계 입장 후에만 구독 (미가용이면 오프라인 상태만)
-  const { posts: livePosts, status: liveStatus } = useLiveFeed(screen === "app");
+  // 실 백엔드 라이브 피드 — 세계 입장 후에만 구독 (미가용이면 오프라인 상태만).
+  // 범위 선택 시 recent+from_tick 서버 조회가 합쳐진다 (SSE 구독은 범위와 무관).
+  const { posts: livePosts, status: liveStatus } = useLiveFeed(screen === "app", feedRange);
 
   // 관계 그래프 실측 (kuzu-projector, ADR-006) — 미가용이면 빈 상태
   const relGraph = useRelationshipGraph(screen === "app");
@@ -112,9 +120,10 @@ export function LivingFeedApp() {
   const worldGraph = useWorldGraph(screen === "app" && tab === "graph");
 
   // Hidden Feed — 당신에게만 닿은 비공개 이야기 (private 타임라인, ADR-014).
-  // 신뢰가 열어준다: 액터가 당신에게만 건넨 것이 하나라도 있으면 언락된다.
-  const hidden = useHiddenFeed(screen === "app");
-  const hiddenUnlocked = hidden.items.length > 0;
+  // 신뢰가 열어준다: 닿은 것이 하나라도 있었으면 언락 — 범위 조회가 비어도
+  // 래치는 유지된다 (범위는 조회 조건이지 신뢰의 철회가 아니다).
+  const hidden = useHiddenFeed(screen === "app", hiddenRange);
+  const hiddenUnlocked = hidden.unlocked;
 
   // 액터 명단(read.actors) — 표시 이름을 여기서 읽는다 (하드코딩 금지, ADR-012)
   const { byId } = useActorDirectory(screen === "app");
@@ -137,8 +146,9 @@ export function LivingFeedApp() {
     [byId],
   );
 
-  // 액터의 내면 실측 (pg-projector 신념·에피소드, ADR-003/008) — 미가용이면 데모 서사
-  const focusProfile = useActorProfile(FOCUS_ACTOR_ID, screen === "app");
+  // 액터의 내면 실측 (pg-projector 신념·에피소드, ADR-003/008) — 미가용이면 데모 서사.
+  // 겪은 일(에피소드)만 범위 조회를 받는다 — 신념·아크는 "지금의 내면"이다.
+  const focusProfile = useActorProfile(FOCUS_ACTOR_ID, screen === "app", profileRange);
 
   // 되읽은 댓글 합류 — 이미 화면에 있는 분(라이브 WS·방금 쓴 내 댓글) 앞에
   // 시간순으로 이어 붙인다 (event id 중복 제거 — DM 히스토리와 같은 규약)
@@ -447,11 +457,20 @@ export function LivingFeedApp() {
     openThread(FOCUS_ACTOR_ID);
   }, [openThread]);
 
+  // 받은 것의 조회 범위 — 마지막 메시지의 세계 tick(서버 동봉 last_tick)으로
+  // 클라에서 거른다. 목록이 로컬 우선(방금 오간 말의 낙관 갱신)이라 서버 재조회
+  // 대신 이 방식이 정직하다 — 로컬 항목(tick 미상)은 "지금"이니 어느 범위에도 든다.
+  const dmVisibleThreads = useMemo(() => {
+    const bounds = rangeTickBounds(dmRange, currentTick());
+    if (bounds === null) return dmThreads;
+    return dmThreads.filter((t) => t.lastTick === undefined || t.lastTick >= bounds.fromTick);
+  }, [dmRange, dmThreads]);
+
   // 실측 스레드가 하나도 없을 때의 시작점 — 기존 데모 인트로 경험 보존:
   // 포커스 액터에게 먼저 말을 걸 수 있는 스레드 하나를 남긴다 (이름은 디렉터리 파생)
   const displayThreads: DmThread[] =
     dmThreads.length > 0
-      ? dmThreads
+      ? dmVisibleThreads
       : [{ actorId: FOCUS_ACTOR_ID, lastText: "", lastChannel: "dm", lastAt: "", lastFromActor: false }];
 
   return (
@@ -489,6 +508,8 @@ export function LivingFeedApp() {
           <FeedTab
             livePosts={livePosts}
             liveStatus={liveStatus}
+            range={feedRange}
+            onRangeChange={setFeedRange}
             likedLive={likedLive}
             onLikeLive={likeLivePost}
             commentsByPost={commentsByPost}
@@ -513,6 +534,8 @@ export function LivingFeedApp() {
             }}
             goDm={goDm}
             profile={focusProfile.profile}
+            episodeRange={profileRange}
+            onEpisodeRangeChange={setProfileRange}
             hasMoreEpisodes={focusProfile.hasMoreEpisodes}
             loadingEpisodes={focusProfile.loadingEpisodes}
             onLoadMoreEpisodes={focusProfile.loadMoreEpisodes}
@@ -523,6 +546,8 @@ export function LivingFeedApp() {
             worldTime={worldTime}
             threads={displayThreads}
             emptyInbox={dmThreads.length === 0}
+            range={dmRange}
+            onRangeChange={setDmRange}
             nameOf={authorName}
             unread={dmUnread}
             typingActors={dmTypingActors}
@@ -540,7 +565,14 @@ export function LivingFeedApp() {
             onBack={() => setOpenDmActor(null)}
           />
         )}
-        {tab === "hidden" && <HiddenTab items={hidden.items} nameOf={authorName} />}
+        {tab === "hidden" && (
+          <HiddenTab
+            items={hidden.items}
+            nameOf={authorName}
+            range={hiddenRange}
+            onRangeChange={setHiddenRange}
+          />
+        )}
         {tab === "studio" && (
           // 창조자 도구 — 인물을 빚어 세계에 풀어놓는다. 데뷔는 World Feed에서 지켜본다.
           <StudioTab enabled={screen === "app"} onGoWorldFeed={() => setTab("feed")} />

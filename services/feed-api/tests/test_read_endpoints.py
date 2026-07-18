@@ -24,8 +24,12 @@ class FakeReads:
         self.calls.append(("actors", world_id))
         return [{"actor_id": "a_x", "name": "이름", "archetype": "arch", "bio": "b", "goals": []}]
 
-    async def actor_profile(self, world_id, actor_id, *, episode_limit, episode_cursor):
-        self.calls.append(("profile", world_id, actor_id, episode_limit, episode_cursor))
+    async def actor_profile(
+        self, world_id, actor_id, *, episode_limit, episode_cursor, episode_from_tick=None
+    ):
+        self.calls.append(
+            ("profile", world_id, actor_id, episode_limit, episode_cursor, episode_from_tick)
+        )
         return {"world_id": world_id, "actor_id": actor_id, "identity": None, "beliefs": [],
                 "episodes": {"items": [], "next_cursor": None}, "arc": None,
                 "arc_history": []}
@@ -140,7 +144,7 @@ def test_profile_and_messages_delegate_with_clamped_limits():
     assert client.get(
         "/actors/a_aria_kim/profile", params={"episode_limit": 500}
     ).status_code == 200
-    assert reads.calls[-1] == ("profile", "w_main", "a_aria_kim", 100, None)
+    assert reads.calls[-1] == ("profile", "w_main", "a_aria_kim", 100, None, None)
 
     assert client.get(
         "/messages", params={"player_id": PLAYER, "actor_id": "a_aria_kim"}

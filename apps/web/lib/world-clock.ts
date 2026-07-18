@@ -65,6 +65,14 @@ export function worldNow(nowMs: number = Date.now()): number | null {
   return anchor === null ? null : worldTimeAt(anchor, nowMs);
 }
 
+/**
+ * 현재 세계 tick — 앵커 그대로 (엔진이 진실, 보간은 표시용이다).
+ * 조회 범위(lib/range)의 "오늘" 경계 계산이 이 좌표를 쓴다. 앵커 전엔 null.
+ */
+export function currentTick(): number | null {
+  return anchor?.tick ?? null;
+}
+
 /** 표시 형식은 기존 데모 시계(data.ts)와 동일한 결 — "3월 15일 22:41" */
 export function formatWorldClock(utcMs: number): string {
   const d = new Date(utcMs);

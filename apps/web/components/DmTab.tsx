@@ -8,10 +8,12 @@ import { relativeTime } from "@/lib/live-feed";
 import type { DmThread } from "@/lib/messages";
 import { disablePush, enablePush, getPushState } from "@/lib/push";
 import type { PushState } from "@/lib/push";
+import type { Range } from "@/lib/range";
 import type { DmMessage } from "@/lib/types";
 
 import { Face } from "./Face";
 import { Icon } from "./Icon";
+import { RangeChips } from "./RangeChips";
 import styles from "./lf.module.css";
 
 const AVATAR_COLORS = ["#AFC8F5", "#F2B8CF", "#BFE3CF", "#E8D5A8", "#CBBDE8", "#A8D8E8"];
@@ -28,6 +30,9 @@ interface DmTabProps {
   threads: DmThread[];
   /** 실측 스레드가 하나도 없는가 — 빈 인박스 안내(데모 인트로 규약)를 띄우는 근거 */
   emptyInbox: boolean;
+  /** 조회 범위(세계 시간) — 인박스 목록에만 적용, 열린 대화 뷰는 대화 전체다 */
+  range: Range;
+  onRangeChange: (range: Range) => void;
   /** actor_id → 표시 이름 (라이브 디렉터리, 모르면 '누군가' 폴백) */
   nameOf: (actorId: string) => string;
   /** 아직 열어보지 않은 새 DM이 있는 스레드들 */
@@ -122,6 +127,8 @@ export function DmTab(props: DmTabProps) {
 function InboxList({
   threads,
   emptyInbox,
+  range,
+  onRangeChange,
   nameOf,
   unread,
   typingActors,
@@ -158,6 +165,29 @@ function InboxList({
           gap: 8,
         }}
       >
+        {/* 조회 범위 — 세계 시간의 창 (목록 상단, 모든 탭 공통 자리) */}
+        <RangeChips value={range} onChange={onRangeChange} />
+
+        {!emptyInbox && threads.length === 0 && (
+          // 대화는 있지만 이 기간엔 없다 — 범위의 빈 상태 (인박스의 결)
+          <div
+            style={{
+              border: "1.5px dashed #D5DEEE",
+              borderRadius: 18,
+              padding: "26px 22px",
+              textAlign: "center",
+              color: "#8C97AF",
+              fontSize: 13,
+              fontWeight: 600,
+              lineHeight: 1.7,
+              background: "#FBFCFE",
+              marginBottom: 6,
+            }}
+          >
+            이 기간엔 오간 말이 없어요 — 범위를 넓히면 지난 대화가 보여요.
+          </div>
+        )}
+
         {emptyInbox && (
           // 빈 인박스 — 세계가 먼저 말을 걸어올 때까지의 우아한 공백 (데모 인트로 규약)
           <div

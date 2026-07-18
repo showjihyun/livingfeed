@@ -75,6 +75,7 @@ interface ThreadDoc {
   last_channel: "dm" | "comment";
   last_at: string;
   last_event_id: string;
+  last_tick: number;
   last_from_actor: boolean;
 }
 
@@ -85,6 +86,11 @@ export interface DmThread {
   lastChannel: "dm" | "comment";
   /** ISO 시각 — 로컬 upsert(방금 보낸/받은 메시지)도 이 좌표를 쓴다 */
   lastAt: string;
+  /**
+   * 마지막 메시지의 세계 tick (read.messages) — 조회 범위(lib/range) 하한 비교
+   * 좌표. 로컬 upsert(방금 오간 말)는 undefined — "지금"이므로 어느 범위에도 든다.
+   */
+  lastTick?: number;
   lastFromActor: boolean;
 }
 
@@ -105,6 +111,7 @@ export async function fetchDmThreads(): Promise<DmThread[] | null> {
       lastText: t.last_text,
       lastChannel: t.last_channel,
       lastAt: t.last_at,
+      lastTick: t.last_tick,
       lastFromActor: t.last_from_actor,
     }));
   } catch {

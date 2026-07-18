@@ -24,9 +24,15 @@ def entry_kind(doc: dict[str, Any]) -> str:
 
 
 async def read_timeline(
-    redis: Any, world_id: str, player_id: str, kinds: list[str], *, limit: int, cursor: str | None
+    redis: Any, world_id: str, player_id: str, kinds: list[str], *, limit: int,
+    cursor: str | None, from_tick: int | None = None,
 ) -> dict[str, Any]:
-    """타임라인 페이지 — /feed recent와 같은 응답 계약({items, next_cursor, mode})."""
+    """타임라인 페이지 — /feed recent와 같은 응답 계약({items, next_cursor, mode}).
+
+    from_tick: 조회 범위(오늘/이번 주/이번 달, ADR-011 세계일 좌표)의 tick 하한 —
+    엔트리의 tick(모든 프로젝터 doc이 싣는다)으로 거른다. tick이 없는 엔트리는
+    창에 놓을 수 없으니 범위 조회에서 제외한다 (정직한 침묵).
+    """
     raw = await redis.zrevrange(TimelineStore.timeline_key(world_id, player_id), 0, -1)
     docs = sorted(
         (json.loads(entry) for entry in raw),
@@ -35,7 +41,9 @@ async def read_timeline(
     )
     items = [
         doc for doc in docs
-        if entry_kind(doc) in kinds and (cursor is None or doc["event_id"] < cursor)
+        if entry_kind(doc) in kinds
+        and (cursor is None or doc["event_id"] < cursor)
+        and (from_tick is None or doc.get("tick", -1) >= from_tick)
     ][:limit]
     return {
         "items": items,

@@ -142,6 +142,10 @@ def create_app(
             None, pattern=r"^p_[a-z0-9_]+$",
             description="랭킹에 관계 근접도 항을 켠다 (ADR-014 w_proximity)",
         ),
+        from_tick: int | None = Query(
+            None, ge=0,
+            description="조회 범위의 세계 tick 하한 (포함) — 오늘/이번 주/이번 달 (ADR-011)",
+        ),
     ) -> dict:
         kinds = sorted({t.strip() for t in types.split(",") if t.strip()})
         unknown = set(kinds) - FEED_KINDS
@@ -153,6 +157,8 @@ def create_app(
             if not ULID_RE.match(cursor):
                 raise HTTPException(400, "cursor는 ULID여야 한다 (post id)")
             sort = "recent"  # 커서 이어보기는 정의상 시간순이다 (search.py 참고)
+        if from_tick is not None:
+            sort = "recent"  # 범위 조회도 정의상 시간순이다 (커서와 같은 강제)
         limit = min(limit, cfg.max_limit)
 
         # Personal/Private — 플레이어 단위 타임라인 (fan-out-on-write, ADR-014 §2단).
@@ -165,15 +171,17 @@ def create_app(
             if player_id is None:
                 raise HTTPException(400, "personal/private 피드는 player_id가 필요하다")
             return await read_timeline(
-                app.state.cache, world_id, player_id, kinds, limit=limit, cursor=cursor
+                app.state.cache, world_id, player_id, kinds,
+                limit=limit, cursor=cursor, from_tick=from_tick,
             )
 
         graph = getattr(app.state, "graph", None)
         personalize = sort == "ranked" and player_id is not None and graph is not None
 
         cache_key = None
-        if cursor is None and not personalize:
-            # 첫 화면만 캐시한다 — 개인화 응답은 공유 캐시에 넣지 않는다 (ADR-014)
+        if cursor is None and not personalize and from_tick is None:
+            # 첫 화면만 캐시한다 — 개인화 응답은 공유 캐시에 넣지 않는다 (ADR-014).
+            # 범위 조회(from_tick)도 캐시하지 않는다 — 하한이 세계일과 함께 움직인다.
             cache_key = f"feed:{world_id}:{','.join(kinds)}:{sort}:{limit}"
             cached = await _cache_get(app.state.cache, cache_key)
             if cached is not None:
@@ -184,6 +192,13 @@ def create_app(
         result = await app.state.search.search(
             world_id, kinds, limit=fetch_limit, sort=sort, cursor=cursor
         )
+        if from_tick is not None:
+            # 범위 하한은 기존 recent 질의 결과에 얹는다 — search.py의 질의 body를
+            # 고치지 않는 우회다 (병렬 편집 충돌 방지; 다음 정리 커밋에서 질의로 합친다).
+            # recent(event_id/ULID 내림차순)는 시간 내림차순이고 tick은 시간에 단조라,
+            # 하한 밑 첫 항목에서 자르면 그 뒤(더 과거)에 범위 내 항목이 없다 —
+            # 페이지 후처리가 질의 필터와 동치이고, 잘렸으면 커서도 닫는 게 정직하다.
+            result = _clip_from_tick(result, from_tick)
 
         if personalize and result["items"]:
             # 세계 사건(Director incident) 포스트는 작성자가 없다 — 근접도 항 제외
@@ -279,12 +294,17 @@ def create_app(
         world_id: str = Query("w_main", pattern=r"^w_[a-z0-9_]+$"),
         episode_limit: int = Query(20, ge=1),
         episode_cursor: str | None = Query(None, description="에피소드 이어보기 (event id ULID)"),
+        episode_from_tick: int | None = Query(
+            None, ge=0,
+            description="겪은 일의 조회 범위 tick 하한 (포함) — 오늘/이번 주/이번 달 (ADR-011)",
+        ),
     ) -> dict:
         """액터의 내면 — 신념 전체 + 최근 에피소드 (ADR-008이 제품에서 드러나는 곳)."""
         return await _reads().actor_profile(
             world_id, actor_id,
             episode_limit=min(episode_limit, cfg.max_limit),
             episode_cursor=_validate_cursor(episode_cursor),
+            episode_from_tick=episode_from_tick,
         )
 
     @app.get("/story/{correlation_id}")
@@ -378,6 +398,25 @@ def create_app(
         )
 
     return app
+
+
+def _clip_from_tick(result: dict, from_tick: int) -> dict:
+    """recent 페이지를 tick 하한에서 자른다 — 조회 범위(오늘/주/월)의 서버 필터.
+
+    항목은 시간 내림차순이므로 하한 밑 첫 항목부터는 전부 범위 밖(더 과거)이다 —
+    거기서 자르고 next_cursor를 닫는다 (더 과거 페이지에 범위 내 항목이 없다).
+    tick 없는 항목은 창에 놓을 수 없으니 범위 밖으로 다룬다 (정직한 침묵).
+    """
+    items = result["items"]
+    kept = len(items)
+    for i, item in enumerate(items):
+        if item.get("tick", -1) < from_tick:
+            kept = i
+            break
+    if kept == len(items):
+        return result
+    clipped = items[:kept]
+    return {**result, "items": clipped, "next_cursor": None}
 
 
 async def _cache_get(cache: Redis, key: str) -> dict | None:

@@ -2,9 +2,11 @@ import { ICON } from "@/lib/data";
 import { relativeTime } from "@/lib/live-feed";
 import type { ActorProfile } from "@/lib/profile";
 import { ARC_STAGE_LABELS, FADED_BELIEF_MAX, humanize } from "@/lib/profile";
+import type { Range } from "@/lib/range";
 
 import { Face } from "./Face";
 import { Icon } from "./Icon";
+import { RangeChips } from "./RangeChips";
 import styles from "./lf.module.css";
 
 interface ProfileTabProps {
@@ -13,6 +15,9 @@ interface ProfileTabProps {
   goDm: () => void;
   /** pg-projector 실측 내면 (ADR-003/008) — null이면 데모 서사를 유지한다 */
   profile: ActorProfile | null;
+  /** 겪은 일(에피소드)의 조회 범위 — 세계 시간의 창 (lib/range) */
+  episodeRange: Range;
+  onEpisodeRangeChange: (range: Range) => void;
   /** 더 과거 기억 페이지가 남아있는가 — 없으면 버튼을 숨긴다 */
   hasMoreEpisodes: boolean;
   loadingEpisodes: boolean;
@@ -24,6 +29,8 @@ export function ProfileTab({
   onToggleFollow,
   goDm,
   profile,
+  episodeRange,
+  onEpisodeRangeChange,
   hasMoreEpisodes,
   loadingEpisodes,
   onLoadMoreEpisodes,
@@ -266,6 +273,8 @@ export function ProfileTab({
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {/* 조회 범위 — 겪은 일 목록 상단 (모든 탭 공통 칩, 세계 시간 기준) */}
+          <RangeChips value={episodeRange} onChange={onEpisodeRangeChange} />
           {episodes.length > 0 ? (
             episodes.map((ep) => (
               <div
@@ -299,7 +308,9 @@ export function ProfileTab({
                 fontWeight: 600,
               }}
             >
-              아직 쌓인 기억이 없어요 — 함께 겪은 일이 생기면 여기에 남습니다.
+              {episodeRange !== "all"
+                ? "이 기간의 기억이 없어요 — 범위를 넓히면 지난 날들이 보여요."
+                : "아직 쌓인 기억이 없어요 — 함께 겪은 일이 생기면 여기에 남습니다."}
             </div>
           )}
           {episodes.length > 0 && hasMoreEpisodes && (

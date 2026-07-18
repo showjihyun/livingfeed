@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import type { DerivedStories } from "@/lib/comments";
 import type { LivePost, LiveStatus } from "@/lib/live-feed";
+import type { Range } from "@/lib/range";
 import { useWorldSearch } from "@/lib/search";
 import type { WorldSearchResult } from "@/lib/search";
 import { useStory } from "@/lib/story";
@@ -10,10 +11,14 @@ import type { FeedComment } from "@/lib/types";
 import { Icon } from "./Icon";
 import { ICON } from "@/lib/data";
 import { LivePosts, StoryThread } from "./LivePosts";
+import { RangeChips } from "./RangeChips";
 
 interface FeedTabProps {
   livePosts: LivePost[];
   liveStatus: LiveStatus;
+  /** 조회 범위(세계 시간) — 전체/오늘/이번 주/이번 달 (lib/range) */
+  range: Range;
+  onRangeChange: (range: Range) => void;
   likedLive: ReadonlySet<string>;
   onLikeLive: (post: LivePost) => void;
   /** 포스트별 댓글·타이핑·작성 핸들러 — 댓글은 실제 라이브 포스트에 붙는다 */
@@ -108,6 +113,8 @@ function SearchResultCard({
 export function FeedTab({
   livePosts,
   liveStatus,
+  range,
+  onRangeChange,
   likedLive,
   onLikeLive,
   commentsByPost,
@@ -239,6 +246,9 @@ export function FeedTab({
           </>
         )}
 
+        {/* 조회 범위 — 세계 시간의 창 (목록 상단, 모든 탭 공통 자리) */}
+        {!searching && <RangeChips value={range} onChange={onRangeChange} />}
+
         {/* Aha 코치 배너 — 첫 개입을 유도 (특정 인물에 묶이지 않는 안내) */}
         {!searching && showCoach && (
           <div
@@ -298,6 +308,11 @@ export function FeedTab({
           <LivePosts
             posts={livePosts}
             status={liveStatus}
+            emptyNotice={
+              range !== "all"
+                ? "이 기간엔 세계가 조용했어요 — 범위를 넓히면 지난 이야기가 보여요."
+                : undefined
+            }
             liked={likedLive}
             onLike={onLikeLive}
             commentsByPost={commentsByPost}

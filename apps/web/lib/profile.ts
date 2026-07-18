@@ -12,6 +12,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { ActorIdentity } from "./actors";
 import { PLAYER_ID } from "./config";
+import { rangeTickBounds, type Range } from "./range";
+import { currentTick } from "./world-clock";
 
 const FEED_API_URL = process.env.NEXT_PUBLIC_LF_FEED_API_URL ?? "http://localhost:8001";
 
@@ -167,6 +169,7 @@ function fromResponse(body: ProfileResponse): ActorProfile {
 export function useActorProfile(
   actorId: string,
   enabled: boolean,
+  range: Range = "all",
 ): {
   profile: ActorProfile | null;
   available: boolean;
@@ -177,17 +180,24 @@ export function useActorProfile(
 } {
   const [profile, setProfile] = useState<ActorProfile | null>(null);
   const [episodeCursor, setEpisodeCursor] = useState<string | null>(null);
+  // 이번 조회의 tick 하한 — 첫 페이지에서 굳혀 더보기 페이지에도 같은 창을 쓴다
+  const [episodeFromTick, setEpisodeFromTick] = useState<number | null>(null);
   const [loadingEpisodes, setLoadingEpisodes] = useState(false);
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-    // 대상 액터가 바뀌면 이전 커서는 무효 — 첫 페이지부터 다시
+    // 대상 액터·범위가 바뀌면 이전 커서는 무효 — 첫 페이지부터 다시
     setEpisodeCursor(null);
+    // 겪은 일(에피소드)의 조회 범위 — 세계 tick 하한 (lib/range, ADR-011 좌표계)
+    const bounds = rangeTickBounds(range, currentTick());
+    const fromTick = bounds?.fromTick ?? null;
+    setEpisodeFromTick(fromTick);
+    const fromParam = fromTick === null ? "" : `&episode_from_tick=${fromTick}`;
     void (async () => {
       try {
         const response = await fetch(
-          `${FEED_API_URL}/actors/${actorId}/profile?episode_limit=${EPISODE_PAGE_SIZE}`,
+          `${FEED_API_URL}/actors/${actorId}/profile?episode_limit=${EPISODE_PAGE_SIZE}${fromParam}`,
         );
         if (!response.ok) throw new Error(`feed-api ${response.status}`);
         const body = (await response.json()) as ProfileResponse;
@@ -201,16 +211,17 @@ export function useActorProfile(
     return () => {
       cancelled = true;
     };
-  }, [actorId, enabled]);
+  }, [actorId, enabled, range]);
 
   // 과거 기억 이어받기 — 같은 프로필 응답에서 에피소드 페이지만 취해 아래에 붙인다
   const loadMoreEpisodes = useCallback(() => {
     if (!episodeCursor || loadingEpisodes) return;
     setLoadingEpisodes(true);
+    const fromParam = episodeFromTick === null ? "" : `&episode_from_tick=${episodeFromTick}`;
     void (async () => {
       try {
         const response = await fetch(
-          `${FEED_API_URL}/actors/${actorId}/profile?episode_limit=${EPISODE_PAGE_SIZE}&episode_cursor=${episodeCursor}`,
+          `${FEED_API_URL}/actors/${actorId}/profile?episode_limit=${EPISODE_PAGE_SIZE}&episode_cursor=${episodeCursor}${fromParam}`,
         );
         if (!response.ok) throw new Error(`feed-api ${response.status}`);
         const body = (await response.json()) as ProfileResponse;
@@ -229,7 +240,7 @@ export function useActorProfile(
         setLoadingEpisodes(false);
       }
     })();
-  }, [actorId, episodeCursor, loadingEpisodes]);
+  }, [actorId, episodeCursor, episodeFromTick, loadingEpisodes]);
 
   // 실측이 "있다"고 말하려면 내용이 있어야 한다 — 정체성·신념·기억·아크 중 하나라도
   const available =

@@ -553,6 +553,7 @@ function LivePostCard({
 export function LivePosts({
   posts,
   status,
+  emptyNotice,
   liked,
   onLike,
   commentsByPost,
@@ -563,6 +564,8 @@ export function LivePosts({
 }: {
   posts: LivePost[];
   status: LiveStatus;
+  /** 연결은 살아있는데 목록이 빈 이유(조회 범위 등) — 있으면 빈 상태 문장을 그린다 */
+  emptyNotice?: string;
   liked: ReadonlySet<string>;
   onLike: (post: LivePost) => void;
   commentsByPost: Record<string, FeedComment[]>;
@@ -602,7 +605,7 @@ export function LivePosts({
           {chip.label}
         </div>
       </div>
-      {posts.length === 0 && status !== "live" && (
+      {posts.length === 0 && (status !== "live" || emptyNotice) && (
         <div
           style={{
             border: "1.5px dashed #D8E1F0",
@@ -614,7 +617,9 @@ export function LivePosts({
             fontWeight: 600,
           }}
         >
-          아직 흐르는 이야기가 없어요 — 세계가 깨어나면 여기에 채워집니다.
+          {status !== "live"
+            ? "아직 흐르는 이야기가 없어요 — 세계가 깨어나면 여기에 채워집니다."
+            : emptyNotice}
         </div>
       )}
       {posts.map((post) => (

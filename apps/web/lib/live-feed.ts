@@ -5,16 +5,20 @@
  *
  * 초기 목록: feed-api GET /feed (랭킹 첫 화면, 평탄화된 색인 문서)
  * 라이브:    TAL subscribe() — SSE, 봉투(EventEnvelope) 수신. 재접속은 TAL 책임.
+ * 범위 조회: 오늘/이번 주/이번 달(lib/range) — recent 모드 + from_tick 서버 필터.
+ *   범위는 조회 조건이지 구독 조건이 아니다: SSE 신착은 범위와 무관하게 계속
+ *   합류하고, 화면 목록에서만 범위 밖(tick < 하한)을 숨긴다.
  * 백엔드 미가용이면 status="offline" — 화면은 데모 시나리오만 보여준다.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { createTransport } from "@livingfeed/api-client";
 import type { EventEnvelope, FeedPostPublished } from "@livingfeed/schemas";
 
 import { PLAYER_ID } from "./config";
-import { observeTick } from "./world-clock";
+import { rangeTickBounds, type Range } from "./range";
+import { currentTick, observeTick } from "./world-clock";
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_LF_GATEWAY_URL ?? "http://localhost:8000";
 const FEED_API_URL = process.env.NEXT_PUBLIC_LF_FEED_API_URL ?? "http://localhost:8001";
@@ -25,6 +29,8 @@ export type LiveStatus = "connecting" | "live" | "offline";
 export interface LivePost {
   /** post id = 봉투 event_id (ULID) — 커서와 같은 좌표계 */
   id: string;
+  /** 발생 세계 tick (ADR-011) — 조회 범위(lib/range)의 하한 비교 좌표 */
+  tick: number;
   title: string;
   body: string;
   authorId: string;
@@ -57,6 +63,7 @@ interface FeedDoc {
 function fromDoc(doc: FeedDoc): LivePost {
   return {
     id: doc.event_id,
+    tick: doc.tick,
     title: doc.title,
     body: doc.body,
     // SSE 경로(fromEnvelope)와 같은 폴백 — 작성자 없는 세계 뉴스는 "?"
@@ -73,6 +80,7 @@ function fromEnvelope(envelope: EventEnvelope): LivePost {
   const p = envelope.payload as unknown as FeedPostPublished;
   return {
     id: envelope.event_id,
+    tick: envelope.tick,
     title: p.title,
     body: p.body,
     authorId: envelope.actor_id ?? p.participants[0] ?? "?",
@@ -99,9 +107,14 @@ export function relativeTime(iso: string, now = Date.now()): string {
   return `${Math.floor(diffS / 86400)}일 전`;
 }
 
-export function useLiveFeed(enabled: boolean): { posts: LivePost[]; status: LiveStatus } {
+export function useLiveFeed(
+  enabled: boolean,
+  range: Range = "all",
+): { posts: LivePost[]; status: LiveStatus; rangeFiltered: boolean } {
   const [posts, setPosts] = useState<LivePost[]>([]);
   const [status, setStatus] = useState<LiveStatus>("connecting");
+  // 범위 조회 결과 — recent + from_tick 서버 응답 (범위를 벗어나면 버린다)
+  const [ranged, setRanged] = useState<{ fromTick: number; posts: LivePost[] } | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
@@ -147,5 +160,42 @@ export function useLiveFeed(enabled: boolean): { posts: LivePost[]; status: Live
     };
   }, [enabled]);
 
-  return { posts, status };
+  // 범위 조회 — 선택 시점의 세계 tick으로 하한을 굳혀 recent 모드로 서버 조회.
+  // 랭킹 첫 화면(전체)과 별도 상태다: 전체로 돌아오면 현행 랭킹 목록 그대로다.
+  useEffect(() => {
+    if (!enabled) return;
+    const bounds = rangeTickBounds(range, currentTick());
+    if (bounds === null) {
+      // 전체 — 또는 앵커 전(세계 미연결)이라 경계를 모른다: 필터 없음이 정직하다
+      setRanged(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(
+          `${FEED_API_URL}/feed?types=world&sort=recent&from_tick=${bounds.fromTick}&limit=${MAX_POSTS}`,
+        );
+        if (!response.ok) throw new Error(`feed-api ${response.status}`);
+        const body = (await response.json()) as { items: FeedDoc[] };
+        for (const doc of body.items) observeTick(doc.tick);
+        if (!cancelled) setRanged({ fromTick: bounds.fromTick, posts: body.items.map(fromDoc) });
+      } catch {
+        // 미가용 — 라이브 풀의 범위 내 분만 보인다 (조용한 강등)
+        if (!cancelled) setRanged({ fromTick: bounds.fromTick, posts: [] });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, range]);
+
+  // 화면 목록 — 범위 중엔 서버 범위 조회분 + 라이브 풀의 범위 내 분(SSE 신착 합류).
+  // 범위 밖 신착은 숨긴다 (범위는 조회 조건이지 구독 조건이 아니다).
+  const visible = useMemo(() => {
+    if (range === "all" || ranged === null) return posts;
+    return mergePosts(ranged.posts, posts.filter((p) => p.tick >= ranged.fromTick));
+  }, [range, ranged, posts]);
+
+  return { posts: visible, status, rangeFiltered: range !== "all" && ranged !== null };
 }
