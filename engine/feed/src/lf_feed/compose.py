@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -72,6 +73,23 @@ def load_actor_names(personas_dir: Path) -> dict[str, str]:
     return names
 
 
+# \b는 못 쓴다 — 유니코드 \w에 한글이 들어가 'p_x에게'의 끝 경계가 성립하지 않는다.
+# ASCII 영숫자가 앞에 붙은 경우만 배제한다 (grasp_… 같은 영단어 오염 방지)
+_ACTOR_REF = re.compile(r"(?<![A-Za-z0-9])a_[a-z0-9_]+")
+_PLAYER_REF = re.compile(r"(?<![A-Za-z0-9])p_[a-z0-9_]+")
+
+
+def humanize_ids(text: str, actor_names: dict[str, str]) -> str:
+    """화면 문장 정화 — 원시 id는 세계 어휘로 (리시트 정화의 결).
+
+    LLM intent·서사가 컨텍스트의 식별자를 그대로 옮겨 적는 일이 있다 —
+    액터 id는 실명 그라운딩(모르면 '누군가'), 플레이어 id는 세계 안
+    어휘('어느 관찰자')로 바꾼다. 식별자는 화면 문장에 실리지 않는다.
+    """
+    text = _ACTOR_REF.sub(lambda m: actor_names.get(m.group(0), "누군가"), text)
+    return _PLAYER_REF.sub("어느 관찰자", text)
+
+
 def build_post_event(
     envelope: dict[str, Any],
     *,
@@ -122,8 +140,8 @@ def build_post_event(
         event_id=post_id,
         payload={
             "visibility": "world",
-            "title": title[:200],
-            "body": payload["intent"][:2000],
+            "title": humanize_ids(title, actor_names)[:200],
+            "body": humanize_ids(payload["intent"], actor_names)[:2000],
             "narration_kind": narration_kind,
             "participants": participants,
             "community_id": None,

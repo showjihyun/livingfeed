@@ -63,9 +63,33 @@ def test_build_post_event_payload_matches_schema():
     assert event.payload["tags"] == ["speak"]
 
 
-def test_build_post_event_without_names_falls_back_to_ids():
+def test_build_post_event_without_names_grounds_to_anonymous():
+    # 이름을 모르는 액터도 원시 id는 화면 문장에 싣지 않는다 — '누군가' (내레이터의 결)
     event = build_post_event(SAMPLE, drama=0.5, score=0.4, actor_names={})
-    assert "a_aria_kim" in event.payload["title"]
+    assert "a_aria_kim" not in event.payload["title"]
+    assert "누군가" in event.payload["title"]
+
+
+def test_build_post_event_humanizes_raw_ids_in_body():
+    """LLM intent가 옮겨 적은 식별자는 세계 어휘로 정화된다 — 실사고 재발 방지.
+
+    실제 사례: 발행 본문에 'p_observer_0417에게 …'가 그대로 실렸다 (2026-07-18).
+    """
+    leaky = {
+        **SAMPLE,
+        "payload": {
+            **SAMPLE["payload"],
+            "intent": (
+                "노래로 고민을 털어놓고, p_observer_0417에게 용기를 바란다. "
+                "a_aria_kim의 글에 답하며."
+            ),
+        },
+    }
+    event = build_post_event(leaky, drama=0.5, score=0.4, actor_names=NAMES)
+    body = event.payload["body"]
+    assert "p_observer_0417" not in body and "a_aria_kim" not in body
+    assert "어느 관찰자에게 용기를 바란다" in body
+    assert "김아리의 글에 답하며" in body  # 액터는 실명 그라운딩
 
 
 def test_llm_headline_becomes_title_with_llm_narration():

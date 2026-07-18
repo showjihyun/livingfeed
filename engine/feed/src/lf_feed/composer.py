@@ -31,6 +31,7 @@ from lf_feed.compose import (
     evaluate_debut,
     evaluate_goal_achievement,
     evaluate_incident,
+    humanize_ids,
     load_actor_names,
 )
 from lf_feed.config import Config
@@ -173,7 +174,8 @@ class FeedComposer:
                 tick=envelope["tick"],
             )
             if narrated:
-                event.payload["body"] = narrated[:2000]
+                # 서사도 정화를 지난다 — LLM이 재료의 식별자를 되뱉을 수 있다
+                event.payload["body"] = humanize_ids(narrated, self._names)[:2000]
                 event.payload["narration_kind"] = "llm"
         await append(conn, PRINCIPAL, [event], expected_head=0)
         logger.info(
