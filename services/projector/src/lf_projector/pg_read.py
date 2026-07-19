@@ -19,6 +19,9 @@
 소멸도 프로젝션이다: actor.identity.retired(스튜디오 삭제)가 그 액터의 행과
 그의 포스트 스레드를 지운다 — es는 불변, read 모델이 이벤트를 소비해 집행한다
 (_RETIRE_SQLS/_RETIRE_THREADS_SQL — 리플레이해도 같은 소멸이 재생성된다).
+부활도 프로젝션이다: actor.identity.returned(복원)가 같은 PG의 es(SoT)에서
+그 액터 범위(returned ULID 이전)를 같은 apply에 다시 먹여 은퇴가 지운 행을
+되만든다 (_return — 라이브와 from-es 리플레이가 같은 경로라 결정적이다).
 """
 
 from __future__ import annotations
@@ -27,6 +30,8 @@ import json
 from typing import Any
 
 from psycopg import AsyncConnection
+
+from lf_projector.replay import return_envelopes
 
 DDL = """
 CREATE SCHEMA IF NOT EXISTS read;
@@ -182,6 +187,8 @@ ON CONFLICT (event_id) DO NOTHING
 
 #: 은퇴 소멸 — 스튜디오 삭제(actor.identity.retired)의 read 스키마 집행
 RETIRED_TYPE = "actor.identity.retired"
+#: 부활 재사영 — 복원(actor.identity.returned)이 소멸의 역을 집행한다
+RETURNED_TYPE = "actor.identity.returned"
 
 #: 그 액터의 행 전부. event_id(ULID) < 은퇴 이벤트 가드가 재전달·순서 뒤집힘을
 #: 흡수한다 — 은퇴 뒤에 도착한(더 큰 ULID) 재선언·새 사건은 살아남는다 (신념
@@ -341,6 +348,9 @@ class ReadStore:
         if envelope["type"] == RETIRED_TYPE:
             await self._retire(envelope)
             return True
+        if envelope["type"] == RETURNED_TYPE:
+            await self._return(envelope)
+            return True
         projections = PROJECTIONS.get(envelope["type"])
         if projections is None:
             return False
@@ -359,6 +369,19 @@ class ReadStore:
             await self._conn.execute(_RETIRE_THREADS_SQL, params)
         for sql in _RETIRE_SQLS:
             await self._conn.execute(sql, params)
+
+    async def _return(self, envelope: dict[str, Any]) -> None:
+        """부활 재사영 — 은퇴가 지운 그 액터 범위의 es를 같은 apply에 다시 먹인다.
+
+        범위(RETURN_SCOPES["pg"])는 _RETIRE_SQLS/_RETIRE_THREADS_SQL과 정확히
+        대칭이고 returned ULID 이전으로 닫힌다. upsert/ON CONFLICT 경로 재사용이라
+        재적용은 무연산(멱등)이고, 이후의 재은퇴는 더 큰 ULID 가드로 이것을 다시
+        지운다. es가 없는 DB면 되살릴 원천도 없다 (_retire와 같은 전제).
+        """
+        if not await self._has_es():
+            return
+        async for past in return_envelopes(self._conn, "pg", envelope):
+            await self.apply(past)
 
     async def _has_es(self) -> bool:
         """es(SoT)가 같은 DB에 있는가 — 은퇴 스레드 역추적의 전제 (없으면 생략)."""

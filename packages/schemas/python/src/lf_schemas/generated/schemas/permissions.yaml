@@ -23,8 +23,10 @@ principals:
     - "feed.*"
   services.gateway:
     - "player.*"
-    # 스튜디오 은퇴(DELETE)의 이벤트화 — gateway가 발행하는 유일한 actor.* 이벤트.
-    # 접두 와일드카드가 아니라 정확한 타입 하나만 — 액터의 삶은 engine.actor의 몫이다.
+    # 스튜디오 은퇴(DELETE)의 이벤트화 — gateway가 발행하는 actor.* 이벤트 둘 중 하나.
+    # 접두 와일드카드가 아니라 정확한 타입만 — 액터의 삶은 engine.actor의 몫이다.
     - "actor.identity.retired"
+    # 복원(returned)도 스튜디오의 결정이다 — 은퇴의 역방향, 같은 저자성 (재사영은 프로젝터의 몫).
+    - "actor.identity.returned"
   services.ai-runtime: []        # AI Runtime은 이벤트를 발행하지 않는다 (ADR-018)
   services.projector: []         # 프로젝터는 절대 발행하지 않는다 (ADR-003 계약 4)

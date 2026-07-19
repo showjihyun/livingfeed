@@ -7,6 +7,9 @@ messages/arc_history)은 개수를, 신념은 (actor, kind, about) 슬롯 수를
 은퇴(actor.identity.retired)도 원천의 일부다: 기대 계산은 "그 행의 이벤트보다
 나중(event_id ULID 비교, ADR-002)에 그 액터의 은퇴가 있으면 소멸했다"로
 프로젝션의 소멸 가드(_RETIRE_SQLS)와 동형이다 — 은퇴 액터 때문에 어긋나지 않는다.
+부활(actor.identity.returned)은 그 은퇴를 무른다: 은퇴 뒤에 부활이 또 있으면
+소멸이 아니다 — "행 이후의 마지막 라이프사이클 이벤트가 retired일 때만 소멸"
+(_NO_LATER_RETURN, 재사영 _return과 동형). 재은퇴는 다시 소멸로 친다.
 """
 
 from __future__ import annotations
@@ -18,6 +21,15 @@ from psycopg import AsyncConnection
 
 logger = logging.getLogger("lf.projector.pg_verify")
 
+#: "그 은퇴(r) 뒤에 같은 액터의 부활이 없다" — 각 소멸 판정의 공통 꼬리.
+#: 부활이 있으면 은퇴는 물러났고, 부활 뒤의 재은퇴는 새 r로 다시 걸린다.
+_NO_LATER_RETURN = (
+    " AND NOT EXISTS ("
+    "   SELECT 1 FROM es.events t"
+    "   WHERE t.world_id = r.world_id AND t.type = 'actor.identity.returned'"
+    "     AND t.actor_id = r.actor_id AND t.event_id > r.event_id)"
+)
+
 #: (이름, 기대 SQL, 실측 SQL) — 스칼라 비교(개수/슬롯 수)
 _COUNTS: tuple[tuple[str, str, str], ...] = (
     (
@@ -27,7 +39,7 @@ _COUNTS: tuple[tuple[str, str, str], ...] = (
         " AND NOT EXISTS ("
         "   SELECT 1 FROM es.events r"
         "   WHERE r.world_id = m.world_id AND r.type = 'actor.identity.retired'"
-        "     AND r.actor_id = m.actor_id AND r.event_id > m.event_id)",
+        f"     AND r.actor_id = m.actor_id AND r.event_id > m.event_id{_NO_LATER_RETURN})",
         "SELECT count(*) FROM read.actor_episodes WHERE world_id = %s",
     ),
     (
@@ -38,7 +50,7 @@ _COUNTS: tuple[tuple[str, str, str], ...] = (
         "   SELECT 1 FROM es.events r"
         "   WHERE r.world_id = a.world_id AND r.type = 'actor.identity.retired'"
         "     AND r.actor_id = a.payload->>'target_actor_id'"
-        "     AND r.event_id > a.event_id)",
+        f"     AND r.event_id > a.event_id{_NO_LATER_RETURN})",
         "SELECT count(*) FROM read.actor_arc_history WHERE world_id = %s",
     ),
     (
@@ -57,7 +69,7 @@ _COUNTS: tuple[tuple[str, str, str], ...] = (
         "         SELECT 1 FROM es.events p"
         "         WHERE p.world_id = m.world_id AND p.type = 'feed.post.published'"
         "           AND p.event_id = m.payload->>'post_id'"
-        "           AND p.actor_id = r.actor_id)))",
+        f"           AND p.actor_id = r.actor_id)){_NO_LATER_RETURN})",
         "SELECT count(*) FROM read.messages WHERE world_id = %s",
     ),
     (
@@ -73,7 +85,7 @@ _COUNTS: tuple[tuple[str, str, str], ...] = (
         "   SELECT 1 FROM es.events r"
         "   WHERE r.world_id = s.world_id AND r.type = 'actor.identity.retired'"
         "     AND r.actor_id IN (s.actor_id, s.about_id)"
-        "     AND r.event_id > s.last_event)",
+        f"     AND r.event_id > s.last_event{_NO_LATER_RETURN})",
         "SELECT count(*) FROM read.actor_beliefs WHERE world_id = %s",
     ),
 )
@@ -87,7 +99,7 @@ _KEY_SETS: tuple[tuple[str, str, str], ...] = (
         " AND NOT EXISTS ("
         "   SELECT 1 FROM es.events r"
         "   WHERE r.world_id = d.world_id AND r.type = 'actor.identity.retired'"
-        "     AND r.actor_id = d.actor_id AND r.event_id > d.event_id)",
+        f"     AND r.actor_id = d.actor_id AND r.event_id > d.event_id{_NO_LATER_RETURN})",
         "SELECT actor_id FROM read.actors WHERE world_id = %s",
     ),
     (
@@ -98,7 +110,7 @@ _KEY_SETS: tuple[tuple[str, str, str], ...] = (
         "   SELECT 1 FROM es.events r"
         "   WHERE r.world_id = a.world_id AND r.type = 'actor.identity.retired'"
         "     AND r.actor_id = a.payload->>'target_actor_id'"
-        "     AND r.event_id > a.event_id)",
+        f"     AND r.event_id > a.event_id{_NO_LATER_RETURN})",
         "SELECT actor_id FROM read.actor_arcs WHERE world_id = %s",
     ),
 )

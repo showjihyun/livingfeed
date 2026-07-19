@@ -18,17 +18,42 @@ from typing import Any
 import nats
 from lf_dispatcher.subjects import dlq_subject
 from nats.js.errors import NotFoundError
+from psycopg import AsyncConnection
 
 from lf_projector.config import Config
 from lf_projector.consume import batches
 from lf_projector.lag import KindMetrics, LagAggregator, observe
 from lf_projector.os_index import OpenSearchIndex, envelope_to_doc
+from lf_projector.replay import return_envelopes
 
 logger = logging.getLogger("lf.projector.os")
 
 FEED_POST_TYPE = "feed.post.published"
 #: 은퇴 소멸 — 스튜디오 삭제의 이벤트화. 그 액터의 포스트 문서를 인덱스에서 지운다
 RETIRED_TYPE = "actor.identity.retired"
+#: 부활 재색인 — 복원의 이벤트화. 그 액터의 포스트를 es(SoT)에서 다시 읽어 색인한다
+RETURNED_TYPE = "actor.identity.returned"
+
+
+async def reindex_returned(
+    index: OpenSearchIndex, conn: AsyncConnection, envelope: dict[str, Any]
+) -> int:
+    """부활 재색인 — 그 액터의 feed.post.published(returned 이전)를 es에서 다시 먹인다.
+
+    같은 문서 변환(envelope_to_doc)과 _id=event_id upsert라 재실행이 안전하고
+    (자연 멱등), delete_by_actor(은퇴 소멸)와 정확히 대칭이다. 라이브 소비와
+    from-es 리플레이가 이 함수 하나를 부른다 (결정적 부활). 반환: 색인 문서 수.
+    """
+    docs: list[dict[str, Any]] = []
+    total = 0
+    async for past in return_envelopes(conn, "os", envelope):
+        docs.append(envelope_to_doc(past))
+        if len(docs) >= 500:
+            await index.bulk_upsert(docs)
+            total += len(docs)
+            docs = []
+    await index.bulk_upsert(docs)
+    return total + len(docs)
 
 
 class OsProjector:
@@ -114,6 +139,42 @@ class OsProjector:
                 done += 1
         return done
 
+    async def return_batch(
+        self, msgs: list[Any], index: OpenSearchIndex, js: Any
+    ) -> int:
+        """부활 봉투 배치 — 액터별 es 재색인(reindex_returned). 반환: 집행한 부활 수.
+
+        es 접속은 cfg.database_url — from-es 리빌드가 이미 쓰는 같은 접근이다
+        (파생 원천 접근, 계층 위반 아님). 부활은 드문 사건이라 건별 접속을 수용한다.
+        """
+        done = 0
+        for msg in msgs:
+            try:
+                envelope = json.loads(msg.data)
+                async with await AsyncConnection.connect(
+                    self._cfg.database_url, autocommit=True
+                ) as conn:
+                    restored = await reindex_returned(index, conn, envelope)
+            except (json.JSONDecodeError, KeyError, TypeError) as e:
+                if msg.metadata.num_delivered >= self._cfg.max_deliver:
+                    await self._to_dlq(msg, js, reason=repr(e))
+                else:
+                    await msg.nak(delay=self._cfg.nak_delay_s)
+            except Exception:
+                if msg.metadata.num_delivered >= self._cfg.max_deliver:
+                    await self._to_dlq(msg, js, reason="재색인 반복 실패")
+                else:
+                    await msg.nak(delay=self._cfg.nak_delay_s)
+            else:
+                logger.info(
+                    "부활 재색인 — actor=%s 문서 %d건",
+                    envelope["payload"]["actor_id"], restored,
+                )
+                observe(self._lag, envelope, logger, metrics=self._metrics)
+                await msg.ack()
+                done += 1
+        return done
+
     async def _to_dlq(self, msg: Any, js: Any, *, reason: str) -> None:
         # 조용한 유실 금지 (ADR-017 §4). 도메인 발행이 아니라 인프라 이동이다 —
         # 프로젝터의 발행 금지 계약(ADR-003 계약 4)은 outbox/도메인 스트림에 적용된다.
@@ -126,11 +187,12 @@ class OsProjector:
         await msg.ack()
 
     def _sources(self) -> tuple[tuple[str, str, str, Any], ...]:
-        """(스트림, filter 조각, durable, 배치 핸들러) — 은퇴는 LF_ACTOR에서 따로 온다."""
+        """(스트림, filter 조각, durable, 배치 핸들러) — 은퇴·부활은 LF_ACTOR에서 따로 온다."""
         cfg = self._cfg
         return (
             (cfg.stream, FEED_POST_TYPE, cfg.durable, self.project_batch),
             ("LF_ACTOR", RETIRED_TYPE, f"{cfg.durable}-retire", self.retire_batch),
+            ("LF_ACTOR", RETURNED_TYPE, f"{cfg.durable}-return", self.return_batch),
         )
 
     async def _consume(

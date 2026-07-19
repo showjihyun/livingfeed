@@ -37,7 +37,8 @@ from lf_projector.kuzu_verify import verify_worlds
 from lf_projector.lag import LagMetrics
 from lf_projector.os_index import OpenSearchIndex, envelope_to_doc
 from lf_projector.os_projector import RETIRED_TYPE as OS_RETIRED_TYPE
-from lf_projector.os_projector import OsProjector
+from lf_projector.os_projector import RETURNED_TYPE as OS_RETURNED_TYPE
+from lf_projector.os_projector import OsProjector, reindex_returned
 from lf_projector.pg_projector import PgProjector
 from lf_projector.pg_read import ReadStore
 from lf_projector.pg_verify import verify_pg
@@ -105,7 +106,8 @@ async def run_from_es(kind: str) -> int:
             projector = KuzuProjector(cfg)
             try:
                 projector.graph.drop_all()
-                fed = await replay_into(conn, PATTERNS["kuzu"], projector.replay_apply())
+                # conn 전달 — returned의 부활 재사영이 같은 es 원천을 쓴다 (결정적)
+                fed = await replay_into(conn, PATTERNS["kuzu"], projector.replay_apply(conn))
             finally:
                 projector.graph.close()
         elif kind == "redis":
@@ -114,7 +116,7 @@ async def run_from_es(kind: str) -> int:
                 store = TimelineStore(redis)
                 await store.drop_all()
                 fed = await replay_into(
-                    conn, PATTERNS["redis"], RedisProjector(cfg).replay_apply(store)
+                    conn, PATTERNS["redis"], RedisProjector(cfg).replay_apply(store, conn)
                 )
             finally:
                 await redis.aclose()
@@ -133,6 +135,12 @@ async def run_from_es(kind: str) -> int:
                         await index.delete_by_actor(
                             envelope["world_id"], envelope["payload"]["actor_id"]
                         )
+                        continue
+                    if envelope["type"] == OS_RETURNED_TYPE:
+                        # 부활도 같은 순서 규율 — 먼저 밀고 es에서 재색인한다
+                        await index.bulk_upsert(docs)
+                        docs = []
+                        await reindex_returned(index, conn, envelope)
                         continue
                     docs.append(envelope_to_doc(envelope))
                     if len(docs) >= 500:

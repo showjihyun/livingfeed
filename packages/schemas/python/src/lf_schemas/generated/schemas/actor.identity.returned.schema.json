@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/actor.identity.returned.schema.json",
+  "title": "ActorIdentityReturned",
+  "description": "은퇴했던 페르소나가 세계로 복원된다 — actor.identity.retired의 역방향. es는 불변이라 복원도 역사의 한 사건이다: gateway가 적재하고, read 모델(pg/os/kuzu/redis 프로젝터)이 이 이벤트를 소비해 es(SoT)에서 그 액터 범위(returned ULID 이전)를 재사영한다 — 은퇴가 지웠던 글·댓글·관계·프로필이 되살아난다. 리플레이(--rebuild --from-es) 중의 returned도 같은 재사영을 하므로 라이브와 동일 경로다 (ADR-003 계약 3 — 파생물 원칙).",
+  "type": "object",
+  "properties": {
+    "actor_id": {
+      "type": "string",
+      "description": "복원되는 액터 — 봉투 actor_id/stream_key와 동일 (소비측 재사영 키)",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "description": "복원 시점의 표시 이름 — 재사영이 끝나기 전의 서사·로그 재료",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "returned_by": {
+      "type": "string",
+      "description": "복원을 결정한 플레이어 (페르소나 스튜디오) — 은퇴와 같은 저자성의 표식",
+      "pattern": "^p_[a-z0-9_]+$"
+    }
+  },
+  "required": ["actor_id", "name", "returned_by"],
+  "additionalProperties": false
+}

@@ -11,6 +11,9 @@ milestone 어느 쪽이든 첫 이벤트가 그래프 엣지를 만든다 (graph
 은퇴(actor.identity.retired)도 원천의 일부다: 끝점의 은퇴가 그 키의 마지막
 관계 이벤트보다 나중이면 간선은 소멸했다 (apply_retired의 양방향 소멸과 동형,
 event_id ULID 비교 — ADR-002) — 은퇴 액터 때문에 어긋나지 않는다.
+부활(actor.identity.returned)은 그 은퇴를 무른다: 액터의 마지막 라이프사이클
+이벤트가 returned면 은퇴자가 아니다 (reproject_returned가 간선을 되살렸다) —
+기대에 다시 포함된다. 마지막이 retired(재은퇴)면 다시 소멸 기준이 된다.
 """
 
 from __future__ import annotations
@@ -29,9 +32,13 @@ _EXPECTED_SQL = (
     "SELECT stream_key, max(event_id) FROM es.events "
     "WHERE world_id = %s AND stream = 'relationship' GROUP BY stream_key"
 )
-_RETIRED_SQL = (
-    "SELECT actor_id, max(event_id) FROM es.events "
-    "WHERE world_id = %s AND type = 'actor.identity.retired' GROUP BY actor_id"
+#: 액터별 마지막 라이프사이클(은퇴/부활) 이벤트 — 마지막이 retired인 액터만
+#: 소멸 기준(retired)으로 남는다 (부활이 이긴다 — reproject_returned와 동형)
+_LIFECYCLE_SQL = (
+    "SELECT DISTINCT ON (actor_id) actor_id, type, event_id FROM es.events "
+    "WHERE world_id = %s AND type IN"
+    " ('actor.identity.retired', 'actor.identity.returned')"
+    " ORDER BY actor_id, event_id DESC"
 )
 _WORLDS_SQL = "SELECT DISTINCT world_id FROM es.events WHERE stream = 'relationship'"
 
@@ -53,12 +60,16 @@ async def expected_edges(conn: AsyncConnection, world_id: str) -> set[tuple[str,
     """원천에서 파생되는 기대 엣지 집합 — relationship 스트림 키가 곧 방향 엣지다.
 
     끝점의 은퇴가 그 키의 마지막 관계 이벤트보다 나중이면 간선은 소멸했다
-    (apply_retired와 동형). 은퇴 뒤의 새 관계 이벤트는 간선을 되살린다.
+    (apply_retired와 동형). 은퇴 뒤의 새 관계 이벤트는 간선을 되살리고,
+    은퇴 뒤의 부활(returned)도 간선을 되살린다 — 마지막 라이프사이클이 이긴다.
     """
     rows = await (await conn.execute(_EXPECTED_SQL, (world_id,))).fetchall()
-    retired: dict[str, str] = dict(
-        await (await conn.execute(_RETIRED_SQL, (world_id,))).fetchall()
-    )
+    lifecycle = await (await conn.execute(_LIFECYCLE_SQL, (world_id,))).fetchall()
+    retired: dict[str, str] = {
+        actor: event_id
+        for actor, type_, event_id in lifecycle
+        if type_ == "actor.identity.retired"
+    }
     edges: set[tuple[str, str]] = set()
     for stream_key, last_event in rows:
         from_id, _, to_id = stream_key.partition("|")

@@ -7,12 +7,13 @@
 4. 단방향 — 도메인 이벤트를 발행하지 않는다
 5. 격리 — 다른 프로젝터와 consumer 독립
 
-소스 다섯이 곧 팬아웃 파이프라인이다:
-- relationship.*          → 팔로워 인덱스 stand-in + 변화 리시트 (액터→플레이어 Private)
-- player.follow.changed   → 명시 팔로우/철회 (진짜 팔로우 모델 — 철회가 이긴다)
-- feed.post.published     → 팔로워 타임라인으로 fan-out-on-write
-- actor.message.sent      → 수신 플레이어 타임라인 (Private 단독 배달)
-- actor.identity.retired  → 은퇴 소멸 — 팔로워 인덱스와 타임라인의 발신분을 걷는다
+소스 여섯이 곧 팬아웃 파이프라인이다:
+- relationship.*           → 팔로워 인덱스 stand-in + 변화 리시트 (액터→플레이어 Private)
+- player.follow.changed    → 명시 팔로우/철회 (진짜 팔로우 모델 — 철회가 이긴다)
+- feed.post.published      → 팔로워 타임라인으로 fan-out-on-write
+- actor.message.sent       → 수신 플레이어 타임라인 (Private 단독 배달)
+- actor.identity.retired   → 은퇴 소멸 — 팔로워 인덱스와 타임라인의 발신분을 걷는다
+- actor.identity.returned  → 부활 재사영 — es에서 그 액터 범위를 위 넷에 다시 먹인다
 """
 
 from __future__ import annotations
@@ -26,12 +27,13 @@ from typing import Any
 import nats
 from lf_dispatcher.subjects import dlq_subject
 from nats.js.errors import NotFoundError
+from psycopg import AsyncConnection
 from redis.asyncio import Redis
 
 from lf_projector.config import Config
 from lf_projector.consume import batches
 from lf_projector.lag import KindMetrics, LagAggregator, observe
-from lf_projector.replay import matches
+from lf_projector.replay import matches, return_envelopes
 from lf_projector.timeline import TimelineStore, follower_pair
 
 logger = logging.getLogger("lf.projector.redis")
@@ -41,6 +43,8 @@ POST_TYPE = "feed.post.published"
 FOLLOW_TYPE = "player.follow.changed"
 #: 은퇴 소멸 — 스튜디오 삭제의 이벤트화. 타임라인의 그 액터 발신분을 걷는다
 RETIRED_TYPE = "actor.identity.retired"
+#: 부활 재사영 — 복원의 이벤트화. es에서 그 액터 범위를 기존 appliers에 다시 먹인다
+RETURNED_TYPE = "actor.identity.returned"
 
 
 class RedisProjector:
@@ -52,13 +56,14 @@ class RedisProjector:
         self._metrics = metrics
 
     def _sources(
-        self, store: TimelineStore
+        self, store: TimelineStore, conn: AsyncConnection | None = None
     ) -> tuple[tuple[str, str, str, Callable[[dict[str, Any]], Awaitable[None]]], ...]:
         """(스트림, durable, filter subject 조각, 핸들러).
 
-        durable은 스트림 이름에서 파생되지만, LF_ACTOR를 두 filter로 나눠 듣는
-        은퇴 소스만은 접미사(-retire)로 갈라선다 — 같은 durable에 다른 filter를
-        걸 수 없다 (consumer 독립, ADR-003 계약 5).
+        durable은 스트림 이름에서 파생되지만, LF_ACTOR를 여러 filter로 나눠 듣는
+        은퇴·부활 소스만은 접미사(-retire/-return)로 갈라선다 — 같은 durable에
+        다른 filter를 걸 수 없다 (consumer 독립, ADR-003 계약 5). conn은 부활
+        재사영의 es 원천 — 리플레이가 넘기고, 라이브(None)는 직접 접속한다.
         """
         return (
             ("LF_REL", self._durable("LF_REL"), "relationship.>",
@@ -68,6 +73,8 @@ class RedisProjector:
             ("LF_ACTOR", self._durable("LF_ACTOR"), REPLY_TYPE, self._apply_reply(store)),
             ("LF_ACTOR", f"{self._cfg.redis_durable}-retire", RETIRED_TYPE,
              self._apply_retired(store)),
+            ("LF_ACTOR", f"{self._cfg.redis_durable}-return", RETURNED_TYPE,
+             self._apply_returned(store, conn)),
         )
 
     def _apply_relationship(self, store: TimelineStore):
@@ -111,11 +118,51 @@ class RedisProjector:
             logger.info("은퇴 소멸 — actor=%s 타임라인 엔트리 %d건", actor_id, removed)
         return apply
 
+    def _apply_returned(self, store: TimelineStore, conn: AsyncConnection | None = None):
+        async def apply(envelope: dict[str, Any]) -> None:
+            if conn is not None:
+                fed = await self.reproject_returned(store, conn, envelope)
+            else:
+                # 라이브 소비 — es가 사는 PG에 직접 접속한다. from-es 리빌드가
+                # 이미 같은 접근(cfg.database_url)을 쓰므로 계층 위반이 아니다.
+                async with await AsyncConnection.connect(
+                    self._cfg.database_url, autocommit=True
+                ) as own:
+                    fed = await self.reproject_returned(store, own, envelope)
+            logger.info(
+                "부활 재사영 — actor=%s 봉투 %d건 재적용",
+                envelope["payload"]["actor_id"], fed,
+            )
+        return apply
+
+    async def reproject_returned(
+        self, store: TimelineStore, conn: AsyncConnection, envelope: dict[str, Any]
+    ) -> int:
+        """부활 재사영 — 그 액터 범위의 es(returned 이전)를 기존 appliers에 다시 먹인다.
+
+        global_seq 순서라 팔로워 인덱스·거부 마커가 먼저 복원되고 그 위로 포스트
+        팬아웃·답장·리시트가 다시 실린다 — retire_actor가 걷은 것과 대칭. ZADD/SADD
+        재기록이라 재적용은 무연산(멱등)이고, 라이브와 from-es가 같은 경로다.
+        범위 술어가 라이프사이클 이벤트를 제외하므로 재귀하지 않는다.
+        """
+        apply = self.replay_apply(store, conn)
+        fed = 0
+        async for past in return_envelopes(conn, "redis", envelope):
+            await apply(past)
+            fed += 1
+        return fed
+
     def replay_apply(
-        self, store: TimelineStore
+        self, store: TimelineStore, conn: AsyncConnection | None = None
     ) -> Callable[[dict[str, Any]], Awaitable[None]]:
-        """from-es 리플레이 어댑터 — _sources와 같은 술어로 적용자를 고른다."""
-        routes = tuple((segment, apply) for _, _, segment, apply in self._sources(store))
+        """from-es 리플레이 어댑터 — _sources와 같은 술어로 적용자를 고른다.
+
+        returned는 es 범위 재사영이라 conn이 필요하다 — 리플레이 호출자는
+        읽고 있는 그 conn을 넘긴다 (같은 원천 = 결정적).
+        """
+        routes = tuple(
+            (segment, apply) for _, _, segment, apply in self._sources(store, conn)
+        )
 
         async def apply(envelope: dict[str, Any]) -> None:
             for pattern, fn in routes:

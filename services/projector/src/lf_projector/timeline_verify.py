@@ -2,7 +2,8 @@
 
 기대 집합은 두 원천의 fold다 (timeline.py의 쓰기 규칙과 동형):
 관계 유래(액터↔플레이어 관계 스트림 키) ∪ 명시 팔로우 − 명시 철회(이긴다)
-− 은퇴 액터(actor.identity.retired — retire_actor가 인덱스 키를 걷는다).
+− 은퇴 액터(마지막 라이프사이클이 retired — retire_actor가 인덱스 키를 걷는다.
+마지막이 returned면 부활 재사영이 되살렸으니 기대에 다시 포함된다).
 타임라인(lf:tl) 자체는 상한·최종 일관성 때문에 개수 비교가 무의미해 검사하지
 않는다 — 인덱스가 맞으면 다음 포스트부터의 팬아웃이 맞는다.
 """
@@ -27,9 +28,13 @@ _FOLLOW_SQL = (
     "SELECT payload FROM es.events"
     " WHERE world_id = %s AND type = 'player.follow.changed' ORDER BY event_id"
 )
-_RETIRED_SQL = (
-    "SELECT DISTINCT actor_id FROM es.events"
-    " WHERE world_id = %s AND type = 'actor.identity.retired'"
+#: 액터별 마지막 라이프사이클(은퇴/부활) — 마지막이 retired인 액터만 은퇴자다
+#: (부활이 이긴다 — reproject_returned가 인덱스·발신분을 되살렸다)
+_LIFECYCLE_SQL = (
+    "SELECT DISTINCT ON (actor_id) actor_id, type FROM es.events"
+    " WHERE world_id = %s AND type IN"
+    " ('actor.identity.retired', 'actor.identity.returned')"
+    " ORDER BY actor_id, event_id DESC"
 )
 _WORLDS_SQL = (
     "SELECT DISTINCT world_id FROM es.events"
@@ -46,8 +51,9 @@ def fold_followers(
 
     관계 키("from|to")의 액터↔플레이어 쌍이 stand-in으로 들어가고, 명시
     선언은 (player, actor)당 마지막이 이긴다 — 철회면 stand-in도 밀어낸다.
-    은퇴 액터는 통째로 빠진다 (retire_actor가 인덱스 키를 걷는다 — 은퇴는
-    관계·선언보다 항상 나중이라는 전제, 은퇴 뒤 이벤트는 세계에 없다).
+    은퇴 액터(retired 집합 — 마지막 라이프사이클이 retired)는 통째로 빠진다
+    (retire_actor가 인덱스 키를 걷는다 — 은퇴는 관계·선언보다 항상 나중이라는
+    전제, 은퇴와 부활 사이의 이벤트는 세계에 없다).
     """
     followers: dict[str, set[str]] = {}
     for key in rel_keys:
@@ -87,7 +93,9 @@ async def verify_timeline_world(
         r[0] for r in await (await conn.execute(_FOLLOW_SQL, (world_id,))).fetchall()
     ]
     retired = {
-        r[0] for r in await (await conn.execute(_RETIRED_SQL, (world_id,))).fetchall()
+        actor
+        for actor, type_ in await (await conn.execute(_LIFECYCLE_SQL, (world_id,))).fetchall()
+        if type_ == "actor.identity.retired"
     }
     expected = fold_followers(rel_keys, follows, retired)
 

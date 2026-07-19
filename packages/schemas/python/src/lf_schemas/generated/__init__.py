@@ -6,6 +6,7 @@ from lf_schemas.generated import actor_goal_achieved as actor_goal_achieved
 from lf_schemas.generated import actor_goal_advanced as actor_goal_advanced
 from lf_schemas.generated import actor_identity_declared as actor_identity_declared
 from lf_schemas.generated import actor_identity_retired as actor_identity_retired
+from lf_schemas.generated import actor_identity_returned as actor_identity_returned
 from lf_schemas.generated import actor_memory_consolidated as actor_memory_consolidated
 from lf_schemas.generated import actor_message_sent as actor_message_sent
 from lf_schemas.generated import envelope as envelope
