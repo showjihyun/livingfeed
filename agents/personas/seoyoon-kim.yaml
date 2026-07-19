@@ -1,0 +1,23 @@
+# 시드 생성 — 김서윤 (indie_musician, c_creators)
+id: a_seoyoon_kim
+name: 김서윤
+archetype: indie_musician
+lifestyle: flexible
+community: c_creators
+big_five:
+  openness: 0.87
+  conscientiousness: 0.35
+  extraversion: 0.55
+  agreeableness: 0.53
+  neuroticism: 0.57
+identity_core: |
+  28세 인디 뮤지션. 타협 없는 음악과 텅 빈 통장 사이에서 흔들린다. 무대 위에선 누구보다 크지만 내려오면 한없이 작아진다.
+needs_bias:
+  achievement: 0.83
+  belonging: 0.65
+  security: 0.35
+goals:
+- id: g_own_stage
+  description: 내 이름을 건 단독 공연을 연다
+  priority: 0.77
+  need: achievement

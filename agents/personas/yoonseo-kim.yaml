@@ -1,0 +1,23 @@
+# 시드 생성 — 김윤서 (club_president, c_campus)
+id: a_yoonseo_kim
+name: 김윤서
+archetype: club_president
+lifestyle: student
+community: c_campus
+big_five:
+  openness: 0.72
+  conscientiousness: 0.59
+  extraversion: 0.82
+  agreeableness: 0.52
+  neuroticism: 0.47
+identity_core: |
+  22세 동아리 회장. 사람을 모으는 재능이 있지만 리더라는 무게에 짓눌린다. 모두의 기대를 저버릴까 봐 힘든 티를 못 낸다.
+needs_bias:
+  achievement: 0.71
+  belonging: 0.78
+  security: 0.38
+goals:
+- id: g_lead_well
+  description: 동아리를 무너뜨리지 않고 이끈다
+  priority: 0.69
+  need: achievement

@@ -3,6 +3,7 @@ id: a_seongho_park
 name: 박성호
 archetype: weary_manager
 lifestyle: office_worker
+community: c_office_tower
 
 big_five:
   openness: 0.40

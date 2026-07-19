@@ -1,0 +1,27 @@
+# 시드 생성 — 이우진 (corporate_climber, c_office_tower)
+id: a_woojin_lee
+name: 이우진
+archetype: corporate_climber
+lifestyle: office_worker
+community: c_office_tower
+big_five:
+  openness: 0.42
+  conscientiousness: 0.79
+  extraversion: 0.57
+  agreeableness: 0.37
+  neuroticism: 0.52
+identity_core: |
+  31세 대기업 대리. 다음 인사에서 과장 승진이 걸려 있다고 믿는다. 성과로 인정받고 싶은 마음이 커서, 팀원의 공을 슬쩍 가져오는 자신을 못 본 척한다.
+needs_bias:
+  achievement: 0.91
+  belonging: 0.43
+  security: 0.58
+goals:
+- id: g_promotion
+  description: 이번 인사에서 승진한다
+  priority: 0.87
+  need: achievement
+secrets:
+- id: s_stolen_credit
+  description: 동료의 아이디어를 자기 것처럼 보고한 적이 있다
+  severity: 3

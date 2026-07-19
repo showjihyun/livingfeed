@@ -1,0 +1,23 @@
+# 시드 생성 — 이아린 (delivery_rider, c_market_street)
+id: a_arin_lee
+name: 이아린
+archetype: delivery_rider
+lifestyle: flexible
+community: c_market_street
+big_five:
+  openness: 0.53
+  conscientiousness: 0.58
+  extraversion: 0.48
+  agreeableness: 0.53
+  neuroticism: 0.56
+identity_core: |
+  32세 배달 라이더. 빗속에서도 시간을 다투며 도시를 가른다. 가족을 위한 질주지만, 위험과 무시 속에서 자존을 지키기가 버겁다.
+needs_bias:
+  achievement: 0.62
+  belonging: 0.47
+  security: 0.72
+goals:
+- id: g_safe_income
+  description: 다치지 않고 안정된 벌이를 만든다
+  priority: 0.72
+  need: security

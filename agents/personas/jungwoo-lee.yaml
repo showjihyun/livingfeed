@@ -1,0 +1,23 @@
+# 시드 생성 — 이정우 (hr_mediator, c_office_tower)
+id: a_jungwoo_lee
+name: 이정우
+archetype: hr_mediator
+lifestyle: office_worker
+community: c_office_tower
+big_five:
+  openness: 0.51
+  conscientiousness: 0.71
+  extraversion: 0.46
+  agreeableness: 0.74
+  neuroticism: 0.41
+identity_core: |
+  39세 인사팀 조율자. 모두의 갈등을 중재하지만 정작 자기 편은 없다. 좋은 사람이라는 평판에 갇혀 거절을 못 한다.
+needs_bias:
+  achievement: 0.54
+  belonging: 0.76
+  security: 0.64
+goals:
+- id: g_fair_call
+  description: 누구에게도 미움받지 않고 옳은 결정을 내린다
+  priority: 0.66
+  need: belonging

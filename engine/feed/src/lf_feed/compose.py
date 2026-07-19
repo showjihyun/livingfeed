@@ -73,6 +73,26 @@ def load_actor_names(personas_dir: Path) -> dict[str, str]:
     return names
 
 
+def load_actor_communities(personas_dir: Path) -> dict[str, str]:
+    """페르소나 id → 커뮤니티 id(^c_). 무소속·미상은 매핑에서 빠진다.
+
+    컴포저가 포스트에 community_id를 실어 커뮤니티 피드(ADR-014)를 채우는 원천.
+    소속은 페르소나 파일이 SoT다 (ADR-001/012) — 별도 상태 저장 없음.
+    """
+    communities: dict[str, str] = {}
+    if not personas_dir.is_dir():
+        return communities
+    for path in sorted(personas_dir.glob("*.yaml")):
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            community = doc.get("community")
+            if community:
+                communities[doc["id"]] = community
+        except Exception:  # 손상 파일이 피드를 멈추면 안 된다 (load_actor_names 선례)
+            logger.warning("페르소나 파싱 실패(커뮤니티): %s — 건너뜀", path, exc_info=True)
+    return communities
+
+
 # \b는 못 쓴다 — 유니코드 \w에 한글이 들어가 'p_x에게'의 끝 경계가 성립하지 않는다.
 # ASCII 영숫자가 앞에 붙은 경우만 배제한다 (grasp_… 같은 영단어 오염 방지)
 _ACTOR_REF = re.compile(r"(?<![A-Za-z0-9])a_[a-z0-9_]+")
@@ -96,12 +116,13 @@ def build_post_event(
     drama: float,
     score: float,
     actor_names: dict[str, str],
+    community_id: str | None = None,
 ) -> NewEvent:
     """actor.action.performed 봉투를 feed.post.published NewEvent로 승격한다.
 
-    가시성은 MVP에서 전부 world다 — 관계/커뮤니티 가시성은 해당 엔진
-    (ADR-016, Community)이 생길 때 규칙을 추가한다 (등급은 FeedItem 속성이므로
-    이 함수의 반환값만 달라지면 된다, ADR-014).
+    가시성은 world다 — 세계는 한 마을이라 모두가 본다. 작성자가 커뮤니티에
+    속하면 community_id를 함께 실어, 같은 글이 커뮤니티 피드(ADR-014)에도
+    걸리게 한다 (커뮤니티는 월드의 부분집합 렌즈, 별도 가시성 강등이 아니다).
     """
     payload = envelope["payload"]
     author_id = envelope["actor_id"]
@@ -144,7 +165,7 @@ def build_post_event(
             "body": humanize_ids(payload["intent"], actor_names)[:2000],
             "narration_kind": narration_kind,
             "participants": participants,
-            "community_id": None,
+            "community_id": community_id,
             "location_id": payload.get("location_id"),
             "drama_score": round(drama, 4),
             "worthiness": round(score, 4),
@@ -184,6 +205,7 @@ def build_arc_post_event(
     drama: float,
     score: float,
     actor_names: dict[str, str],
+    community_id: str | None = None,
 ) -> NewEvent:
     """system.director.arc_planned(장 전환분만) → feed.post.published (ADR-014).
 
@@ -218,7 +240,7 @@ def build_arc_post_event(
             "body": body[:2000],
             "narration_kind": "template",
             "participants": [target_id],
-            "community_id": None,
+            "community_id": community_id,
             "location_id": None,
             "drama_score": round(drama, 4),
             "worthiness": round(score, 4),
@@ -240,7 +262,7 @@ def evaluate_debut(cfg: ScoringConfig) -> tuple[float, float]:
 
 
 def build_debut_post_event(
-    envelope: dict[str, Any], *, drama: float, score: float
+    envelope: dict[str, Any], *, drama: float, score: float, community_id: str | None = None
 ) -> NewEvent:
     """actor.identity.declared → feed.post.published — 데뷔는 세계의 사건이다.
 
@@ -267,7 +289,7 @@ def build_debut_post_event(
             "body": payload["bio"][:2000],
             "narration_kind": "template",
             "participants": [author_id],
-            "community_id": None,
+            "community_id": community_id,
             "location_id": None,
             "drama_score": round(drama, 4),
             "worthiness": round(score, 4),
@@ -288,7 +310,8 @@ def evaluate_goal_achievement(
 
 
 def build_goal_post_event(
-    envelope: dict[str, Any], *, drama: float, score: float, actor_names: dict[str, str]
+    envelope: dict[str, Any], *, drama: float, score: float, actor_names: dict[str, str],
+    community_id: str | None = None,
 ) -> NewEvent:
     """actor.goal.achieved → feed.post.published (인물의 마디, ADR-014)."""
     payload = envelope["payload"]
@@ -311,7 +334,7 @@ def build_goal_post_event(
             "body": f"마침내 — {payload['description']}"[:2000],
             "narration_kind": "template",
             "participants": [author_id],
-            "community_id": None,
+            "community_id": community_id,
             "location_id": None,
             "drama_score": round(drama, 4),
             "worthiness": round(score, 4),

@@ -24,16 +24,43 @@ def visibility_filter(world_id: str, kinds: list[str]) -> list[dict[str, Any]]:
     ]
 
 
-def build_ranked_query(cfg: Config, world_id: str, kinds: list[str], limit: int) -> dict[str, Any]:
+def community_filter(world_id: str, community_id: str) -> list[dict[str, Any]]:
+    """커뮤니티 피드 필터 — community_id로 거른다 (가시성은 world 그대로).
+
+    커뮤니티 포스트는 세계(월드) 피드에도 실리는 world 가시성이다. 커뮤니티
+    피드는 그 부분집합 렌즈일 뿐이라 visibility가 아니라 community_id로 뽑는다.
+    """
+    return [
+        {"term": {"world_id": world_id}},
+        {"term": {"community_id": community_id}},
+    ]
+
+
+def _feed_filter(
+    world_id: str, kinds: list[str], community_id: str | None
+) -> list[dict[str, Any]]:
+    """community_id가 있으면 커뮤니티 렌즈, 없으면 가시성 등급 필터."""
+    return (
+        community_filter(world_id, community_id)
+        if community_id is not None
+        else visibility_filter(world_id, kinds)
+    )
+
+
+def build_ranked_query(
+    cfg: Config, world_id: str, kinds: list[str], limit: int,
+    community_id: str | None = None,
+) -> dict[str, Any]:
     """score = w_drama·drama + w_recency·gauss(occurred_at). collapse = 다양성 보정.
 
     관계 근접도 항(w_proximity)은 Relationship Engine(ADR-016)이 생기면 추가된다.
+    community_id가 오면 그 커뮤니티 내부의 글만 같은 공식으로 랭킹한다 (ADR-014).
     """
     return {
         "size": limit,
         "query": {
             "function_score": {
-                "query": {"bool": {"filter": visibility_filter(world_id, kinds)}},
+                "query": {"bool": {"filter": _feed_filter(world_id, kinds, community_id)}},
                 "functions": [
                     {
                         "field_value_factor": {
@@ -89,8 +116,9 @@ def build_recent_query(
     limit: int,
     cursor: str | None,
     from_tick: int | None = None,
+    community_id: str | None = None,
 ) -> dict[str, Any]:
-    filters = visibility_filter(world_id, kinds)
+    filters = _feed_filter(world_id, kinds, community_id)
     if from_tick is not None:
         # 조회 범위(오늘/이번 주/이번 달)의 세계 tick 하한 — 포함 (ADR-011 좌표)
         filters = [*filters, {"range": {"tick": {"gte": from_tick}}}]
@@ -141,13 +169,14 @@ class FeedSearch:
         sort: str,
         cursor: str | None,
         from_tick: int | None = None,
+        community_id: str | None = None,
     ) -> dict[str, Any]:
         cfg = self._cfg
         # from_tick은 recent 전용이다 — 호출자(main)가 범위 조회를 recent로 강제한다
         body = (
-            build_recent_query(world_id, kinds, limit, cursor, from_tick)
+            build_recent_query(world_id, kinds, limit, cursor, from_tick, community_id)
             if sort == "recent"
-            else build_ranked_query(cfg, world_id, kinds, limit)
+            else build_ranked_query(cfg, world_id, kinds, limit, community_id)
         )
         r = await self._client.post(f"/{cfg.index}/_search", json=body)
         r.raise_for_status()

@@ -17,6 +17,8 @@ export const ICON = {
   globe:
     "M2 12a10 10 0 1 0 20 0a10 10 0 1 0 -20 0M12 2a14.5 14.5 0 0 0 0 20a14.5 14.5 0 0 0 0-20M2 12h20",
   user: "M7 8a5 5 0 1 0 10 0a5 5 0 1 0 -10 0M20 21a8 8 0 0 0-16 0",
+  users:
+    "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0 8a4 4 0 0 0 0-8M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
   inbox:
     "M22 12h-6l-2 3h-4l-2-3H2M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z",
   graph:
@@ -64,6 +66,7 @@ export interface NavDef {
 
 export const NAV_DEFS: NavDef[] = [
   { key: "feed", label: "World Feed", iconD: ICON.globe },
+  { key: "community", label: "커뮤니티", iconD: ICON.users },
   { key: "profile", label: "프로필", iconD: ICON.user },
   { key: "dm", label: "받은 것", iconD: ICON.inbox },
   { key: "graph", label: "관계 그래프", iconD: ICON.graph },

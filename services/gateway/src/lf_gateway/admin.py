@@ -58,7 +58,7 @@ NEEDS_KEYS = frozenset({"achievement", "belonging", "security"})
 
 #: 저장 시 스튜디오가 소유하는 최상위 키 — 이 밖의 키는 파일의 결로 보존한다
 _OWNED_KEYS = frozenset(
-    {"id", "name", "archetype", "lifestyle", "active", "created_by",
+    {"id", "name", "archetype", "lifestyle", "active", "created_by", "community",
      "big_five", "identity_core", "needs_bias", "goals", "secrets"}
 )
 
@@ -93,6 +93,8 @@ class PersonaDoc(BaseModel):
     lifestyle: Literal["office_worker", "student", "teacher", "night_worker", "flexible"]
     active: bool = True
     created_by: str | None = Field(default=None, pattern=r"^p_[a-z0-9_]+$")
+    #: 커뮤니티 소속(^c_) — 커뮤니티 피드의 소속 원천 (ADR-014). 무소속은 None.
+    community: str | None = Field(default=None, pattern=r"^c_[a-z0-9_]+$")
     big_five: dict[str, float]
     needs_bias: dict[str, float]
     goals: list[GoalDoc] = Field(default_factory=list)
@@ -188,6 +190,8 @@ def merged_yaml_doc(doc: PersonaDoc, old: dict[str, Any] | None) -> dict[str, An
         "lifestyle": data["lifestyle"],
         "active": data["active"],
     }
+    if data.get("community") is not None:
+        out["community"] = data["community"]  # 무소속은 키 자체를 쓰지 않는다
     if created_by is not None:
         out["created_by"] = created_by
     out["big_five"] = data["big_five"]

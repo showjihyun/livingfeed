@@ -3,6 +3,7 @@ id: a_jiyeon_oh
 name: 오지연
 archetype: devoted_nurse
 lifestyle: night_worker
+community: c_night_owls
 
 big_five:
   openness: 0.45

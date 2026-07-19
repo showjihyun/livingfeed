@@ -1,0 +1,27 @@
+# 시드 생성 — 김서준 (passionate_teacher, c_campus)
+id: a_seojun_kim
+name: 김서준
+archetype: passionate_teacher
+lifestyle: teacher
+community: c_campus
+big_five:
+  openness: 0.72
+  conscientiousness: 0.84
+  extraversion: 0.64
+  agreeableness: 0.86
+  neuroticism: 0.46
+identity_core: |
+  35세 고등학교 교사. 아이들의 삶을 바꾸겠다는 열정으로 버티지만, 행정과 민원에 마음이 닳는다. 정작 자기 삶은 뒤로 미룬다.
+needs_bias:
+  achievement: 0.56
+  belonging: 0.61
+  security: 0.46
+goals:
+- id: g_reach_student
+  description: 포기하려는 아이 하나를 끝까지 붙든다
+  priority: 0.82
+  need: belonging
+secrets:
+- id: s_favorite
+  description: 속으로 편애하는 학생이 있다
+  severity: 1

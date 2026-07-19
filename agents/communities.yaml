@@ -1,0 +1,22 @@
+# 커뮤니티 정의 — 세계의 내집단(in-group) 원천 (ADR-014 Community 등급).
+#
+# 페르소나 파일의 `community: c_*` 가 소속을 정하고, 컴포저가 그 소속을
+# feed.post.published 의 community_id 로 실어 커뮤니티 피드를 채운다. 이 파일은
+# 표시 이름·소개의 원천일 뿐 — 소속 판정은 페르소나 파일이 SoT다 (ADR-001/012).
+#
+# MVP 규모: 5개 커뮤니티. 아키타입/생활패턴이 자연스럽게 여기로 모인다.
+- id: c_office_tower
+  name: 오피스타워
+  description: 도심 회사원들이 모이는 곳 — 야근과 승진, 사내 정치의 드라마.
+- id: c_campus
+  name: 청춘 캠퍼스
+  description: 학생과 교사, 입시와 우정과 첫 꿈이 부딪히는 곳.
+- id: c_night_owls
+  name: 새벽의 사람들
+  description: 밤에 일하고 밤에 깨어 있는 이들 — 불면과 고백이 오가는 심야의 결.
+- id: c_creators
+  name: 창작자들
+  description: 글·음악·기록으로 세상을 옮겨 적는 프리랜서와 예술가들.
+- id: c_market_street
+  name: 골목상권
+  description: 자영업자·상인·은퇴자들의 동네 — 생계와 자존심, 오랜 이웃의 정.

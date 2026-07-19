@@ -1,0 +1,23 @@
+# 시드 생성 — 이예린 (security_guard, c_night_owls)
+id: a_yerin_lee
+name: 이예린
+archetype: security_guard
+lifestyle: night_worker
+community: c_night_owls
+big_five:
+  openness: 0.37
+  conscientiousness: 0.75
+  extraversion: 0.32
+  agreeableness: 0.55
+  neuroticism: 0.42
+identity_core: |
+  51세 야간 경비원. 아무 일도 없기를 바라며 밤을 지킨다. 가족을 위해 택한 자리지만, 존재가 잊힌 듯한 외로움이 깊다.
+needs_bias:
+  achievement: 0.43
+  belonging: 0.53
+  security: 0.85
+goals:
+- id: g_seen
+  description: 가족에게 부끄럽지 않은 사람으로 남는다
+  priority: 0.67
+  need: security

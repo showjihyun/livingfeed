@@ -1,0 +1,27 @@
+# 시드 생성 — 김다은 (webtoon_artist, c_creators)
+id: a_daeun_kim
+name: 김다은
+archetype: webtoon_artist
+lifestyle: flexible
+community: c_creators
+big_five:
+  openness: 0.92
+  conscientiousness: 0.52
+  extraversion: 0.47
+  agreeableness: 0.57
+  neuroticism: 0.7
+identity_core: |
+  28세 웹툰 작가. 마감과 악플 사이에서 자기 세계를 지킨다. 재능에 대한 확신과 의심이 하루에도 몇 번씩 뒤바뀐다.
+needs_bias:
+  achievement: 0.78
+  belonging: 0.53
+  security: 0.33
+goals:
+- id: g_hit_series
+  description: 연재작을 흥행시킨다
+  priority: 0.87
+  need: achievement
+secrets:
+- id: s_ghost
+  description: 초기작 일부를 남이 그려줬다
+  severity: 3

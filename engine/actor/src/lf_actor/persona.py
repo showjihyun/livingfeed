@@ -31,6 +31,9 @@ class Persona:
     active: bool = True
     #: 이 인물을 빚은 플레이어(^p_) — 스튜디오 태생의 저자성. 시스템 태생은 None
     created_by: str | None = None
+    #: 커뮤니티 소속(^c_) — 컴포저가 포스트의 community_id로 실어 커뮤니티 피드를
+    #: 채운다 (ADR-014). 무소속은 None(월드 피드에만 실린다).
+    community: str | None = None
 
 
 def load_persona(path: Path) -> Persona:
@@ -47,6 +50,7 @@ def load_persona(path: Path) -> Persona:
         lifestyle=doc.get("lifestyle") or "flexible",
         active=bool(doc.get("active", True)),
         created_by=doc.get("created_by"),
+        community=doc.get("community"),
     )
 
 

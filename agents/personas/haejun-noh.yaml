@@ -3,6 +3,7 @@ id: a_haejun_noh
 name: 노해준
 archetype: unsung_novelist
 lifestyle: night_worker
+community: c_creators
 
 big_five:
   openness: 0.88

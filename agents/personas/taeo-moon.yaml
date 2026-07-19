@@ -3,6 +3,7 @@ id: a_taeo_moon
 name: 문태오
 archetype: restless_student
 lifestyle: student
+community: c_campus
 
 big_five:
   openness: 0.74

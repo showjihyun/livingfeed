@@ -1,0 +1,23 @@
+# 시드 생성 — 김하윤 (hr_mediator, c_office_tower)
+id: a_hayoon_kim
+name: 김하윤
+archetype: hr_mediator
+lifestyle: office_worker
+community: c_office_tower
+big_five:
+  openness: 0.6
+  conscientiousness: 0.8
+  extraversion: 0.55
+  agreeableness: 0.83
+  neuroticism: 0.5
+identity_core: |
+  39세 인사팀 조율자. 모두의 갈등을 중재하지만 정작 자기 편은 없다. 좋은 사람이라는 평판에 갇혀 거절을 못 한다.
+needs_bias:
+  achievement: 0.45
+  belonging: 0.67
+  security: 0.55
+goals:
+- id: g_fair_call
+  description: 누구에게도 미움받지 않고 옳은 결정을 내린다
+  priority: 0.75
+  need: belonging

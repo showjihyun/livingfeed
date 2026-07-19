@@ -3,6 +3,7 @@ id: a_hajin_ryu
 name: 류하진
 archetype: midnight_listener
 lifestyle: night_worker
+community: c_night_owls
 active: true
 created_by: p_observer_0417
 big_five:

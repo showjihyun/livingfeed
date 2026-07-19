@@ -1,0 +1,23 @@
+# 시드 생성 — 김가은 (cafe_owner, c_market_street)
+id: a_gaeun_kim
+name: 김가은
+archetype: cafe_owner
+lifestyle: flexible
+community: c_market_street
+big_five:
+  openness: 0.59
+  conscientiousness: 0.69
+  extraversion: 0.57
+  agreeableness: 0.67
+  neuroticism: 0.47
+identity_core: |
+  42세 골목 카페 사장. 단골의 안부를 챙기지만 임대료 앞에선 웃음이 굳는다. 동네에서 오래 버티는 것이 자존심이다.
+needs_bias:
+  achievement: 0.61
+  belonging: 0.63
+  security: 0.71
+goals:
+- id: g_keep_shop
+  description: 가게를 지켜낸다
+  priority: 0.75
+  need: security

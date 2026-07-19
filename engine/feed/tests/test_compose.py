@@ -70,6 +70,33 @@ def test_build_post_event_without_names_grounds_to_anonymous():
     assert "누군가" in event.payload["title"]
 
 
+def test_build_post_event_tags_community_when_author_affiliated():
+    """작성자가 커뮤니티 소속이면 community_id가 실린다 — 가시성은 world 그대로 (ADR-014)."""
+    event = build_post_event(
+        SAMPLE, drama=0.5, score=0.4, actor_names=NAMES, community_id="c_creators"
+    )
+    assert event.payload["community_id"] == "c_creators"
+    assert event.payload["visibility"] == "world"  # 커뮤니티 포스트도 월드에 실린다
+    schema = registry.payload_schema("feed.post.published")
+    assert list(Draft202012Validator(schema).iter_errors(event.payload)) == []
+
+
+def test_build_post_event_community_none_when_unaffiliated():
+    event = build_post_event(SAMPLE, drama=0.5, score=0.4, actor_names=NAMES)
+    assert event.payload["community_id"] is None  # 무소속은 월드 피드에만
+
+
+def test_load_actor_communities_maps_only_affiliated(tmp_path):
+    from lf_feed.compose import load_actor_communities
+
+    (tmp_path / "a.yaml").write_text(
+        "id: a_x\nname: 엑스\ncommunity: c_office_tower\n", encoding="utf-8"
+    )
+    (tmp_path / "b.yaml").write_text("id: a_y\nname: 와이\n", encoding="utf-8")  # 무소속
+    mapping = load_actor_communities(tmp_path)
+    assert mapping == {"a_x": "c_office_tower"}  # 무소속은 매핑에서 빠진다
+
+
 def test_build_post_event_humanizes_raw_ids_in_body():
     """LLM intent가 옮겨 적은 식별자는 세계 어휘로 정화된다 — 실사고 재발 방지.
 

@@ -1,0 +1,27 @@
+# 시드 생성 — 이승현 (exam_student, c_campus)
+id: a_seunghyun_lee
+name: 이승현
+archetype: exam_student
+lifestyle: student
+community: c_campus
+big_five:
+  openness: 0.63
+  conscientiousness: 0.53
+  extraversion: 0.48
+  agreeableness: 0.61
+  neuroticism: 0.81
+identity_core: |
+  20세 고3 수험생. 부모의 기대와 자기 실력 사이의 간극이 매일 무섭다. 친구의 성적과 자신을 끝없이 비교하며 잠을 줄인다.
+needs_bias:
+  achievement: 0.69
+  belonging: 0.67
+  security: 0.37
+goals:
+- id: g_pass_exam
+  description: 원하는 대학에 합격한다
+  priority: 0.88
+  need: achievement
+secrets:
+- id: s_grade_lie
+  description: 모의고사 성적을 부모에게 부풀려 말했다
+  severity: 2

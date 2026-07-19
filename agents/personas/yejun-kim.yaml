@@ -1,0 +1,23 @@
+# 시드 생성 — 김예준 (club_president, c_campus)
+id: a_yejun_kim
+name: 김예준
+archetype: club_president
+lifestyle: student
+community: c_campus
+big_five:
+  openness: 0.75
+  conscientiousness: 0.62
+  extraversion: 0.85
+  agreeableness: 0.55
+  neuroticism: 0.5
+identity_core: |
+  22세 동아리 회장. 사람을 모으는 재능이 있지만 리더라는 무게에 짓눌린다. 모두의 기대를 저버릴까 봐 힘든 티를 못 낸다.
+needs_bias:
+  achievement: 0.68
+  belonging: 0.75
+  security: 0.35
+goals:
+- id: g_lead_well
+  description: 동아리를 무너뜨리지 않고 이끈다
+  priority: 0.72
+  need: achievement

@@ -1,0 +1,27 @@
+# 시드 생성 — 박지훈 (corporate_climber, c_office_tower)
+id: a_jihoon_park
+name: 박지훈
+archetype: corporate_climber
+lifestyle: office_worker
+community: c_office_tower
+big_five:
+  openness: 0.5
+  conscientiousness: 0.87
+  extraversion: 0.65
+  agreeableness: 0.45
+  neuroticism: 0.6
+identity_core: |
+  31세 대기업 대리. 다음 인사에서 과장 승진이 걸려 있다고 믿는다. 성과로 인정받고 싶은 마음이 커서, 팀원의 공을 슬쩍 가져오는 자신을 못 본 척한다.
+needs_bias:
+  achievement: 0.83
+  belonging: 0.35
+  security: 0.5
+goals:
+- id: g_promotion
+  description: 이번 인사에서 승진한다
+  priority: 0.95
+  need: achievement
+secrets:
+- id: s_stolen_credit
+  description: 동료의 아이디어를 자기 것처럼 보고한 적이 있다
+  severity: 3

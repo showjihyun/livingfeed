@@ -8,6 +8,7 @@ import type { DerivedStories } from "@/lib/comments";
 import { fetchPostComments } from "@/lib/comments";
 import { FOCUS_ACTOR_ID, PLAYER_NAME } from "@/lib/config";
 import { useRelationshipGraph, useWorldGraph } from "@/lib/graph";
+import { useCommunities, useCommunityFeed } from "@/lib/community";
 import { useHiddenFeed } from "@/lib/hidden";
 import type { LivePost } from "@/lib/live-feed";
 import { useLiveFeed } from "@/lib/live-feed";
@@ -24,6 +25,7 @@ import { Digest } from "./Digest";
 import { DmTab } from "./DmTab";
 import { FeedTab } from "./FeedTab";
 import { GraphTab } from "./GraphTab";
+import { CommunityTab } from "./CommunityTab";
 import { HiddenTab } from "./HiddenTab";
 import { Onboarding } from "./Onboarding";
 import { ProfileTab } from "./ProfileTab";
@@ -43,6 +45,8 @@ export function LivingFeedApp() {
   const [feedRange, setFeedRange] = useState<Range>("all");
   const [hiddenRange, setHiddenRange] = useState<Range>("all");
   const [dmRange, setDmRange] = useState<Range>("all");
+  // 선택된 커뮤니티 — 내집단 렌즈(ADR-014). null이면 목록의 첫 커뮤니티를 자동 선택
+  const [selectedCommunity, setSelectedCommunity] = useState<string | null>(null);
   const [profileRange, setProfileRange] = useState<Range>("all");
   const [topics, setTopics] = useState<string[]>(["직장 드라마"]);
   const [worldMin, setWorldMin] = useState(WORLD_MIN_START);
@@ -124,6 +128,12 @@ export function LivingFeedApp() {
   // 래치는 유지된다 (범위는 조회 조건이지 신뢰의 철회가 아니다).
   const hidden = useHiddenFeed(screen === "app", hiddenRange);
   const hiddenUnlocked = hidden.unlocked;
+
+  // 커뮤니티 — 세계의 내집단 렌즈 (ADR-014). 목록은 상시, 피드는 탭 활성 시에만
+  const communities = useCommunities(screen === "app");
+  const communityFeed = useCommunityFeed(
+    selectedCommunity, screen === "app" && tab === "community",
+  );
 
   // 액터 명단(read.actors) — 표시 이름을 여기서 읽는다 (하드코딩 금지, ADR-012)
   const { byId } = useActorDirectory(screen === "app");
@@ -563,6 +573,16 @@ export function LivingFeedApp() {
             onLoadOlder={loadOlderDms}
             onOpenThread={openThread}
             onBack={() => setOpenDmActor(null)}
+          />
+        )}
+        {tab === "community" && (
+          <CommunityTab
+            communities={communities}
+            selectedId={selectedCommunity}
+            onSelect={setSelectedCommunity}
+            posts={communityFeed.posts}
+            available={communityFeed.available}
+            nameOf={authorName}
           />
         )}
         {tab === "hidden" && (

@@ -1,0 +1,23 @@
+# 시드 생성 — 김은우 (cafe_owner, c_market_street)
+id: a_eunwoo_kim
+name: 김은우
+archetype: cafe_owner
+lifestyle: flexible
+community: c_market_street
+big_five:
+  openness: 0.67
+  conscientiousness: 0.77
+  extraversion: 0.65
+  agreeableness: 0.75
+  neuroticism: 0.55
+identity_core: |
+  42세 골목 카페 사장. 단골의 안부를 챙기지만 임대료 앞에선 웃음이 굳는다. 동네에서 오래 버티는 것이 자존심이다.
+needs_bias:
+  achievement: 0.53
+  belonging: 0.55
+  security: 0.63
+goals:
+- id: g_keep_shop
+  description: 가게를 지켜낸다
+  priority: 0.83
+  need: security

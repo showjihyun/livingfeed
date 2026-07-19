@@ -1,0 +1,23 @@
+# 시드 생성 — 이가은 (cafe_owner, c_market_street)
+id: a_gaeun_lee
+name: 이가은
+archetype: cafe_owner
+lifestyle: flexible
+community: c_market_street
+big_five:
+  openness: 0.64
+  conscientiousness: 0.74
+  extraversion: 0.62
+  agreeableness: 0.72
+  neuroticism: 0.52
+identity_core: |
+  42세 골목 카페 사장. 단골의 안부를 챙기지만 임대료 앞에선 웃음이 굳는다. 동네에서 오래 버티는 것이 자존심이다.
+needs_bias:
+  achievement: 0.56
+  belonging: 0.58
+  security: 0.66
+goals:
+- id: g_keep_shop
+  description: 가게를 지켜낸다
+  priority: 0.8
+  need: security

@@ -1,0 +1,27 @@
+# 시드 생성 — 김선우 (burnt_out_staff, c_office_tower)
+id: a_sunwoo_kim
+name: 김선우
+archetype: burnt_out_staff
+lifestyle: office_worker
+community: c_office_tower
+big_five:
+  openness: 0.49
+  conscientiousness: 0.59
+  extraversion: 0.34
+  agreeableness: 0.61
+  neuroticism: 0.71
+identity_core: |
+  33세 7년차 직장인. 매일 아침 사표를 품고 출근한다. 번아웃이 왔지만 대출과 생계 때문에 버틴다. 무기력과 죄책감 사이를 오간다.
+needs_bias:
+  achievement: 0.46
+  belonging: 0.56
+  security: 0.81
+goals:
+- id: g_quit_or_stay
+  description: 이 일을 계속할지 그만둘지 결정한다
+  priority: 0.69
+  need: security
+secrets:
+- id: s_hidden_resume
+  description: 몰래 이직 원서를 넣고 있다
+  severity: 2

@@ -27,6 +27,9 @@ class Config:
     #: 브라우저 오리진 허용 목록 (fetch CORS) — 쉼표 구분
     cors_origins: tuple[str, ...] = ("http://localhost:3000",)
     index: str = "lf-feed-posts"
+    #: 커뮤니티 표시 이름·소개의 원천 (ADR-014). 소속 판정은 페르소나 파일이 SoT —
+    #: 이 파일은 /communities 목록의 이름표일 뿐이다. 없으면 목록은 빈 리스트.
+    communities_path: str = "agents/communities.yaml"
     #: fan-out-on-read 결과 캐시 TTL (ADR-014 §2단)
     cache_ttl_s: int = 30
     default_limit: int = 20
@@ -55,5 +58,6 @@ class Config:
             nats_url=os.environ.get("NATS_URL", "nats://localhost:4222"),
             env=os.environ.get("LF_ENV", "dev"),
             session_token=os.environ.get("LF_SESSION_TOKEN") or None,
+            communities_path=os.environ.get("LF_COMMUNITIES_PATH", "agents/communities.yaml"),
             cors_origins=tuple(o.strip() for o in origins.split(",") if o.strip()),
         )

@@ -3,6 +3,7 @@ id: a_jaeha_lim
 name: 임재하
 archetype: enduring_rider
 lifestyle: flexible
+community: c_market_street
 
 big_five:
   openness: 0.42

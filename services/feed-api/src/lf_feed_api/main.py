@@ -31,6 +31,7 @@ from lf_projector.graph_api import GraphQueryClient
 from psycopg_pool import AsyncConnectionPool
 from redis.asyncio import Redis
 
+from lf_feed_api.communities import load_communities
 from lf_feed_api.config import Config
 from lf_feed_api.reads import ProfileReads
 from lf_feed_api.search import FeedSearch
@@ -131,6 +132,9 @@ def create_app(
     if not owned_story:
         app.state.story = story
 
+    # 커뮤니티 레지스트리 — 정적 목록(표시 이름·소개). 파일 없으면 빈 목록으로 강등.
+    app.state.communities = load_communities(cfg.communities_path)
+
     # ── 사설 조회 게이트 — player_id는 아직 클라이언트 주장 값이다 (config.py 경고).
     # LF_SESSION_TOKEN이 서면 사설 경로(DM·개인 타임라인)는 Bearer 일치를 요구하고,
     # 미설정(dev)이면 열린다 — gateway require_admin과 같은 규약. player_id를 검증된
@@ -166,6 +170,10 @@ def create_app(
             None, ge=0,
             description="조회 범위의 세계 tick 하한 (포함) — 오늘/이번 주/이번 달 (ADR-011)",
         ),
+        community_id: str | None = Query(
+            None, pattern=r"^c_[a-z0-9_]+$",
+            description="커뮤니티 피드 대상 — types=community와 함께 (ADR-014 Community)",
+        ),
         authorization: Annotated[str, Header()] = "",
     ) -> dict:
         kinds = sorted({t.strip() for t in types.split(",") if t.strip()})
@@ -181,6 +189,20 @@ def create_app(
         if from_tick is not None:
             sort = "recent"  # 범위 조회도 정의상 시간순이다 (커서와 같은 강제)
         limit = min(limit, cfg.max_limit)
+
+        # Community — 세계(월드)의 부분집합 렌즈 (ADR-014). 저장소는 OS로 world와
+        # 같지만 community_id로 뽑는다. 단독 등급이라 다른 등급과 섞을 수 없다.
+        if "community" in kinds:
+            if set(kinds) != {"community"}:
+                raise HTTPException(
+                    400, "community는 다른 등급과 섞어 질의할 수 없다 (커뮤니티 렌즈)"
+                )
+            if community_id is None:
+                raise HTTPException(400, "community 피드는 community_id가 필요하다")
+            return await app.state.search.search(
+                world_id, kinds, limit=limit, sort=sort, cursor=cursor,
+                from_tick=from_tick, community_id=community_id,
+            )
 
         # Personal/Private — 플레이어 단위 타임라인 (fan-out-on-write, ADR-014 §2단).
         # 저장소가 다르므로(OS가 아니라 Redis) 다른 등급과 섞어 질의할 수 없다.
@@ -305,6 +327,15 @@ def create_app(
     ) -> dict:
         """세계 액터 명단 — FE가 표시 이름·소개를 이 read 모델에서 읽는다 (하드코딩 금지)."""
         return {"world_id": world_id, "actors": await _reads().actors(world_id)}
+
+    @app.get("/communities")
+    async def communities() -> dict:
+        """세계 커뮤니티 목록 — FE 커뮤니티 탭의 이름표 (ADR-014 Community).
+
+        소속 판정은 페르소나 파일이 SoT이고, 이 목록은 표시 이름·소개의 원천이다.
+        앱 조립 시 1회 로드한 정적 레지스트리 (파일 없으면 빈 목록으로 강등).
+        """
+        return {"communities": app.state.communities}
 
     @app.get("/actors/{actor_id}/profile")
     async def actor_profile(

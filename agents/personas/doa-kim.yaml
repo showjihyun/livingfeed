@@ -1,0 +1,23 @@
+# 시드 생성 — 김도아 (neighborhood_elder, c_market_street)
+id: a_doa_kim
+name: 김도아
+archetype: neighborhood_elder
+lifestyle: flexible
+community: c_market_street
+big_five:
+  openness: 0.47
+  conscientiousness: 0.72
+  extraversion: 0.52
+  agreeableness: 0.75
+  neuroticism: 0.37
+identity_core: |
+  67세 은퇴 후 동네 어른. 지난 세월의 지혜를 나누고 싶지만 아무도 묻지 않는다. 쓸모를 잃었다는 두려움을 정 많은 참견으로 감춘다.
+needs_bias:
+  achievement: 0.38
+  belonging: 0.73
+  security: 0.63
+goals:
+- id: g_still_useful
+  description: 누군가에게 여전히 필요한 사람이 된다
+  priority: 0.69
+  need: belonging

@@ -13,9 +13,12 @@ class FakeSearch:
         self.text_calls: list[dict] = []
         self.items = [{"event_id": CURSOR, "title": "t"}]
 
-    async def search(self, world_id, kinds, *, limit, sort, cursor, from_tick=None):
+    async def search(
+        self, world_id, kinds, *, limit, sort, cursor, from_tick=None, community_id=None
+    ):
         self.calls.append(
-            {"world_id": world_id, "kinds": kinds, "limit": limit, "sort": sort, "cursor": cursor}
+            {"world_id": world_id, "kinds": kinds, "limit": limit, "sort": sort,
+             "cursor": cursor, "community_id": community_id}
         )
         next_cursor = self.items[-1]["event_id"] if sort == "recent" else None
         return {"items": self.items, "next_cursor": next_cursor, "mode": sort}
@@ -56,18 +59,63 @@ def test_default_is_ranked_world_first_page():
     assert body["mode"] == "ranked"
     assert body["next_cursor"] is None
     assert search.calls == [
-        {"world_id": "w_main", "kinds": ["world"], "limit": 20, "sort": "ranked", "cursor": None}
+        {"world_id": "w_main", "kinds": ["world"], "limit": 20, "sort": "ranked",
+         "cursor": None, "community_id": None}
     ]
 
 
 def test_types_csv_is_parsed_and_validated():
     client, search, _ = make_client()
-    assert client.get("/feed", params={"types": "community, world"}).status_code == 200
-    assert search.calls[-1]["kinds"] == ["community", "world"]
+    # 공백 트림 + 정렬로 CSV가 kinds로 파싱된다 (community는 단독 렌즈라 아래 별도 검증)
+    assert client.get("/feed", params={"types": "relationship, world"}).status_code == 200
+    assert search.calls[-1]["kinds"] == ["relationship", "world"]
 
     resp = client.get("/feed", params={"types": "world,doom"})
     assert resp.status_code == 400
     assert "doom" in resp.json()["detail"]
+
+
+def test_community_feed_filters_by_community_id():
+    """types=community&community_id=c_x → 그 커뮤니티 렌즈로 OS 검색 (ADR-014)."""
+    client, search, _ = make_client()
+    resp = client.get(
+        "/feed", params={"types": "community", "community_id": "c_office_tower"}
+    )
+    assert resp.status_code == 200
+    assert search.calls[-1]["community_id"] == "c_office_tower"
+    assert search.calls[-1]["kinds"] == ["community"]
+
+
+def test_community_requires_community_id():
+    client, _, _ = make_client()
+    resp = client.get("/feed", params={"types": "community"})
+    assert resp.status_code == 400
+    assert "community_id" in resp.json()["detail"]
+
+
+def test_community_cannot_mix_with_other_kinds():
+    client, _, _ = make_client()
+    resp = client.get(
+        "/feed", params={"types": "community,world", "community_id": "c_office_tower"}
+    )
+    assert resp.status_code == 400
+
+
+def test_community_id_pattern_validated():
+    client, _, _ = make_client()
+    resp = client.get("/feed", params={"types": "community", "community_id": "office"})
+    assert resp.status_code == 422  # ^c_ 패턴 위반은 FastAPI 검증(422)
+
+
+def test_communities_registry_endpoint():
+    """GET /communities — 시드 파일의 커뮤니티 목록 (표시 이름·소개 원천)."""
+    client, _, _ = make_client()
+    resp = client.get("/communities")
+    assert resp.status_code == 200
+    ids = {c["id"] for c in resp.json()["communities"]}
+    assert "c_office_tower" in ids and "c_campus" in ids
+    office = next(c for c in resp.json()["communities"] if c["id"] == "c_office_tower")
+    assert office["name"] and office["description"]
 
 
 def test_cursor_forces_recent_and_returns_next_cursor():

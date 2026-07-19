@@ -3,6 +3,7 @@ id: a_eunchae_seo
 name: 서은채
 archetype: resolute_returnee
 lifestyle: office_worker
+community: c_office_tower
 
 big_five:
   openness: 0.50

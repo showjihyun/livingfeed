@@ -32,6 +32,7 @@ from lf_feed.compose import (
     evaluate_goal_achievement,
     evaluate_incident,
     humanize_ids,
+    load_actor_communities,
     load_actor_names,
 )
 from lf_feed.config import Config
@@ -74,11 +75,19 @@ class FeedComposer:
         cfg: Config,
         *,
         actor_names: dict[str, str] | None = None,
+        actor_communities: dict[str, str] | None = None,
         narrator: Any | None = None,
     ) -> None:
         self._cfg = cfg
         self._names = (
             actor_names if actor_names is not None else load_actor_names(cfg.personas_dir)
+        )
+        #: 액터 id → 커뮤니티 id — 포스트에 실어 커뮤니티 피드를 채운다 (ADR-014).
+        #: 무소속은 매핑에서 빠져 community_id=None(월드 피드에만)이 된다.
+        self._communities = (
+            actor_communities
+            if actor_communities is not None
+            else load_actor_communities(cfg.personas_dir)
         )
         self._rarity = RarityTracker(cfg.scoring.rarity_window)
         self._repeat = RepeatTracker(
@@ -123,18 +132,23 @@ class FeedComposer:
             event = build_arc_post_event(
                 envelope, previous_stage=previous, drama=drama, score=score,
                 actor_names=self._names,
+                community_id=self._communities.get(payload["target_actor_id"]),
             )
         elif envelope["type"] == GOAL_ACHIEVED_TYPE:
             # 목표 완주 — 인물의 마디, 세계 뉴스로 승격 (ADR-012/014)
             drama, score = evaluate_goal_achievement(envelope, self._cfg.scoring)
             event = build_goal_post_event(
-                envelope, drama=drama, score=score, actor_names=self._names
+                envelope, drama=drama, score=score, actor_names=self._names,
+                community_id=self._communities.get(envelope["actor_id"]),
             )
         elif envelope["type"] == DEBUT_EVENT_TYPE:
             # 데뷔 — 세계가 새 인물을 받아들이는 순간 (페르소나 스튜디오의 방생).
             # 정체성은 세계당 1회 선언이라 도배가 없다 (plan/03 저자성)
             drama, score = evaluate_debut(self._cfg.scoring)
-            event = build_debut_post_event(envelope, drama=drama, score=score)
+            event = build_debut_post_event(
+                envelope, drama=drama, score=score,
+                community_id=self._communities.get(envelope["actor_id"]),
+            )
         else:
             drama, score = evaluate(
                 envelope, self._rarity, self._cfg.scoring,
@@ -150,7 +164,8 @@ class FeedComposer:
                 promoted=score >= self._cfg.scoring.threshold,
             )
             event = build_post_event(
-                envelope, drama=drama, score=score, actor_names=self._names
+                envelope, drama=drama, score=score, actor_names=self._names,
+                community_id=self._communities.get(envelope["actor_id"]),
             )
         if score < self._cfg.scoring.threshold:
             logger.debug(
