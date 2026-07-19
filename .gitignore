@@ -34,3 +34,7 @@ data/
 
 # Playwright MCP 스모크 산출물 (로컬 전용)
 .playwright-mcp/
+
+# 개발용 스크린샷 (저장소 루트) — QA 캡처는 로컬 전용, 커밋하지 않는다.
+# 루트만 겨눈다(/*.png) — 하위의 정식 이미지 에셋(예: apps/web/public)은 살린다.
+/*.png
