@@ -9,7 +9,7 @@
  * "게이트웨이 연결이 필요해요" 폴백 (기존 칩 규약).
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 
 import { PLAYER_ID } from "@/lib/config";
@@ -22,16 +22,26 @@ import {
   TRAIT_BAND_LABELS,
   blankPersona,
   deletePersona,
+  fetchRetired,
   freshId,
   groupKeyOf,
   groupPersonas,
   personaMatches,
   personalityPreview,
+  restorePersona,
   savePersona,
   traitBand,
   usePersonaRoster,
 } from "@/lib/studio";
-import type { BigFive, GroupAxis, Lifestyle, Need, NeedsBias, PersonaDoc } from "@/lib/studio";
+import type {
+  BigFive,
+  GroupAxis,
+  Lifestyle,
+  Need,
+  NeedsBias,
+  PersonaDoc,
+  RetiredPersona,
+} from "@/lib/studio";
 
 import { Icon } from "./Icon";
 import styles from "./lf.module.css";
@@ -821,12 +831,21 @@ interface StudioTabProps {
 }
 
 export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
-  const { personas, available, applyLocal, removeLocal } = usePersonaRoster(enabled);
+  const { personas, available, reload, applyLocal, removeLocal } = usePersonaRoster(enabled);
   const [view, setView] = useState<View>({ kind: "roster" });
   // 수정 저장 직후 명단 위에 뜨는 확인 — "세계가 받아들입니다" 결
   const [savedName, setSavedName] = useState<string | null>(null);
   // 떠나보낸 직후 명단 위에 뜨는 작별 — 저장 확인(초록)과 다른, 차분한 회색 결
   const [farewellName, setFarewellName] = useState<string | null>(null);
+  // 다시 불러온 직후의 귀환 배너 — 작별(회색)과 짝을 이루는 공방(호박)의 결
+  const [returnedName, setReturnedName] = useState<string | null>(null);
+  // 떠난 사람들 — 보관함 목록(비어 있으면 섹션 자체가 없다), 접힘이 기본
+  const [retired, setRetired] = useState<RetiredPersona[]>([]);
+  const [retiredOpen, setRetiredOpen] = useState(false);
+  // 다시 불러오기 — 확인 한 단계(파괴가 아니라 귀환이라 작별의 2단보다 가볍다)
+  const [confirmRestoreKey, setConfirmRestoreKey] = useState<string | null>(null);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
   const [togglingIds, setTogglingIds] = useState<ReadonlySet<string>>(new Set());
   const [rosterError, setRosterError] = useState<string | null>(null);
   // 명단 조회 — 검색어, 그룹 기준(성격의 결·아키타입·생활 리듬), 선택 그룹(null=전체)
@@ -883,14 +902,50 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
     [applyLocal],
   );
 
+  // 보관함 재조회 — 미가용이면 빈 목록이라 섹션이 조용히 사라진다 (강등 규약)
+  const refreshRetired = useCallback(() => {
+    void fetchRetired().then(setRetired);
+  }, []);
+
+  useEffect(() => {
+    if (enabled) refreshRetired();
+  }, [enabled, refreshRetired]);
+
   const handleRetired = useCallback(
     (id: string, name: string) => {
       removeLocal(id);
       setSavedName(null);
+      setReturnedName(null);
       setFarewellName(name);
       setView({ kind: "roster" });
+      refreshRetired(); // 방금 떠난 사람이 보관함에 나타난다
     },
-    [removeLocal],
+    [removeLocal, refreshRetired],
+  );
+
+  const handleRestore = useCallback(
+    (entry: RetiredPersona) => {
+      if (restoringId !== null) return;
+      setRestoringId(entry.id);
+      setRestoreError(null);
+      void restorePersona(entry.id).then((result) => {
+        setRestoringId(null);
+        if (result.ok) {
+          setConfirmRestoreKey(null);
+          setFarewellName(null);
+          setSavedName(null);
+          setReturnedName(result.name || entry.name || entry.id);
+          setRetired((list) => list.filter((r) => r.id !== entry.id));
+          reload(); // 명단 재조회 — 돌아온 사람이 합류한다
+          refreshRetired(); // 같은 id의 다른 보관본이 남았을 수 있다 — 실측 재동기
+        } else {
+          // 실패 규약은 기존 그대로 — offline/409/404의 구분 문장이 그대로 온다
+          setRestoreError(result.message);
+          if (!result.offline) refreshRetired(); // 보관함 실측과 어긋난 상태 — 다시 본다
+        }
+      });
+    },
+    [restoringId, reload, refreshRetired],
   );
 
   if (view.kind === "edit") {
@@ -1112,6 +1167,34 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
             <div
               onClick={() => setFarewellName(null)}
               style={{ color: "#6B7691", cursor: "pointer", fontSize: 15, fontWeight: 800, padding: 4 }}
+            >
+              ×
+            </div>
+          </div>
+        )}
+
+        {returnedName && (
+          <div
+            style={{
+              background: AMBER.bg,
+              border: `1.5px solid ${AMBER.border}`,
+              borderRadius: 16,
+              padding: "13px 18px",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              animation: "lf-pop 0.35s ease-out",
+            }}
+          >
+            <Icon d={ICON.sparkles} size={16} color={AMBER.text} />
+            <div
+              style={{ flex: 1, fontSize: 13, fontWeight: 700, color: AMBER.deep, lineHeight: 1.6 }}
+            >
+              세계가 이 사람을 다시 기억해냅니다 — {returnedName}의 흔적이 돌아오고 있어요
+            </div>
+            <div
+              onClick={() => setReturnedName(null)}
+              style={{ color: AMBER.text, cursor: "pointer", fontSize: 15, fontWeight: 800, padding: 4 }}
             >
               ×
             </div>
@@ -1361,6 +1444,212 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
               )
             )}
           </>
+        )}
+
+        {/* 떠난 사람들 — 보관본이 있을 때만 나타나는 접힌 섹션. 회색 결: 여기는
+            명단이 아니라 기억의 서랍이다. 다시 불러오기만 공방의 호박색을 입는다 */}
+        {retired.length > 0 && (
+          <div
+            style={{
+              border: "1.5px solid #E0E4EC",
+              borderRadius: 20,
+              background: "#F6F7FA",
+              overflow: "hidden",
+              marginTop: 6,
+            }}
+          >
+            <div
+              onClick={() => setRetiredOpen((open) => !open)}
+              className={styles.press97}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "14px 20px",
+                cursor: "pointer",
+              }}
+            >
+              <Icon d={ICON.moon} size={14} color="#8C97AF" />
+              <div style={{ flex: 1, fontSize: 13, fontWeight: 800, color: "#6B7691" }}>
+                떠난 사람들 · {retired.length}
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 800, color: "#A9B2C7" }}>
+                {retiredOpen ? "접기" : "펼치기"}
+              </div>
+            </div>
+
+            {retiredOpen && (
+              <div
+                style={{
+                  padding: "0 20px 16px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#8C97AF", lineHeight: 1.6 }}>
+                  세계를 떠났지만 기록은 남아 있어요 — 다시 불러오면 글과 관계도 함께 돌아옵니다.
+                </div>
+
+                {restoreError && (
+                  <div
+                    style={{
+                      background: "#FBECF0",
+                      border: "1.5px solid #F2CBD7",
+                      borderRadius: 14,
+                      padding: "11px 15px",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: "#B24E6B",
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    {restoreError}
+                  </div>
+                )}
+
+                {retired.map((entry) => {
+                  const confirming = confirmRestoreKey === entry.filename;
+                  const restoring = restoringId === entry.id;
+                  return (
+                    <div
+                      key={entry.filename}
+                      style={{
+                        background: "#fff",
+                        border: "1.5px solid #E8EBF2",
+                        borderRadius: 16,
+                        padding: "12px 16px",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 10,
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <div
+                          style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: "50%",
+                            background: "#E4E7EE",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: 14,
+                            fontWeight: 800,
+                            color: "#8C97AF",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {(entry.name || entry.id).slice(0, 1).toUpperCase()}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 800, color: "#5A6478" }}>
+                            {entry.name || entry.id}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 600,
+                              color: "#A9B2C7",
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                          >
+                            {entry.archetype || "결이 기록되지 않았어요"}
+                          </div>
+                        </div>
+                        {!confirming && (
+                          <div
+                            onClick={() => {
+                              setConfirmRestoreKey(entry.filename);
+                              setRestoreError(null);
+                            }}
+                            className={styles.press95}
+                            style={{
+                              padding: "8px 16px",
+                              borderRadius: 9999,
+                              background: "#fff",
+                              border: `1.5px solid ${AMBER.border}`,
+                              color: AMBER.text,
+                              fontSize: 13,
+                              fontWeight: 800,
+                              cursor: "pointer",
+                              flexShrink: 0,
+                            }}
+                          >
+                            다시 불러오기
+                          </div>
+                        )}
+                      </div>
+
+                      {confirming && (
+                        <div
+                          style={{
+                            background: AMBER.bg,
+                            border: `1.5px solid ${AMBER.border}`,
+                            borderRadius: 14,
+                            padding: "13px 16px",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 10,
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 700,
+                              color: AMBER.deep,
+                              lineHeight: 1.65,
+                            }}
+                          >
+                            {entry.name || entry.id} — 이 사람을 세계로 다시 불러올까요? 글과
+                            관계도 함께 돌아옵니다.
+                          </div>
+                          <div style={{ display: "flex", gap: 10 }}>
+                            <div
+                              onClick={() => handleRestore(entry)}
+                              className={styles.press95}
+                              style={{
+                                padding: "8px 16px",
+                                borderRadius: 9999,
+                                background: restoring ? "#D8DEEA" : AMBER.solid,
+                                color: "#fff",
+                                fontSize: 13,
+                                fontWeight: 800,
+                                cursor: restoring ? "default" : "pointer",
+                              }}
+                            >
+                              {restoring ? "돌아오는 중…" : "다시 불러오기"}
+                            </div>
+                            <div
+                              onClick={() => {
+                                if (restoring) return;
+                                setConfirmRestoreKey(null);
+                                setRestoreError(null);
+                              }}
+                              className={styles.press95}
+                              style={{
+                                padding: "8px 16px",
+                                borderRadius: 9999,
+                                background: "#F2F6FC",
+                                color: "#6B7691",
+                                fontSize: 13,
+                                fontWeight: 800,
+                                cursor: "pointer",
+                              }}
+                            >
+                              그대로 두기
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </>

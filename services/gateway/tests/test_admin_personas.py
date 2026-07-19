@@ -680,3 +680,273 @@ async def test_delete_appends_envelope_to_real_eventstore(
     assert env["payload"] == {"actor_id": "a_zed", "name": "제드", "retired_by": "p_reaper"}
     assert env["correlation_id"] == env["event_id"]  # 사슬의 시작 — 자기 자신이 루트
     assert await current_head(conn, "w_test", "actor", "a_zed") == 1  # CAS head 전진
+
+
+# ── 떠난 사람들 목록 + 복원 — 은퇴의 역방향 ──────────────────────────────────
+#
+# actor.identity.returned의 스키마 파일·발행 권한도 packages/schemas의 병렬
+# 작업분이다 — 은퇴와 같은 협업 관례로, 단위 테스트는 적재 대역으로 봉투 계약을
+# 보고, es 실적재는 registry 선등록(자가 판별) 통합 테스트가 본다.
+
+
+@pytest.fixture
+def returned_events(monkeypatch) -> list:
+    """복원 es 적재 대역 — 인프라 없이 NewEvent를 붙잡는다."""
+    events: list = []
+
+    async def capture(cfg: Config, event) -> None:
+        events.append(event)
+
+    monkeypatch.setattr(admin, "append_returned_event", capture)
+    return events
+
+
+@pytest.fixture
+def broken_returned_eventstore(monkeypatch) -> None:
+    """복원 es 불통 대역 — 적재 실패 시 원복(반쪽 복원 금지) 검증용."""
+
+    async def explode(cfg: Config, event) -> None:
+        raise RuntimeError("es가 응답하지 않는다 (대역)")
+
+    monkeypatch.setattr(admin, "append_returned_event", explode)
+
+
+async def test_list_retired_is_empty_without_archive(personas_dir):
+    # "retired"가 {persona_id} 경로에 잡히면 404가 난다 — 경로 순서의 회귀 감시
+    async with make_client(personas_dir) as client:
+        resp = await client.get("/admin/personas/retired")
+    assert resp.status_code == 200
+    assert resp.json() == {"retired": []}
+
+
+async def test_list_retired_lists_all_archives_with_filenames(personas_dir, retired_events):
+    # 같은 파일명 계보(-2 접미)의 보관본도 전부 나열한다 — 파일명이 구분자
+    prior = ZED_YAML.replace("id: a_zed", "id: a_zed_elder").replace("name: 제드", "name: 옛 제드")
+    retired = personas_dir / "retired"
+    retired.mkdir()
+    (retired / "zed.yaml").write_text(prior, encoding="utf-8")
+
+    async with make_client(personas_dir) as client:
+        await client.delete("/admin/personas/a_zed", params={"retired_by": "p_reaper"})
+        resp = await client.get("/admin/personas/retired")
+
+    assert resp.status_code == 200
+    # 파일명 순 — 목록(GET /admin/personas)과 같은 정렬 규약 ("zed-2" < "zed.")
+    assert resp.json()["retired"] == [
+        {"id": "a_zed", "name": "제드", "archetype": "night_owl",
+         "filename": "zed-2.yaml"},
+        {"id": "a_zed_elder", "name": "옛 제드", "archetype": "night_owl",
+         "filename": "zed.yaml"},
+    ]
+
+
+async def test_restore_moves_yaml_back_and_appends_returned_event(
+    personas_dir, retired_events, returned_events
+):
+    original = (personas_dir / "zed.yaml").read_text(encoding="utf-8")
+    async with make_client(personas_dir) as client:
+        await client.delete("/admin/personas/a_zed", params={"retired_by": "p_reaper"})
+        resp = await client.post(
+            "/admin/personas/a_zed/restore", params={"returned_by": "p_keeper"}
+        )
+        listed = (await client.get("/admin/personas")).json()["personas"]
+        archives = (await client.get("/admin/personas/retired")).json()["retired"]
+
+    assert resp.status_code == 200
+    assert resp.json() == {"actor_id": "a_zed", "name": "제드"}
+
+    # ① 복귀 이동 — 원문 그대로 루트로 돌아오고, 보관함에서는 사라진다
+    assert (personas_dir / "zed.yaml").read_text(encoding="utf-8") == original
+    assert not (personas_dir / "retired" / "zed.yaml").exists()
+    # roster(루트 glob) 합류 — 다음 tick 실행 집합에 드는 것과 같은 지문
+    assert [d["id"] for d in listed] == ["a_ari", "a_zed"]
+    assert archives == []
+
+    # ② 적재 봉투 — 프로젝터와 합의된 고정 계약
+    [event] = returned_events
+    assert event.stream == "actor" and event.stream_key == "a_zed"
+    assert event.type == "actor.identity.returned"
+    assert event.world_id == "w_main"  # 기본 세계
+    assert event.actor_id == "a_zed" and event.tick == 0
+    assert event.payload == {"actor_id": "a_zed", "name": "제드", "returned_by": "p_keeper"}
+
+
+async def test_restore_alive_persona_is_409(personas_dir, returned_events):
+    # 루트에 같은 id가 살아 있으면 덮지 않는다 — 보관본이 있어도 없어도 409
+    retired = personas_dir / "retired"
+    retired.mkdir()
+    (retired / "zed-old.yaml").write_text(ZED_YAML, encoding="utf-8")
+
+    async with make_client(personas_dir) as client:
+        resp = await client.post(
+            "/admin/personas/a_zed/restore", params={"returned_by": "p_keeper"}
+        )
+    assert resp.status_code == 409
+    assert (personas_dir / "zed.yaml").exists()  # 살아있는 사람은 그대로
+    assert (retired / "zed-old.yaml").exists()  # 보관본도 그대로
+    assert returned_events == []
+
+
+async def test_restore_without_archive_is_404(personas_dir, returned_events):
+    async with make_client(personas_dir) as client:
+        resp = await client.post(
+            "/admin/personas/a_nobody/restore", params={"returned_by": "p_keeper"}
+        )
+    assert resp.status_code == 404
+    assert returned_events == []
+
+
+async def test_restore_requires_wellformed_returned_by(personas_dir, returned_events):
+    retired = personas_dir / "retired"
+    retired.mkdir()
+    ghost = ZED_YAML.replace("id: a_zed", "id: a_ghost")
+    (retired / "ghost.yaml").write_text(ghost, encoding="utf-8")
+
+    async with make_client(personas_dir) as client:
+        missing = await client.post("/admin/personas/a_ghost/restore")
+        malformed = await client.post(
+            "/admin/personas/a_ghost/restore", params={"returned_by": "keeper"}
+        )
+    assert missing.status_code == 422
+    assert malformed.status_code == 422
+    assert (retired / "ghost.yaml").exists()  # 거부된 복원은 옮기지 않는다
+    assert returned_events == []
+
+
+async def test_restore_append_failure_returns_yaml_to_archive(
+    personas_dir, broken_returned_eventstore
+):
+    retired = personas_dir / "retired"
+    retired.mkdir()
+    ghost = ZED_YAML.replace("id: a_zed", "id: a_ghost").replace("name: 제드", "name: 유령")
+    (retired / "ghost.yaml").write_text(ghost, encoding="utf-8")
+
+    async with make_client(personas_dir) as client:
+        resp = await client.post(
+            "/admin/personas/a_ghost/restore", params={"returned_by": "p_keeper"}
+        )
+        listed = (await client.get("/admin/personas")).json()["personas"]
+
+    assert resp.status_code == 500
+    # 원복 — 반쪽 복원(파일만 돌아온 상태)이 남지 않는다
+    assert (retired / "ghost.yaml").read_text(encoding="utf-8") == ghost
+    assert not (personas_dir / "ghost.yaml").exists()
+    assert [d["id"] for d in listed] == ["a_ari", "a_zed"]  # 세계는 그대로다
+
+
+async def test_restore_sidesteps_root_filename_collision(personas_dir, returned_events):
+    # 보관본과 같은 파일명을 루트의 다른 id가 쓰고 있어도 덮지 않는다 — zed-2.yaml로 비껴 앉는다
+    retired = personas_dir / "retired"
+    retired.mkdir()
+    elder = ZED_YAML.replace("id: a_zed", "id: a_zed_elder").replace("name: 제드", "name: 옛 제드")
+    (retired / "zed.yaml").write_text(elder, encoding="utf-8")
+
+    async with make_client(personas_dir) as client:
+        resp = await client.post(
+            "/admin/personas/a_zed_elder/restore", params={"returned_by": "p_keeper"}
+        )
+    assert resp.status_code == 200
+    assert load_yaml(personas_dir / "zed.yaml")["id"] == "a_zed"  # 살아있는 파일 보존
+    assert load_yaml(personas_dir / "zed-2.yaml")["id"] == "a_zed_elder"
+    assert len(returned_events) == 1
+
+
+async def test_admin_token_gates_restore_routes(personas_dir, returned_events):
+    async with make_client(personas_dir, token="secret-token") as client:
+        assert (await client.get("/admin/personas/retired")).status_code == 403
+        assert (
+            await client.post(
+                "/admin/personas/a_zed/restore", params={"returned_by": "p_keeper"}
+            )
+        ).status_code == 403
+        ok = await client.get(
+            "/admin/personas/retired", headers={"Authorization": "Bearer secret-token"}
+        )
+        assert ok.status_code == 200
+    assert returned_events == []
+
+
+# ── 복원 통합 — 실제 es CAS 적재 (PG 필요, 미설정 skip — conftest 가드) ───────
+
+#: 합의된 payload 계약의 대역 스키마 — packages/schemas 등록 전 선등록용
+RETURNED_PAYLOAD_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+        "actor_id": {"type": "string", "pattern": "^a_[a-z0-9_]+$"},
+        "name": {"type": "string"},
+        "returned_by": {"type": "string", "pattern": "^p_[a-z0-9_]+$"},
+    },
+    "required": ["actor_id", "name", "returned_by"],
+    "additionalProperties": False,
+}
+
+
+@pytest.fixture
+def preregistered_returned_schema(monkeypatch) -> None:
+    """actor.identity.returned가 registry에 아직 없으면 합의 계약대로 선등록한다.
+
+    스키마 파일과 permissions.yaml 갱신은 packages/schemas의 병렬 작업분이다 —
+    이미 등록돼 있으면(정상 종착) 아무것도 덧대지 않고 실물 registry로 검증한다.
+    """
+    from lf_schemas import registry
+
+    try:
+        registry.payload_schema(admin.RETURNED_TYPE)
+        registered = registry.is_allowed("services.gateway", admin.RETURNED_TYPE)
+    except KeyError:
+        registered = False
+    if registered:
+        return  # 실물 스키마·권한이 이미 있다 — 대역 없이 그대로 간다
+
+    real_schema, real_allowed = registry.payload_schema, registry.is_allowed
+
+    def payload_schema(event_type: str) -> dict:
+        if event_type == admin.RETURNED_TYPE:
+            return RETURNED_PAYLOAD_SCHEMA
+        return real_schema(event_type)
+
+    def is_allowed(principal: str, event_type: str) -> bool:
+        if event_type == admin.RETURNED_TYPE:
+            return principal == "services.gateway"
+        return real_allowed(principal, event_type)
+
+    monkeypatch.setattr(registry, "payload_schema", payload_schema)
+    monkeypatch.setattr(registry, "is_allowed", is_allowed)
+
+
+async def test_restore_appends_envelope_to_real_eventstore(
+    personas_dir, conn, preregistered_retired_schema, preregistered_returned_schema
+):
+    # 은퇴 → 복원 전체 왕복 — 한 stream에 두 사건이 차례로 남고 head가 전진한다
+    from lf_eventstore import current_head, read_stream
+    from lf_eventstore.testing import test_database_url
+
+    dsn = test_database_url()
+    assert dsn is not None  # conn 픽스처가 스킵을 보장한다
+    async with make_client(personas_dir, pg_dsn=dsn) as client:
+        gone = await client.delete(
+            "/admin/personas/a_zed",
+            params={"retired_by": "p_reaper", "world_id": "w_test"},
+        )
+        back = await client.post(
+            "/admin/personas/a_zed/restore",
+            params={"returned_by": "p_keeper", "world_id": "w_test"},
+        )
+    assert gone.status_code == 200
+    assert back.status_code == 200
+    assert back.json() == {"actor_id": "a_zed", "name": "제드"}
+    assert (personas_dir / "zed.yaml").exists()  # 세계의 실행 집합으로 복귀
+
+    events = await read_stream(conn, "w_test", "actor", "a_zed")
+    retired_env, returned_env = [e.envelope for e in events]
+    assert retired_env["type"] == "actor.identity.retired"
+    assert returned_env["type"] == "actor.identity.returned"
+    assert returned_env["stream"] == "actor"
+    assert returned_env["actor_id"] == "a_zed"
+    assert returned_env["tick"] == 0
+    assert returned_env["payload"] == {
+        "actor_id": "a_zed", "name": "제드", "returned_by": "p_keeper",
+    }
+    assert returned_env["correlation_id"] == returned_env["event_id"]  # 스튜디오 개입은 새 사슬
+    assert await current_head(conn, "w_test", "actor", "a_zed") == 2  # CAS head 전진

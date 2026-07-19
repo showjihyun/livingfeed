@@ -2,12 +2,16 @@
 
 사람이 AI 페르소나를 빚고 세계에 풀어놓는 창조자 도구의 백엔드다 (ADR-001/012
 — 파일이 원천, DB화하지 않는다). 조회·저장은 es에 아무것도 적재하지 않는다:
-세계 반영은 tick 워커의 핫 리로드(lf_actor.reload) 몫이다. 예외는 은퇴(DELETE)
-하나다 — read 모델 소멸은 프로젝터가 집행해야 하므로 actor.identity.retired를
-es에 적재한다(파일 이동은 roster 이탈만 담당한다).
+세계 반영은 tick 워커의 핫 리로드(lf_actor.reload) 몫이다. 예외는 은퇴(DELETE)와
+복원(restore) 둘이다 — read 모델의 소멸·귀환은 프로젝터가 집행해야 하므로
+actor.identity.retired / actor.identity.returned를 es에 적재한다(파일 이동은
+roster 이탈·합류만 담당한다).
 
 계약(FE 병렬 개발 중 — 고정):
   GET    /admin/personas       → {"personas": [PersonaDoc...]} (파일명 순)
+  GET    /admin/personas/retired
+         → {"retired": [{id, name, archetype, filename}...]} (파일명 순).
+           같은 id의 보관본이 여럿(-2, -3…)이어도 전부 나열한다 — 파일명이 구분자.
   GET    /admin/personas/{id}  → PersonaDoc (없으면 404 {"detail": ...})
   PUT    /admin/personas/{id}  → 검증(422) 후 yaml 저장, 저장된 PersonaDoc 반환.
                                  created_by는 생성 시에만 — 수정으로 못 바꾼다.
@@ -16,6 +20,12 @@ es에 적재한다(파일 이동은 roster 이탈만 담당한다).
            보므로 roster에서 빠진다) ② actor.identity.retired 적재(es CAS).
            200 {actor_id, name} / 404(미존재) / 410(이미 은퇴).
            이동 성공·적재 실패는 yaml 원복 후 500 — 반쪽 은퇴를 남기지 않는다.
+  POST   /admin/personas/{id}/restore?returned_by=p_* [&world_id=w_main]
+         → 은퇴의 역방향. ① retired/의 yaml을 루트로 복귀 이동(로더가 루트만
+           보므로 다음 tick 실행 집합에 합류) ② actor.identity.returned 적재.
+           200 {actor_id, name} / 409(루트에 동일 id 생존 — 덮지 않는다) /
+           404(보관본 없음). 이동 성공·적재 실패는 yaml을 retired/로 원복 후
+           500 — 반쪽 복원을 남기지 않는다.
 게이트: LF_ADMIN_TOKEN 설정 시 Authorization: Bearer 일치(403), dev는 열림.
 """
 
@@ -313,28 +323,34 @@ def update_persona_text(text: str, merged: dict[str, Any]) -> str:
     return buf.getvalue()
 
 
-# ── 은퇴 — 파일은 retired/로 물러나고(roster 이탈), 소멸은 이벤트가 나른다 ────
+# ── 은퇴·복원 — 파일은 retired/를 오가고(roster 이탈·합류), 소멸·귀환은 이벤트가 나른다 ────
 #
-# 파일 이동은 세계의 실행 집합에서 빼는 것까지만이다 (reload 지문은 루트 glob).
-# 이미 세계에 남긴 글·관계(read 모델)의 소멸은 프로젝터가 actor.identity.retired
-# 이벤트를 소비해 집행한다 — 그래서 이 경로만 예외적으로 es에 적재한다.
+# 파일 이동은 세계의 실행 집합에서 빼고 넣는 것까지만이다 (reload 지문은 루트 glob).
+# 이미 세계에 남긴 글·관계(read 모델)의 소멸(retired)과 귀환(returned)은
+# 프로젝터가 이벤트를 소비해 집행한다 — 그래서 이 두 경로만 예외적으로 es에 적재한다.
 
 #: 은퇴한 페르소나 yaml의 보관처 — 삭제하지 않는다 (역사 보존의 결)
 RETIRED_DIRNAME = "retired"
 #: 은퇴 이벤트 계약 (프로젝터와 합의된 고정 계약) — stream=actor, stream_key=actor_id
 RETIRED_TYPE = "actor.identity.retired"
+#: 복원 이벤트 계약 (프로젝터와 합의된 고정 계약) — 은퇴의 역방향, 같은 stream/key
+RETURNED_TYPE = "actor.identity.returned"
 
 
-def retire_destination(directory: Path, filename: str) -> Path:
-    """retired/ 하위의 비어 있는 목적지 — 같은 이름이 있으면 -2, -3… (역사를 덮지 않는다)."""
-    base = directory / RETIRED_DIRNAME
-    dest = base / filename
+def vacant_path(directory: Path, filename: str) -> Path:
+    """directory 하위의 비어 있는 목적지 — 같은 이름이 있으면 -2, -3… (있는 것을 덮지 않는다)."""
+    dest = directory / filename
     stem, suffix = dest.stem, dest.suffix
     counter = 2
     while dest.exists():
-        dest = base / f"{stem}-{counter}{suffix}"
+        dest = directory / f"{stem}-{counter}{suffix}"
         counter += 1
     return dest
+
+
+def retire_destination(directory: Path, filename: str) -> Path:
+    """retired/ 하위의 비어 있는 목적지 — 역사를 덮지 않는다."""
+    return vacant_path(directory / RETIRED_DIRNAME, filename)
 
 
 def build_retired_event(
@@ -353,7 +369,22 @@ def build_retired_event(
     )
 
 
-async def append_retired_event(cfg: Config, event: NewEvent) -> None:
+def build_returned_event(
+    world_id: str, actor_id: str, name: str, returned_by: str
+) -> NewEvent:
+    """actor.identity.returned NewEvent — payload는 프로젝터와의 고정 계약."""
+    return NewEvent(
+        world_id=world_id,
+        stream="actor",
+        stream_key=actor_id,
+        type=RETURNED_TYPE,
+        tick=0,  # 스튜디오 개입은 tick 밖의 사건 — 은퇴와 같은 규약
+        actor_id=actor_id,
+        payload={"actor_id": actor_id, "name": name, "returned_by": returned_by},
+    )
+
+
+async def _append_with_cas(cfg: Config, event: NewEvent) -> None:
     """es CAS 적재 — 경합이면 재수화 후 1회 재시도 (session.py 커맨드 적재 관례)."""
     conn = await AsyncConnection.connect(cfg.pg_dsn, autocommit=True)
     try:
@@ -365,6 +396,30 @@ async def append_retired_event(cfg: Config, event: NewEvent) -> None:
             await append(conn, PRINCIPAL, [event], expected_head=head)
     finally:
         await conn.close()
+
+
+# 적재 함수는 경로별로 나뉜다 — 테스트가 은퇴/복원의 대역(fixture)을 따로 붙잡는 이음새
+async def append_retired_event(cfg: Config, event: NewEvent) -> None:
+    """은퇴 이벤트의 es CAS 적재."""
+    await _append_with_cas(cfg, event)
+
+
+async def append_returned_event(cfg: Config, event: NewEvent) -> None:
+    """복원 이벤트의 es CAS 적재."""
+    await _append_with_cas(cfg, event)
+
+
+class RetiredSummary(BaseModel):
+    """떠난 사람의 명단 한 줄 — 전체 문서가 아니라 알아볼 표식만.
+
+    filename이 구분자다: 같은 id가 여러 번 은퇴하면 보관본이 -2, -3…으로
+    쌓이는데, 목록은 전부 나열하고 파일명으로 구분해 보여준다.
+    """
+
+    id: str
+    name: str
+    archetype: str = ""
+    filename: str
 
 
 # ── 라우터 ───────────────────────────────────────────────────────────────────
@@ -386,6 +441,34 @@ def create_admin_router(cfg: Config) -> APIRouter:
     async def list_personas() -> dict[str, list[PersonaDoc]]:
         docs = [PersonaDoc.model_validate(read_doc(p)) for p in persona_files(cfg.personas_dir)]
         return {"personas": docs}
+
+    # 경로 규칙: /personas/{persona_id}보다 먼저 서야 "retired"가 id로 잡히지 않는다
+    @router.get("/personas/retired")
+    async def list_retired() -> dict[str, list[RetiredSummary]]:
+        resting = cfg.personas_dir / RETIRED_DIRNAME
+        if not resting.is_dir():
+            return {"retired": []}
+        summaries: list[RetiredSummary] = []
+        for path in persona_files(resting):
+            try:
+                doc = read_doc(path)
+                actor_id = doc.get("id") if isinstance(doc, dict) else None
+                if not actor_id:
+                    raise ValueError("id가 없다")
+            except Exception as e:
+                # 손상된 보관본이 목록 전체를 죽이면 안 된다 — 건너뛰되 흔적은 남긴다
+                # (id 없는 파일은 복원 경로(id 스캔)로도 못 찾으니 목록에 세울 수 없다)
+                logger.warning("보관본을 읽지 못해 목록에서 건너뛴다: %s (%s)", path.name, e)
+                continue
+            summaries.append(
+                RetiredSummary(
+                    id=str(actor_id),
+                    name=str(doc.get("name") or actor_id),
+                    archetype=str(doc.get("archetype") or ""),
+                    filename=path.name,
+                )
+            )
+        return {"retired": summaries}
 
     @router.get("/personas/{persona_id}")
     async def get_persona(persona_id: str) -> PersonaDoc:
@@ -451,6 +534,53 @@ def create_admin_router(cfg: Config) -> APIRouter:
                     f"적재와 원복이 모두 실패했다 — {RETIRED_DIRNAME}/{dest.name}를 수동 복구하라",
                 ) from e
             raise HTTPException(500, f"세계 역사 적재에 실패했다 (은퇴는 취소됨): {e}") from e
+        return {"actor_id": persona_id, "name": name}
+
+    @router.post("/personas/{persona_id}/restore")
+    async def restore_persona(
+        persona_id: str,
+        returned_by: str = Query(..., pattern=r"^p_[a-z0-9_]+$"),
+        world_id: str = Query("w_main", pattern=r"^w_[a-z0-9_]+$"),
+    ) -> dict[str, str]:
+        # 살아있는 사람 우선 — 루트에 같은 id가 있으면 덮지도, 겹치지도 않는다.
+        # (복원 직후의 이중 클릭도 여기로 온다 — 404가 아니라 "이미 살아 있다")
+        if find_persona_file(cfg.personas_dir, persona_id) is not None:
+            raise HTTPException(409, f"이미 세계에 살아 있는 사람이다: {persona_id}")
+        resting = cfg.personas_dir / RETIRED_DIRNAME
+        archived = (
+            find_persona_file(resting, persona_id) if resting.is_dir() else None
+        )
+        if archived is None:
+            raise HTTPException(404, f"보관된 페르소나가 없다: {persona_id}")
+        name = str(read_doc(archived).get("name") or persona_id)
+
+        # ① 복귀 이동 — 로더는 루트만 보므로 이 이동만으로 다음 tick 실행 집합에
+        # 합류한다. 파일명은 보관본 그대로 옮기되, 루트에 같은 이름의 다른 파일이
+        # 있으면 -2, -3…으로 비껴 앉는다 (id 충돌은 위 409가 이미 막았다)
+        dest = vacant_path(cfg.personas_dir, archived.name)
+        try:
+            archived.replace(dest)
+        except OSError as e:
+            raise HTTPException(500, f"페르소나 파일을 되돌리지 못했다: {e}") from e
+
+        # ② 적재 — 실패면 yaml을 retired/로 원복 후 5xx. 반쪽 복원(파일만 돌아온
+        # 상태)을 남기지 않는다 — 은퇴와 대칭인 규약
+        try:
+            await append_returned_event(
+                cfg, build_returned_event(world_id, persona_id, name, returned_by)
+            )
+        except Exception as e:
+            try:
+                dest.replace(archived)
+            except OSError:
+                logger.exception(
+                    "복원 원복 실패 — 수동 복구 필요: %s", dest.name
+                )
+                raise HTTPException(
+                    500,
+                    f"적재와 원복이 모두 실패했다 — 루트의 {dest.name}를 수동 복구하라",
+                ) from e
+            raise HTTPException(500, f"세계 역사 적재에 실패했다 (복원은 취소됨): {e}") from e
         return {"actor_id": persona_id, "name": name}
 
     return router

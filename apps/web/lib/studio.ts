@@ -374,6 +374,65 @@ export async function deletePersona(id: string): Promise<DeleteResult> {
   }
 }
 
+/* ── 떠난 사람들 (복원) — 은퇴의 역방향: 보관함 조회와 다시 불러오기 ── */
+
+export interface RetiredPersona {
+  id: string;
+  name: string;
+  archetype: string;
+  /** 보관본 파일명 — 같은 id가 여러 번 떠났으면 -2, -3…으로 구분된다 (목록의 키) */
+  filename: string;
+}
+
+/** 떠난 사람들의 보관함 목록 — 미가용이면 빈 목록 (조용한 강등: 섹션이 아예 안 보인다) */
+export async function fetchRetired(): Promise<RetiredPersona[]> {
+  try {
+    const response = await fetch(`${GATEWAY_URL}/admin/personas/retired`);
+    if (!response.ok) return [];
+    const body = (await response.json()) as { retired?: RetiredPersona[] };
+    return body.retired ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export type RestoreResult =
+  | { ok: true; name: string }
+  | {
+      ok: false;
+      /** true면 게이트웨이 자체에 닿지 못한 것 — 서버의 거절과 구분해 보여준다 */
+      offline: boolean;
+      message: string;
+    };
+
+/** 떠난 인물을 세계로 다시 불러온다 — 글·관계의 귀환은 세계(프로젝터)가 집행한다 */
+export async function restorePersona(id: string): Promise<RestoreResult> {
+  try {
+    const query = new URLSearchParams({ returned_by: PLAYER_ID });
+    const response = await fetch(
+      `${GATEWAY_URL}/admin/personas/${encodeURIComponent(id)}/restore?${query.toString()}`,
+      { method: "POST" },
+    );
+    if (!response.ok) {
+      const message =
+        response.status === 409
+          ? "이 사람은 이미 세계에 살고 있어요"
+          : response.status === 404
+            ? "보관함에 이 사람의 기록이 없어요"
+            : `다시 불러오지 못했어요 (gateway ${response.status})`;
+      return { ok: false, offline: false, message };
+    }
+    const body = (await response.json()) as { actor_id: string; name: string };
+    return { ok: true, name: body.name };
+  } catch {
+    return {
+      ok: false,
+      offline: true,
+      message: "게이트웨이에 닿지 못했어요 — 연결되면 다시 시도해주세요",
+    };
+  }
+}
+
 /* ── 명단 훅 ── */
 
 export function usePersonaRoster(enabled: boolean): {
