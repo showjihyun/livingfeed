@@ -253,6 +253,11 @@ services:
       LF_ENV: dev
       LF_WORLD_ID: w_main
       LF_PERSONAS_DIR: /app/agents/personas
+      # 세계 규모 — 깨울 액터 수(10~1000). 미설정이면 시드 전원(현재 100명).
+      # 20명 이상은 40B 이상 모델 권장 (capacity.py / scripts/actor_capacity.py).
+      LF_MAX_ACTORS: ${LF_MAX_ACTORS:-}
+      # 로컬 LLM 모델 파라미터(B) — 알려주면 부팅 로그가 하한 위반을 경고한다 (선택)
+      LF_MODEL_PARAMS_B: ${LF_MODEL_PARAMS_B:-}
       LF_AI_TIMEOUT_S: ${LF_AI_TIMEOUT_S:-18}
       # Semantic 기억 (ADR-008) — 미가용이어도 tick은 흐른다 (회상만 비활성)
       LF_QDRANT_URL: http://qdrant:6333

@@ -40,9 +40,18 @@ class PersonaReloader:
     다시 전진시키므로 다음 poll이 잡는다.
     """
 
-    def __init__(self, directory: Path) -> None:
+    def __init__(self, directory: Path, *, max_actors: int | None = None) -> None:
         self._dir = Path(directory)
+        #: 세계 규모 상한 (LF_MAX_ACTORS) — 파일명 순 앞에서 N명만 실린다. 파일은
+        #: 그대로 두고 몇 명을 깨울지만 조절한다 (capacity.py). None이면 전원.
+        self._max_actors = max_actors
         self._fingerprint: Fingerprint | None = None
+
+    def _capped(self, personas: list[Persona]) -> list[Persona]:
+        """규모 상한 적용 — 결정적으로 앞의 N명만 (load_personas는 파일명 순)."""
+        if self._max_actors is not None and len(personas) > self._max_actors:
+            return personas[: self._max_actors]
+        return personas
 
     def load(self) -> list[Persona]:
         """최초 로드 — 지문을 굳히고 전체를 읽는다 (워커 시작 시 1회).
@@ -51,7 +60,7 @@ class PersonaReloader:
         실행 집합은 샤드별이지만 이름·유효 대상·팬아웃 명부는 세계 전체다.
         """
         self._fingerprint = scan_fingerprint(self._dir)
-        return load_personas(self._dir)
+        return self._capped(load_personas(self._dir))
 
     def poll(self) -> list[Persona] | None:
         """변경이 있으면 새 명부, 없으면 None. 읽기 실패는 호출자에게 던진다."""
@@ -59,7 +68,7 @@ class PersonaReloader:
         if fingerprint == self._fingerprint:
             return None
         self._fingerprint = fingerprint
-        return load_personas(self._dir)
+        return self._capped(load_personas(self._dir))
 
 
 class ReloadingPhases:

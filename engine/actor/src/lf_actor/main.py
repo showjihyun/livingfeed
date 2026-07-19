@@ -22,6 +22,7 @@ from lf_tick.shard import shard_of
 from redis.asyncio import Redis
 
 from lf_actor.arc import ArcStore
+from lf_actor.capacity import clamp_actor_count, format_plan, recommend_capacity
 from lf_actor.client import AiRuntimeClient
 from lf_actor.emotion import EmotionAdapter
 from lf_actor.goal import GoalAdapter
@@ -56,10 +57,28 @@ async def run() -> None:
     # LLM decide 응답 예산 — reasoning 모델은 더 오래 걸릴 수 있다 (tick 예산 안에서)
     ai_timeout_s = float(os.environ.get("LF_AI_TIMEOUT_S", "10"))
 
+    # 세계 규모 설정 — LF_MAX_ACTORS로 10~1000명 조절 (capacity.py). 미설정이면 전원.
+    # LF_MODEL_PARAMS_B(선택)로 로컬 모델 크기(B)를 알려주면 하한 위반을 구체 경고한다.
+    max_actors_env = os.environ.get("LF_MAX_ACTORS")
+    max_actors = clamp_actor_count(int(max_actors_env)) if max_actors_env else None
+    model_params_b_env = os.environ.get("LF_MODEL_PARAMS_B")
+    model_params_b = float(model_params_b_env) if model_params_b_env else None
+
     # 핫 리로드 감지기 — 스튜디오가 파일(SoT)을 바꾸면 tick 경계에서 세계에 반영된다
-    reloader = PersonaReloader(personas_dir)
+    reloader = PersonaReloader(personas_dir, max_actors=max_actors)
     personas = reloader.load()
     logger.info("페르소나 %d명 로드: %s", len(personas), ", ".join(p.id for p in personas))
+
+    # 세계 규모 계획 — 실제 로드된 수 기준 모델/vRAM 권장 + 경고 (설정 시 표기)
+    plan = recommend_capacity(len(personas), model_params_b)
+    for line in format_plan(plan).splitlines():
+        logger.info(line)
+    if max_actors is not None and len(personas) < max_actors:
+        logger.warning(
+            "요청 규모 %d명이나 가용 시드는 %d명입니다 — 더 필요하면 "
+            "`uv run python scripts/seed/generate_personas.py --total %d`",
+            max_actors, len(personas), max_actors,
+        )
 
     # 샤드 분할 (ADR-012 Phase 2) — 샤드 수는 고정 상수, 워커는 샤드 집합을 소유한다.
     # 실행 집합만 샤드별이고 이름·유효 대상·팬아웃 명부는 세계 전체다 (phases 로스터)

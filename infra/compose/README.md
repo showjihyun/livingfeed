@@ -30,6 +30,32 @@ docker compose down -v                       # 데이터까지 완전 삭제
 | feed-api | 8001 | `full` 프로파일만 |
 | dispatcher | (포트 없음) | `full` 프로파일만 — outbox relay 워커 (ADR-017). 시작 시 es 마이그레이션 적용 |
 
+## 세계 규모 (액터 수) — `LF_MAX_ACTORS`
+
+세계에 깨워둘 액터 수를 **10~1000명**에서 조절한다. 페르소나 파일(`agents/personas`,
+현재 100명)은 그대로 두고, 파일명 순 앞에서 N명만 실린다. 미설정이면 시드 전원.
+
+```bash
+LF_MAX_ACTORS=30            # 액터 30명만 (범위 밖은 10/1000으로 클램프)
+LF_MODEL_PARAMS_B=8         # (선택) 내 로컬 모델 크기(B) — 하한 위반을 부팅 로그가 경고
+```
+
+**LLM 모델 가이드** (운영 경험 기반):
+
+- 로컬 LLM 실측 한계는 **~20명 미만**이다. 그 이상은 반응 지연·품질이 무너진다.
+- **20명 이상이면 40B 이상 모델만 권장한다.** `LF_MODEL_PARAMS_B`를 알려주면 액터
+  엔진이 부팅 시 하한 위반을 구체적으로 경고한다.
+- 400명 이상은 로컬 vRAM보다 호스티드 API(Claude 등, ADR-018 예산 라우팅)를 권장한다.
+
+설정 전에 규모별 권장 모델·vRAM을 미리 확인:
+
+```bash
+uv run python scripts/actor_capacity.py --actors 50 --model-b 8   # 내 모델과 대조
+uv run python scripts/actor_capacity.py --table                    # 규모별 참고표
+```
+
+시드가 목표보다 적으면 더 생성: `uv run python scripts/seed/generate_personas.py --total 200`.
+
 ## 샤드 워커 운영 (ADR-012 Phase 2)
 
 액터 tick 워커(`engine/actor`, `lf_actor.main`)는 `LF_NUM_SHARDS`/`LF_SHARDS`로
