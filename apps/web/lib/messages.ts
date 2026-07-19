@@ -11,7 +11,7 @@
  * 백엔드 미가용이면 null — 호출측은 현재 화면을 유지한다 (조용한 강등).
  */
 
-import { PLAYER_ID } from "./config";
+import { authHeaders, PLAYER_ID } from "./config";
 import type { DmMessage } from "./types";
 
 const FEED_API_URL = process.env.NEXT_PUBLIC_LF_FEED_API_URL ?? "http://localhost:8001";
@@ -45,6 +45,7 @@ export async function fetchDmHistory(
     const cursorParam = cursor ? `&cursor=${cursor}` : "";
     const response = await fetch(
       `${FEED_API_URL}/messages?world_id=${WORLD_ID}&player_id=${PLAYER_ID}&actor_id=${actorId}&limit=${DM_PAGE_SIZE}${cursorParam}`,
+      { headers: authHeaders() },
     );
     if (!response.ok) throw new Error(`feed-api ${response.status}`);
     const body = (await response.json()) as {
@@ -103,6 +104,7 @@ export async function fetchDmThreads(): Promise<DmThread[] | null> {
   try {
     const response = await fetch(
       `${FEED_API_URL}/messages/threads?world_id=${WORLD_ID}&player_id=${PLAYER_ID}&limit=${THREADS_LIMIT}`,
+      { headers: authHeaders() },
     );
     if (!response.ok) throw new Error(`feed-api ${response.status}`);
     const body = (await response.json()) as { threads: ThreadDoc[] };

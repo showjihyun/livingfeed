@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from "react";
 
-import { PLAYER_ID } from "./config";
+import { authHeaders, PLAYER_ID } from "./config";
 import { rangeTickBounds, type Range } from "./range";
 import { currentTick } from "./world-clock";
 
@@ -55,6 +55,7 @@ export function useHiddenFeed(
         const fromParam = bounds ? `&from_tick=${bounds.fromTick}` : "";
         const response = await fetch(
           `${FEED_API_URL}/feed?types=private&player_id=${PLAYER_ID}&world_id=${WORLD_ID}&limit=30${fromParam}`,
+          { headers: authHeaders() },
         );
         if (!response.ok) throw new Error(`feed-api ${response.status}`);
         const body = (await response.json()) as { items: TimelineDoc[] };

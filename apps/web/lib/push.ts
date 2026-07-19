@@ -8,7 +8,7 @@
  * 조용한 강등 — 세계 경험은 그대로고, 벨은 꺼진 채로 남는다.
  */
 
-import { PLAYER_ID } from "./config";
+import { authHeaders, PLAYER_ID } from "./config";
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_LF_GATEWAY_URL ?? "http://localhost:8000";
 const WORLD_ID = process.env.NEXT_PUBLIC_LF_WORLD_ID ?? "w_main";
@@ -76,7 +76,7 @@ export async function enablePush(): Promise<PushState> {
 
     const saved = await fetch(`${GATEWAY_URL}/push/subscribe`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({
         player_id: PLAYER_ID,
         world_id: WORLD_ID,
@@ -103,7 +103,7 @@ export async function disablePush(): Promise<PushState> {
     await sub.unsubscribe();
     await fetch(`${GATEWAY_URL}/push/subscribe`, {
       method: "DELETE",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ player_id: PLAYER_ID, world_id: WORLD_ID, endpoint }),
     }).catch(() => undefined); // 남은 서버 구독은 410 응답 시 자동 제거된다
     return "off";

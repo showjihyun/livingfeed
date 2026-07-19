@@ -18,3 +18,16 @@ export const PLAYER_NAME = process.env.NEXT_PUBLIC_LF_PLAYER_NAME ?? "관찰자_
 
 /** 프로필·DM·댓글의 대상 액터 — 프로덕션은 사용자가 연 액터에서 파생된다 */
 export const FOCUS_ACTOR_ID = process.env.NEXT_PUBLIC_LF_FOCUS_ACTOR ?? "a_minji_kim";
+
+/**
+ * 세션 공유 토큰 — BE(gateway·feed-api)가 LF_SESSION_TOKEN을 강제할 때 사설 경로에
+ * 실린다: WS 세션, DM/사설 타임라인 조회, 푸시 구독. 미설정(dev)이면 빈 문자열 —
+ * 어떤 헤더도 싣지 않아 개방 기본과 짝을 이룬다. 계정 인증이 서기 전의 공유 비밀
+ * 게이트이며, 검증된 신원에서 도출하는 진짜 인증은 후속이다 (BE config 경고와 대칭).
+ */
+export const SESSION_TOKEN = process.env.NEXT_PUBLIC_LF_SESSION_TOKEN ?? "";
+
+/** 사설 fetch의 Authorization 헤더 — 토큰이 없으면 빈 객체 (헤더 없음). */
+export function authHeaders(): Record<string, string> {
+  return SESSION_TOKEN ? { Authorization: `Bearer ${SESSION_TOKEN}` } : {};
+}

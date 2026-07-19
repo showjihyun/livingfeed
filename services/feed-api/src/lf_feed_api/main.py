@@ -5,7 +5,9 @@
   Personal/Private는 Redis 타임라인(fan-out-on-write, redis-projector 산출물)
 - GET /actors/{id}/profile, GET /messages, GET /posts/{id}/comments:
   PG read 테이블(pg-projector 산출물)
-플레이어 인증·개인화(Personal/Private 접근 제어)는 gateway 인증 단계의 후속이다.
+플레이어 사설 경로(/messages·/messages/threads·/feed의 personal·private)는
+LF_SESSION_TOKEN 공유 토큰 게이트 뒤에 선다(미설정 dev는 개방). player_id를 검증된
+신원에서 도출하는 진짜 개인화·접근 제어는 계정 인증 단계의 후속이다 (config.py 경고).
 
 실행: uvicorn lf_feed_api.main:app --reload
 (설정: OPENSEARCH_URL, REDIS_URL, LF_DATABASE_URL)
@@ -14,14 +16,16 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import re
 import sys
 from contextlib import asynccontextmanager
+from typing import Annotated
 
 import nats
-from fastapi import FastAPI, HTTPException, Path, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query
 from fastapi.middleware.cors import CORSMiddleware
 from lf_projector.graph_api import GraphQueryClient
 from psycopg_pool import AsyncConnectionPool
@@ -127,6 +131,22 @@ def create_app(
     if not owned_story:
         app.state.story = story
 
+    # ── 사설 조회 게이트 — player_id는 아직 클라이언트 주장 값이다 (config.py 경고).
+    # LF_SESSION_TOKEN이 서면 사설 경로(DM·개인 타임라인)는 Bearer 일치를 요구하고,
+    # 미설정(dev)이면 열린다 — gateway require_admin과 같은 규약. player_id를 검증된
+    # 신원에서 도출하는 진짜 인증은 계정 단계의 후속이다.
+    def _session_ok(authorization: str) -> bool:
+        if cfg.session_token is None:
+            return True  # dev 개방 — 로컬 밖 노출 전 LF_SESSION_TOKEN을 설정하라
+        scheme, _, credential = authorization.partition(" ")
+        return scheme.lower() == "bearer" and hmac.compare_digest(
+            credential.strip(), cfg.session_token
+        )
+
+    def require_session(authorization: Annotated[str, Header()] = "") -> None:
+        if not _session_ok(authorization):
+            raise HTTPException(403, "세션 토큰이 필요하다 (LF_SESSION_TOKEN)")
+
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok", "service": "lf-feed-api"}
@@ -146,6 +166,7 @@ def create_app(
             None, ge=0,
             description="조회 범위의 세계 tick 하한 (포함) — 오늘/이번 주/이번 달 (ADR-011)",
         ),
+        authorization: Annotated[str, Header()] = "",
     ) -> dict:
         kinds = sorted({t.strip() for t in types.split(",") if t.strip()})
         unknown = set(kinds) - FEED_KINDS
@@ -164,6 +185,9 @@ def create_app(
         # Personal/Private — 플레이어 단위 타임라인 (fan-out-on-write, ADR-014 §2단).
         # 저장소가 다르므로(OS가 아니라 Redis) 다른 등급과 섞어 질의할 수 없다.
         if set(kinds) & TIMELINE_KINDS:
+            # 사설 타임라인은 플레이어 개인 데이터다 — DM 경로와 같은 게이트를 건다
+            if not _session_ok(authorization):
+                raise HTTPException(403, "세션 토큰이 필요하다 (LF_SESSION_TOKEN)")
             if not set(kinds) <= TIMELINE_KINDS:
                 raise HTTPException(
                     400, "personal/private는 다른 등급과 섞어 질의할 수 없다 (타임라인 경로)"
@@ -357,7 +381,7 @@ def create_app(
         result["derived_posts"] = derived
         return result
 
-    @app.get("/messages/threads")
+    @app.get("/messages/threads", dependencies=[Depends(require_session)])
     async def message_threads(
         player_id: str = Query(pattern=r"^p_[a-z0-9_]+$"),
         world_id: str = Query("w_main", pattern=r"^w_[a-z0-9_]+$"),
@@ -372,7 +396,7 @@ def create_app(
             world_id, player_id, limit=min(limit, cfg.max_limit)
         )
 
-    @app.get("/messages")
+    @app.get("/messages", dependencies=[Depends(require_session)])
     async def conversation(
         player_id: str = Query(pattern=r"^p_[a-z0-9_]+$"),
         actor_id: str = Query(pattern=r"^a_[a-z0-9_]+$"),

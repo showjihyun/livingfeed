@@ -18,6 +18,12 @@ class Config:
     #: graph query API(관계 근접도) — 미가용이면 근접도 항 없이 동작한다
     nats_url: str = "nats://localhost:4222"
     env: str = "dev"
+    #: 사설 조회 공유 토큰 — 설정되면 플레이어 사설 경로(/messages·/messages/threads·
+    #: /feed의 personal·private 타임라인)에 Authorization: Bearer 일치를 요구한다(403).
+    #: ⚠️ player_id는 아직 클라이언트 주장 값이다(계정 체계 부재) — 로컬 dev 밖에
+    #: 노출한다면 반드시 설정하라(gateway LF_SESSION_TOKEN과 같은 공유 비밀). 검증된
+    #: 신원에서 player_id를 도출하는 진짜 인증은 플레이어 계정 단계의 후속이다.
+    session_token: str | None = None
     #: 브라우저 오리진 허용 목록 (fetch CORS) — 쉼표 구분
     cors_origins: tuple[str, ...] = ("http://localhost:3000",)
     index: str = "lf-feed-posts"
@@ -48,5 +54,6 @@ class Config:
             ),
             nats_url=os.environ.get("NATS_URL", "nats://localhost:4222"),
             env=os.environ.get("LF_ENV", "dev"),
+            session_token=os.environ.get("LF_SESSION_TOKEN") or None,
             cors_origins=tuple(o.strip() for o in origins.split(",") if o.strip()),
         )

@@ -14,7 +14,7 @@ import { createTransport } from "@livingfeed/api-client";
 import type { SessionHandle } from "@livingfeed/api-client";
 import type { ActorMessageSent } from "@livingfeed/schemas";
 
-import { PLAYER_ID } from "./config";
+import { PLAYER_ID, SESSION_TOKEN } from "./config";
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_LF_GATEWAY_URL ?? "http://localhost:8000";
 
@@ -60,7 +60,10 @@ export function useActorSession(opts: {
   useEffect(() => {
     if (!opts.enabled) return;
     let sawOpen = false;
-    const session = createTransport({ baseUrl: GATEWAY_URL }).openSession({
+    const session = createTransport({
+      baseUrl: GATEWAY_URL,
+      sessionToken: SESSION_TOKEN || undefined,
+    }).openSession({
       playerId: PLAYER_ID,
       onReply: (envelope) => {
         const p = envelope.payload as unknown as ActorMessageSent;

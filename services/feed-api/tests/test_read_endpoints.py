@@ -244,3 +244,57 @@ def test_reads_unavailable_returns_503_without_killing_feed():
     assert client.get(
         "/feed", params={"types": "personal", "player_id": PLAYER}
     ).status_code == 200
+
+
+# ── 사설 경로 세션 토큰 게이트 — DM·개인 타임라인 접근 제어 ──────────────────
+
+
+def gated_client(token: str | None) -> TestClient:
+    cfg = Config(
+        opensearch_url="http://unused", redis_url="redis://unused", session_token=token
+    )
+    app = create_app(
+        cfg=cfg, search=object(), cache=FakeTimelineRedis(),
+        reads=FakeReads(), story=FakeStory(),
+    )
+    return TestClient(app)
+
+
+def test_private_routes_require_session_token_when_set():
+    """LF_SESSION_TOKEN이 서면 DM·사설 타임라인은 Bearer 일치를 요구한다 (403).
+    player_id는 아직 클라이언트 주장 값이라, 게이트가 남의 인박스 열람을 막는다."""
+    client = gated_client("s3cret")
+    ok = {"Authorization": "Bearer s3cret"}
+    # DM 대화
+    assert client.get(
+        "/messages", params={"player_id": PLAYER, "actor_id": "a_x"}
+    ).status_code == 403
+    assert client.get(
+        "/messages", params={"player_id": PLAYER, "actor_id": "a_x"}, headers=ok
+    ).status_code == 200
+    # 인박스 목록
+    assert client.get("/messages/threads", params={"player_id": PLAYER}).status_code == 403
+    assert client.get(
+        "/messages/threads", params={"player_id": PLAYER}, headers=ok
+    ).status_code == 200
+    # /feed의 사설 타임라인(personal·private)
+    assert client.get(
+        "/feed", params={"types": "private", "player_id": PLAYER}
+    ).status_code == 403
+    assert client.get(
+        "/feed", params={"types": "private", "player_id": PLAYER}, headers=ok
+    ).status_code == 200
+    # 틀린 토큰도 거부
+    assert client.get(
+        "/messages/threads", params={"player_id": PLAYER},
+        headers={"Authorization": "Bearer nope"},
+    ).status_code == 403
+
+
+def test_private_routes_open_when_token_unset():
+    """dev 기본(미설정)은 열림 — 기존 계약 유지, 로컬 개발이 토큰 없이 돈다."""
+    client = gated_client(None)
+    assert client.get("/messages/threads", params={"player_id": PLAYER}).status_code == 200
+    assert client.get(
+        "/feed", params={"types": "private", "player_id": PLAYER}
+    ).status_code == 200

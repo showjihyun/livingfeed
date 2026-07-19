@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import time
@@ -30,7 +31,7 @@ from typing import Any
 
 import nats.errors
 import yaml
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from nats.js import JetStreamContext
 from nats.js.api import ConsumerConfig, DeliverPolicy
 from pydantic import BaseModel, ConfigDict, Field
@@ -162,14 +163,31 @@ class UnsubscribeBody(BaseModel):
 def create_push_router(cfg: Config) -> APIRouter:
     router = APIRouter(prefix="/push")
 
+    async def require_session(request: Request) -> None:
+        # 구독 저장/해지는 /session WS와 같은 게이트를 건다 — 인증 없이 열려 있으면
+        # 공격자가 남의 player_id로 자기 endpoint를 심어 그 유저의 DM 미리보기를
+        # 가로챌 수 있다 (plan/11 §알림 정책 — 신뢰 자산). 미설정(dev)은 열림.
+        if cfg.session_token is None:
+            return  # dev 개방 — 로컬 밖 노출 전 LF_SESSION_TOKEN을 설정하라
+        supplied = request.query_params.get("token")
+        if supplied is None:
+            scheme, _, credential = request.headers.get("authorization", "").partition(" ")
+            supplied = credential.strip() if scheme.lower() == "bearer" else ""
+        if not hmac.compare_digest(supplied, cfg.session_token):
+            raise HTTPException(403, "세션 토큰이 필요하다 (LF_SESSION_TOKEN)")
+
     @router.get("/vapid-key")
     async def vapid_key() -> dict[str, str]:
-        """구독에 쓸 applicationServerKey — 미설정이면 404 (FE는 조용한 강등)."""
+        """구독에 쓸 applicationServerKey — 미설정이면 404 (FE는 조용한 강등).
+
+        공개키(applicationServerKey)는 본디 브라우저에 실리는 값이라 게이트 밖에 둔다 —
+        사설 데이터가 아니다. 게이트는 구독을 심고 지우는 경로(아래)에만 건다.
+        """
         if not cfg.vapid_public_key:
             raise HTTPException(404, "서사 푸시가 꺼져 있다 (LF_VAPID_PUBLIC_KEY 미설정)")
         return {"key": cfg.vapid_public_key}
 
-    @router.post("/subscribe", status_code=204)
+    @router.post("/subscribe", status_code=204, dependencies=[Depends(require_session)])
     async def subscribe(body: SubscribeBody, request: Request) -> None:
         sub = body.subscription
         await request.app.state.redis.hset(
@@ -178,7 +196,7 @@ def create_push_router(cfg: Config) -> APIRouter:
             json.dumps(sub.model_dump(), ensure_ascii=False),
         )
 
-    @router.delete("/subscribe")
+    @router.delete("/subscribe", dependencies=[Depends(require_session)])
     async def unsubscribe(body: UnsubscribeBody, request: Request) -> dict[str, bool]:
         removed = await request.app.state.redis.hdel(
             push_key(body.world_id, body.player_id), body.endpoint

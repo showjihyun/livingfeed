@@ -205,6 +205,63 @@ async def test_vapid_key_endpoint_reflects_configuration(redis):
     assert resp.status_code == 200 and resp.json() == {"key": "BTestServerKey"}
 
 
+# ── 세션 토큰 게이트 — 구독 하이재킹 방지 (인프라 없이 최소 redis 대역) ──────────
+
+
+class _StoreRedis:
+    """게이트 검증만 겨눈 최소 redis 대역 — 통과 경로의 hset/hdel만 받는다."""
+
+    def __init__(self) -> None:
+        self.h: dict[str, dict] = {}
+
+    async def hset(self, key, field, value):
+        self.h.setdefault(key, {})[field] = value
+        return 1
+
+    async def hdel(self, key, field):
+        return int(self.h.get(key, {}).pop(field, None) is not None)
+
+
+def gated_client(token: str | None) -> httpx.AsyncClient:
+    cfg = Config(nats_url="unused(주입)", env="test", session_token=token)
+    app = create_app(cfg, redis=_StoreRedis())
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+
+async def test_subscribe_requires_session_token_when_set():
+    """LF_SESSION_TOKEN이 서면 구독 저장/해지는 토큰을 요구한다 — 인증 없이 열려 있으면
+    공격자가 남의 player_id로 자기 endpoint를 심어 그 유저의 DM 미리보기를 가로챈다."""
+    sub = {"player_id": PLAYER, "world_id": WORLD, "subscription": sub_doc()}
+    unsub = {"player_id": PLAYER, "world_id": WORLD, "endpoint": sub_doc()["endpoint"]}
+    async with gated_client("s3cret") as client:
+        assert (await client.post("/push/subscribe", json=sub)).status_code == 403
+        bad = await client.post(
+            "/push/subscribe", json=sub, headers={"authorization": "Bearer nope"}
+        )
+        assert bad.status_code == 403
+        ok = await client.post(
+            "/push/subscribe", json=sub, headers={"authorization": "Bearer s3cret"}
+        )
+        assert ok.status_code == 204
+        # WS /session과 같은 ?token= 형태도 허용 (브라우저 경로)
+        assert (await client.post("/push/subscribe?token=s3cret", json=sub)).status_code == 204
+        # 해지도 같은 게이트
+        assert (await client.request("DELETE", "/push/subscribe", json=unsub)).status_code == 403
+        gone = await client.request(
+            "DELETE", "/push/subscribe", json=unsub, headers={"authorization": "Bearer s3cret"}
+        )
+        assert gone.status_code == 200
+        # 공개키는 게이트 밖 — 사설 데이터가 아니다 (FE가 구독 전에 읽어야 한다)
+        assert (await client.get("/push/vapid-key")).status_code == 404
+
+
+async def test_subscribe_open_when_token_unset():
+    """dev 기본(미설정)은 열림 — 로컬 개발이 토큰 없이 돈다 (기존 계약 유지)."""
+    sub = {"player_id": PLAYER, "world_id": WORLD, "subscription": sub_doc()}
+    async with gated_client(None) as client:
+        assert (await client.post("/push/subscribe", json=sub)).status_code == 204
+
+
 # ── 발송 정책 — 프레즌스 제외·소멸 구독 자동 제거·실패 무시 ──────────────────
 
 

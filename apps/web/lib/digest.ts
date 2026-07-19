@@ -16,7 +16,7 @@
  * (데모·검증 가능성). 백엔드 미가용이면 null — 카드를 띄우지 않는다 (조용한 강등).
  */
 
-import { PLAYER_ID } from "./config";
+import { authHeaders, PLAYER_ID } from "./config";
 
 const FEED_API_URL = process.env.NEXT_PUBLIC_LF_FEED_API_URL ?? "http://localhost:8001";
 const WORLD_ID = process.env.NEXT_PUBLIC_LF_WORLD_ID ?? "w_main";
@@ -262,9 +262,12 @@ export function digestSentence(line: DigestLine, name: (actorId: string) => stri
 // 조회 — 부재 구간 재료를 feed-api에서 (미가용이면 null, 조용한 강등)
 // ---------------------------------------------------------------------------
 
-async function fetchDocs(url: string): Promise<DigestDoc[] | null> {
+async function fetchDocs(
+  url: string,
+  headers?: Record<string, string>,
+): Promise<DigestDoc[] | null> {
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, headers ? { headers } : undefined);
     if (!response.ok) throw new Error(`feed-api ${response.status}`);
     const body = (await response.json()) as { items: DigestDoc[] };
     return body.items;
@@ -279,8 +282,10 @@ async function fetchDocs(url: string): Promise<DigestDoc[] | null> {
  */
 export async function loadDigest(lastSeen: LastSeen): Promise<PersonalDigest | null> {
   const [privateDocs, worldDocs] = await Promise.all([
+    // private 타임라인은 사설 경로 — 토큰 게이트 뒤에 선다 (world는 공개, 헤더 불필요)
     fetchDocs(
       `${FEED_API_URL}/feed?types=private&player_id=${PLAYER_ID}&world_id=${WORLD_ID}&limit=${FETCH_LIMIT}`,
+      authHeaders(),
     ),
     fetchDocs(
       `${FEED_API_URL}/feed?types=world&world_id=${WORLD_ID}&sort=recent&limit=${FETCH_LIMIT}`,
