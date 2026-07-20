@@ -13,6 +13,9 @@ class Config:
     env: str
     #: 세션 커맨드 적재용 — gateway는 player.* 이벤트의 발행 주체다 (ADR-017 §2)
     pg_dsn: str = "postgresql://livingfeed:livingfeed@localhost:5432/livingfeed"
+    #: 커맨드 적재 커넥션 풀 상한 — 세션이 커넥션을 붙잡지 않고 커맨드 단위로
+    #: 대여하므로, 동시 in-flight 커맨드 수만큼만 있으면 된다 (접속자 수와 무관)
+    pg_pool_max: int = 16
     #: 세션 프레즌스 저장 (ADR-010 — 무중단 드레이닝의 전제)
     redis_url: str = "redis://localhost:6379/0"
     #: WS 세션 공유 토큰 — 설정되면 /session 접속에 ?token= 또는
@@ -58,6 +61,7 @@ class Config:
             pg_dsn=os.environ.get(
                 "LF_PG_DSN", "postgresql://livingfeed:livingfeed@localhost:5432/livingfeed"
             ),
+            pg_pool_max=int(os.environ.get("LF_PG_POOL_MAX", "16")),
             redis_url=os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
             session_token=os.environ.get("LF_SESSION_TOKEN") or None,
             cors_origins=tuple(o.strip() for o in origins.split(",") if o.strip()),

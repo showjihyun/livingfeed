@@ -31,7 +31,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketD
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from lf_projector.graph_api import GraphQueryClient
-from psycopg import AsyncConnection
+from psycopg_pool import AsyncConnectionPool
 from redis.asyncio import Redis
 
 from lf_gateway.admin import create_admin_router
@@ -95,6 +95,21 @@ def create_app(
         app.state.js = connection.jetstream()
         app.state.graph = GraphQueryClient(connection, cfg.env)
         app.state.redis = redis if redis is not None else Redis.from_url(cfg.redis_url)
+        # 커맨드 적재용 PG 풀 — 세션이 커넥션을 붙잡지 않고 커맨드 단위로 대여한다
+        # (연결당 전용 커넥션은 접속자 수만큼 PG 백엔드를 잠식 = 고갈 위험). PG
+        # 미가용은 세션 적재만 막고 SSE·그래프 등 나머지는 살린다 (조용한 강등).
+        pool: AsyncConnectionPool | None = None
+        try:
+            pool = AsyncConnectionPool(
+                cfg.pg_dsn, min_size=1, max_size=cfg.pg_pool_max, open=False
+            )
+            await pool.open(wait=True, timeout=5)
+        except Exception as e:
+            logger.warning("PG 풀 미가용(세션 커맨드 적재 불가): %s", e)
+            if pool is not None:
+                await pool.close()
+            pool = None
+        app.state.pg_pool = pool
         # 서사 푸시 발송 워커 (push.py, plan/11 §D1) — VAPID 키가 서야만 켠다
         push_task: asyncio.Task | None = None
         if cfg.vapid_public_key and cfg.vapid_private_key:
@@ -112,6 +127,8 @@ def create_app(
                 push_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await push_task
+            if pool is not None:
+                await pool.close()
             if owned_redis:
                 await app.state.redis.aclose()
             if owned_nc:
@@ -250,27 +267,56 @@ def create_app(
                 await sub.unsubscribe()
 
         push_task = asyncio.create_task(push_replies())
-        conn = await AsyncConnection.connect(cfg.pg_dsn, autocommit=True)
         try:
             while True:
-                raw = await ws.receive_json()
-                response = await handle_command(conn, world_id, player_id, raw)
+                try:
+                    raw = await ws.receive_json()
+                except WebSocketDisconnect:
+                    break
+                except Exception:
+                    # 잘못된 JSON 등 — seq를 알 수 없으니 일반 오류만 알리고 세션은 유지
+                    async with send_lock:
+                        await ws.send_json(
+                            {"type": "error", "seq": None,
+                             "payload": {"message": "메시지를 이해하지 못했어요"}}
+                        )
+                    continue
+                seq = raw.get("seq") if isinstance(raw, dict) else None
+                # 커맨드마다 풀에서 짧게 대여한다 — CAS는 매번 current_head를 다시 읽어
+                # 커넥션이 커맨드 사이에 바뀌어도 정합성이 유지된다 (append 유일 쓰기).
+                pool = getattr(app.state, "pg_pool", None)
+                try:
+                    if pool is None:
+                        raise RuntimeError("PG 풀 미가용")
+                    async with pool.connection() as conn:
+                        response = await handle_command(conn, world_id, player_id, raw)
+                except Exception as e:
+                    # 예상 밖 실패(CAS 소진·PG 오류·비정형 봉투)도 세션을 끊지 않고
+                    # error 프레임으로 돌려준다 (봉투 계약: 조용한 유실 금지)
+                    logger.warning("커맨드 처리 실패(세션 유지): %s", e)
+                    response = {
+                        "type": "error", "seq": seq,
+                        "payload": {"message": "커맨드를 처리하지 못했어요 — 다시 시도해 주세요"},
+                    }
                 async with send_lock:
                     await ws.send_json(response)
                 try:  # 프레즌스는 최적화 — Redis 장애가 세션을 죽이면 안 된다
                     await app.state.redis.set(
-                        presence_key(world_id, player_id), presence_value(raw.get("seq")),
+                        presence_key(world_id, player_id), presence_value(seq),
                         ex=3600,
                     )
                 except Exception as e:
                     logger.warning("프레즌스 저장 실패(무시): %s", e)
-        except WebSocketDisconnect:
-            pass
         finally:
+            # 커넥션은 커맨드 단위 대여라 세션 수명에 걸린 커넥션이 없다(누수 지점 제거).
+            # push_task는 취소·오류 어느 쪽이든 정리 대상이라 둘 다 삼킨다.
             push_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            try:
                 await push_task
-            await conn.close()
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.warning("reply push 종료 중 오류(무시)", exc_info=True)
 
     return app
 
