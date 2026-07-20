@@ -10,6 +10,7 @@ decide는 Context Fabric 조립 → AI Runtime 호출, 실패 시 규칙 폴백 
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -187,6 +188,7 @@ class ActorPhases:
         shard_select: Callable[[Persona], bool] | None = None,
         hot_start_cap: int | None = None,
         hot_floor: int = 0,
+        decide_concurrency: int = 8,
     ) -> None:
         if not personas:
             raise ValueError("액터가 없다 — 최소 1명의 페르소나가 필요하다")
@@ -200,6 +202,12 @@ class ActorPhases:
             p.id: p for p in personas if shard_select is None or shard_select(p)
         }
         self._ai = ai
+        # decide의 LLM 호출은 액터 간 독립이라 tick 안에서 병렬로 낸다 (직렬 await는
+        # AI Runtime의 유계 동시성을 놀린다 — 매 호출 왕복만큼 tick 예산을 태운다).
+        # 엔진 쪽 상한으로 팬아웃을 조인다: AI Runtime 슬롯(LF_AI_CONCURRENCY=4 기본)을
+        # 꽉 채우되, NATS request의 10s 타임아웃을 태우는 깊은 대기열은 만들지 않는다
+        # (기본 8 = 4 처리 + 4 대기). 봉투 순서는 gather가 제출 순서로 돌려줘 보존된다.
+        self._decide_sem = asyncio.Semaphore(max(1, decide_concurrency))
         self._memory = memory
         #: Director의 인생 아크 저장 — 있으면 decide 컨텍스트에 방향을 주입한다 (ADR-013)
         self._arc = arc
@@ -483,60 +491,61 @@ class ActorPhases:
         world = WorldContext(world_id=ctx.world_id, tick=ctx.tick, world_time=ctx.world_time)
         schema = registry.payload_schema(ACTION_TYPE)
 
-        for tier in (Tier.HOT, Tier.WARM):
-            for actor_id in due[tier]:
-                payload, trace_id = await self._llm_action(
-                    ctx, world, actor_id, schema, tier=tier.value
-                )
-                if payload is None:
-                    payload = fallback_action(self._personas[actor_id], ctx.tick, trace_id)
-                # LLM이 지어낸 대상을 소스에서 끊는다 — 피드·관계·그래프로 번지기 전에
-                payload = sanitize_target(payload, set(self._roster), actor_id)
-                self._intents.append((actor_id, tier.value, payload))
-                decided[tier.value] += 1
+        # Hot/Warm 행동 — 액터 간 독립이라 tick 안에서 유계 병렬로 낸다. asyncio.gather는
+        # 제출 순서로 결과를 돌려주므로 intent 순서는 직렬 때와 동일하다 (결정성 보존).
+        due_actors = [
+            (actor_id, tier) for tier in (Tier.HOT, Tier.WARM) for actor_id in due[tier]
+        ]
 
-        # 플레이어 상호작용 응답 — due 여부와 무관하게 반드시 (상호작용 우선)
+        async def _decide_action(actor_id: str, tier: Tier) -> dict[str, Any]:
+            payload, trace_id = await self._llm_action(
+                ctx, world, actor_id, schema, tier=tier.value
+            )
+            if payload is None:
+                payload = fallback_action(self._personas[actor_id], ctx.tick, trace_id)
+            # LLM이 지어낸 대상을 소스에서 끊는다 — 피드·관계·그래프로 번지기 전에
+            return sanitize_target(payload, set(self._roster), actor_id)
+
+        for (actor_id, tier), payload in zip(
+            due_actors,
+            await asyncio.gather(
+                *(self._bounded(_decide_action(a, t)) for a, t in due_actors)
+            ),
+            strict=True,
+        ):
+            self._intents.append((actor_id, tier.value, payload))
+            decided[tier.value] += 1
+
+        # 플레이어·댓글 응답 + 첫 접촉 인사 — 모두 self._replies로 모인다. 반드시
+        # 응답(상호작용 우선)이라 병렬로 내되, gather 제출 순서로 다시 담아 한 액터가
+        # 여러 봉투를 받았을 때의 답장 순서까지 직렬 때와 동일하게 보존한다.
+        reply_coros = []
         for actor_id in sorted(self._inbox):
-            persona = self._personas[actor_id]
             for envelope in self._inbox[actor_id]:
                 if envelope["type"] == MESSAGE_TYPE:
                     # 내 글에 달린 액터 댓글 — 응답 의무와 동형, 반드시 한 번 답한다
                     # (액터 소셜 루프). 답글은 라우터가 더 돌리지 않는다 (깊이 1)
-                    await self._reply_to_comment(ctx, world, actor_id, envelope)
-                    continue
-                if envelope["type"] not in _REPLYABLE:
-                    continue
-                working = await self._memory.recent(ctx.world_id, actor_id)
-                episodes = await self._recall(ctx.world_id, actor_id, working)
-                # 이 플레이어와의 대화를 시간순으로 — 답장이 흐름을 잇게 한다 (ADR-009)
-                conversation = conversation_turns(working, envelope["payload"]["player_id"])
-                # 답장도 결정이다 — 인생 방향이 대화의 결까지 물들인다 (ADR-013)
-                arc = await self._arc_of(ctx.world_id, actor_id)
-                # 관계의 온도도 — 앙금이 남은 상대에겐 답의 결이 달라야 한다 (ADR-009 §3)
-                relationships = await self._relationship_summary(ctx.world_id, actor_id)
-                bundle = build(
-                    persona, working, world, purpose="reply_to_player",
-                    episodes=episodes, conversation=conversation, arc=arc,
-                    relationships=relationships,
-                )
-                text = await self._ai.converse(
-                    bundle, tier="hot", actor_id=actor_id, tick=ctx.tick
-                )
-                if text is None:
-                    text = fallback_reply(persona, envelope["payload"]["text"])
-                self._replies.append((actor_id, envelope, text))
-
+                    reply_coros.append(self._reply_to_comment(ctx, world, actor_id, envelope))
+                elif envelope["type"] in _REPLYABLE:
+                    reply_coros.append(self._reply_to_player(ctx, world, actor_id, envelope))
         # 첫 접촉 인사 — 엣지 없는 플레이어의 첫 좋아요가 무반응으로 끝나지 않게
         # (plan/03 §첫 개입). 표현은 LLM(converse), 보증은 규칙 템플릿 풀이다.
         for actor_id, envelope in self._pending_greetings:
-            await self._greet_first_reaction(ctx, world, actor_id, envelope)
+            reply_coros.append(self._greet_first_reaction(ctx, world, actor_id, envelope))
+        for reply in await asyncio.gather(*(self._bounded(c) for c in reply_coros)):
+            if reply is not None:
+                self._replies.append(reply)
 
         # Cold 티어 — 통계 일괄 처리(ADR-012): LLM 없이 일과 행동만, due일 때만(100 tick
-        # 케이던스). 잠든 기간의 생활 요약이라 스팸 없이 삶이 이어진다 — 비용 near-zero.
-        for actor_id in due[Tier.COLD]:
-            persona = self._personas[actor_id]
+        # 케이던스). 아크 조회(Redis)만 병렬로 앞당기고 나머지는 순수 계산이다.
+        cold_actors = list(due[Tier.COLD])
+        for actor_id, arc in zip(
+            cold_actors,
             # 아크(있으면)가 일과의 결이 된다 — 잠든 삶도 방향이 있다 (ADR-013/plan-08)
-            arc = await self._arc_of(ctx.world_id, actor_id)
+            await asyncio.gather(*(self._arc_of(ctx.world_id, a) for a in cold_actors)),
+            strict=True,
+        ):
+            persona = self._personas[actor_id]
             payload = routine_action(persona, ctx.tick, f"cold-{actor_id}-{ctx.tick}", arc=arc)
             payload = sanitize_target(payload, set(self._roster), actor_id)
             self._intents.append((actor_id, Tier.COLD.value, payload))
@@ -553,25 +562,42 @@ class ActorPhases:
         # 액터 — 일수록 분출이 영영 못 나가는 역설이 생긴다 (선제 DM의 교훈).
         # due 액터는 행동과 분출이 한 tick에 공존하고, 아니면 분출이 리듬 포스팅을
         # 대체한다. 빈도의 빗장은 여운의 희소성(임계)·1회 소모·쿨다운·TTL이다.
+        # burst 집합은 아래 리듬 포스팅의 제외 대상이라 리듬보다 먼저 확정한다(장벽).
         burst: set[str] = set()
         if self._resonance is not None:
-            for actor_id in sorted(self._personas):
-                lifestyle = self._personas[actor_id].lifestyle
-                if not posting_moment(actor_id, lifestyle, ctx.world_time, rhythm):
-                    continue
-                if await self._burst_resonance(ctx, world, actor_id, schema):
-                    burst.add(actor_id)
+            burst_actors = [
+                a for a in sorted(self._personas)
+                if posting_moment(a, self._personas[a].lifestyle, ctx.world_time, rhythm)
+            ]
+            for a, did in zip(
+                burst_actors,
+                await asyncio.gather(
+                    *(self._bounded(self._burst_resonance(ctx, world, a, schema))
+                      for a in burst_actors)
+                ),
+                strict=True,
+            ):
+                if did:
+                    burst.add(a)
                     # tick.completed의 actors_decided는 hot/warm/cold로 닫힌 스키마 —
                     # 리듬 관례를 따라 warm에 합산한다
                     decided["warm"] += 1
 
-        for actor_id in sorted(set(self._personas) - already - burst):
-            persona = self._personas[actor_id]
-            if not posting_moment(actor_id, persona.lifestyle, ctx.world_time, rhythm):
-                continue
-            payload, _ = await self._llm_action(
-                ctx, world, actor_id, schema, tier=Tier.WARM.value, purpose="post_status"
-            )
+        rhythm_actors = [
+            a for a in sorted(set(self._personas) - already - burst)
+            if posting_moment(a, self._personas[a].lifestyle, ctx.world_time, rhythm)
+        ]
+        for actor_id, (payload, _) in zip(
+            rhythm_actors,
+            await asyncio.gather(
+                *(self._bounded(
+                    self._llm_action(
+                        ctx, world, a, schema, tier=Tier.WARM.value, purpose="post_status"
+                    )
+                ) for a in rhythm_actors)
+            ),
+            strict=True,
+        ):
             if payload is None:
                 continue  # 머뭇거림 — 포스팅 모먼트는 지나가면 그만이다
             payload = sanitize_target(payload, set(self._roster), actor_id)
@@ -586,19 +612,58 @@ class ActorPhases:
         # 못 나가는 역설이 생긴다 (2026-07-17 라이브 관측). 진짜 빗장은 쿨다운
         # (세계 하루 1회)이고, 기회 창은 지연 상한일 뿐이다. LOD 불문 검사한다.
         interval = max(1, int(default_params()["outreach"]["dm_check_ticks"]))
-        for actor_id in sorted(self._personas):
-            if ctx.tick % interval != phase_offset(actor_id, interval):
-                continue
-            await self._proactive_dm(ctx, world, actor_id)
+        dm_actors = [
+            a for a in sorted(self._personas)
+            if ctx.tick % interval == phase_offset(a, interval)
+        ]
+        await asyncio.gather(
+            *(self._bounded(self._proactive_dm(ctx, world, a)) for a in dm_actors)
+        )
         return decided
+
+    async def _bounded(self, coro: Any) -> Any:
+        """decide의 LLM/조회 코루틴을 엔진 쪽 동시성 상한 안에서 실행한다.
+
+        gather로 팬아웃한 코루틴을 세마포어로 조여 AI Runtime의 유계 슬롯을
+        꽉 채우되(놀리지 않고), NATS request 타임아웃을 태우는 깊은 대기열은
+        만들지 않는다 (self._decide_sem 주석 참고).
+        """
+        async with self._decide_sem:
+            return await coro
+
+    async def _reply_to_player(
+        self, ctx: TickContext, world: WorldContext, actor_id: str, envelope: dict[str, Any]
+    ) -> tuple[str, dict[str, Any], str]:
+        """플레이어의 댓글/DM에 답한다 — 반환한 튜플을 호출자가 순서대로 담는다.
+
+        답장도 결정이다 — 인생 방향·관계의 온도·이 사람과의 대화 흐름이 결을
+        물들인다 (ADR-009/013). 표현은 LLM(converse), 실패 시 규칙 폴백.
+        """
+        persona = self._personas[actor_id]
+        working = await self._memory.recent(ctx.world_id, actor_id)
+        episodes = await self._recall(ctx.world_id, actor_id, working)
+        # 이 플레이어와의 대화를 시간순으로 — 답장이 흐름을 잇게 한다 (ADR-009)
+        conversation = conversation_turns(working, envelope["payload"]["player_id"])
+        arc = await self._arc_of(ctx.world_id, actor_id)
+        relationships = await self._relationship_summary(ctx.world_id, actor_id)
+        bundle = build(
+            persona, working, world, purpose="reply_to_player",
+            episodes=episodes, conversation=conversation, arc=arc,
+            relationships=relationships,
+        )
+        text = await self._ai.converse(bundle, tier="hot", actor_id=actor_id, tick=ctx.tick)
+        if text is None:
+            text = fallback_reply(persona, envelope["payload"]["text"])
+        return (actor_id, envelope, text)
 
     async def _reply_to_comment(
         self, ctx: TickContext, world: WorldContext, actor_id: str, envelope: dict[str, Any]
-    ) -> None:
+    ) -> tuple[str, dict[str, Any], str]:
         """내 글에 달린 액터 댓글에 답한다 — 표현은 LLM, 보증은 규칙 폴백.
 
         플레이어 응답 의무와 동형이다 (반드시 한 번). 답글 이벤트의 in_reply_to는
         댓글 event_id — post_id와 달라 라우터의 순환 기준에서 벗어난다 (깊이 1 끝).
+        반환한 튜플을 호출자가 순서대로 self._replies에 담는다.
         """
         persona = self._personas[actor_id]
         working = await self._memory.recent(ctx.world_id, actor_id)
@@ -612,15 +677,16 @@ class ActorPhases:
         text = await self._ai.converse(bundle, tier="hot", actor_id=actor_id, tick=ctx.tick)
         if text is None:
             text = fallback_reply(persona, envelope["payload"]["text"])
-        self._replies.append((actor_id, envelope, text))
+        return (actor_id, envelope, text)
 
     async def _greet_first_reaction(
         self, ctx: TickContext, world: WorldContext, actor_id: str, envelope: dict[str, Any]
-    ) -> None:
+    ) -> tuple[str, dict[str, Any], str]:
         """첫 접촉 좋아요에 가벼운 인사 한 줄 — 그 포스트의 댓글로 (plan/03 §첫 개입).
 
         표현은 LLM(converse, 가벼운 첫 인사 결의 Task Frame), 실패 시 결정적 규칙
         템플릿 풀 — 첫 개입의 가시적 반응은 보증이다 (응답 의무와 같은 급).
+        반환한 튜플을 호출자가 순서대로 self._replies에 담는다.
         """
         persona = self._personas[actor_id]
         working = await self._memory.recent(ctx.world_id, actor_id)
@@ -631,11 +697,11 @@ class ActorPhases:
         text = await self._ai.converse(bundle, tier="warm", actor_id=actor_id, tick=ctx.tick)
         if text is None:
             text = fallback_greeting(persona, envelope["payload"]["player_id"])
-        self._replies.append((actor_id, envelope, text))
         logger.info(
             "첫 접촉 인사: %s → %s tick=%d (plan/03 첫 개입)",
             actor_id, envelope["payload"]["player_id"], ctx.tick,
         )
+        return (actor_id, envelope, text)
 
     async def _proactive_dm(
         self, ctx: TickContext, world: WorldContext, actor_id: str

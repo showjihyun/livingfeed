@@ -56,6 +56,13 @@ async def run() -> None:
     personas_dir = Path(os.environ.get("LF_PERSONAS_DIR", "agents/personas"))
     # LLM decide 응답 예산 — reasoning 모델은 더 오래 걸릴 수 있다 (tick 예산 안에서)
     ai_timeout_s = float(os.environ.get("LF_AI_TIMEOUT_S", "10"))
+    # decide의 tick 내 LLM 팬아웃 상한 — 액터 간 독립 호출을 병렬로 내되(직렬 await는
+    # AI Runtime 슬롯을 놀린다), AI Runtime 동시성(LF_AI_CONCURRENCY=4 기본)을 꽉 채울
+    # 만큼만. 기본 2× = 슬롯을 채우고도 대기열이 얕아 NATS 타임아웃을 태우지 않는다.
+    ai_concurrency = int(os.environ.get("LF_AI_CONCURRENCY", "4"))
+    decide_concurrency = int(
+        os.environ.get("LF_DECIDE_CONCURRENCY", str(max(1, ai_concurrency) * 2))
+    )
 
     # 세계 규모 설정 — LF_MAX_ACTORS로 10~1000명 조절 (capacity.py). 미설정이면 전원.
     # LF_MODEL_PARAMS_B(선택)로 로컬 모델 크기(B)를 알려주면 하한 위반을 구체 경고한다.
@@ -158,6 +165,7 @@ async def run() -> None:
             shard_select=shard_select,
             hot_start_cap=hot_start_cap,
             hot_floor=hot_floor,
+            decide_concurrency=decide_concurrency,
         )
         barrier = (
             RedisShardBarrier(
