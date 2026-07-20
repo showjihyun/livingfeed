@@ -119,7 +119,9 @@ export function LivingFeedApp() {
   const { posts: livePosts, status: liveStatus } = useLiveFeed(screen === "app", feedRange);
 
   // 관계 그래프 실측 (kuzu-projector, ADR-006) — 미가용이면 빈 상태
-  const relGraph = useRelationshipGraph(screen === "app");
+  // 관계 그래프는 그래프 탭에서만 소비된다 — 다른 탭에서 20초마다 폴링하지 않는다
+  // (worldGraph와 같은 게이팅). 탭 전환 시 available=false→데이터로 자연 강등.
+  const relGraph = useRelationshipGraph(screen === "app" && tab === "graph");
   // 세계 전체 관계망 (액터↔액터 포함) — 그래프 탭을 볼 때만 폴링한다
   const worldGraph = useWorldGraph(screen === "app" && tab === "graph");
 

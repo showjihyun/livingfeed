@@ -123,7 +123,11 @@ export function useWorldGraph(enabled: boolean): WorldGraphState {
     };
 
     void load();
-    const timer = window.setInterval(() => void load(), REFRESH_MS);
+    // 배경 탭(document.hidden)에서는 폴링을 멈춘다 — 안 보이는 화면에 네트워크·리렌더
+    // 낭비 금지. 최초 로드는 무조건, 이후 폴링만 가시성에 좌우된다.
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void load();
+    }, REFRESH_MS);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -169,7 +173,11 @@ export function useRelationshipGraph(enabled: boolean): {
     };
 
     void load();
-    const timer = window.setInterval(() => void load(), REFRESH_MS);
+    // 배경 탭(document.hidden)에서는 폴링을 멈춘다 — 안 보이는 화면에 네트워크·리렌더
+    // 낭비 금지. 최초 로드는 무조건, 이후 폴링만 가시성에 좌우된다.
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void load();
+    }, REFRESH_MS);
     return () => {
       cancelled = true;
       window.clearInterval(timer);

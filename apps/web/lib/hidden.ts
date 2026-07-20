@@ -75,7 +75,10 @@ export function useHiddenFeed(
       }
     };
     void load();
-    const timer = window.setInterval(() => void load(), 15_000);
+    // 배경 탭에서는 폴링 정지 (안 보이는 화면에 네트워크·리렌더 낭비 금지)
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void load();
+    }, 15_000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
