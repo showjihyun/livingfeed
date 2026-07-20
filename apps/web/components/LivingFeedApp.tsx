@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { TOAST_DURATION_MS } from "@/lib/data";
@@ -24,14 +25,24 @@ import { Curating } from "./Curating";
 import { Digest } from "./Digest";
 import { DmTab } from "./DmTab";
 import { FeedTab } from "./FeedTab";
-import { GraphTab } from "./GraphTab";
 import { CommunityTab } from "./CommunityTab";
 import { HiddenTab } from "./HiddenTab";
 import { Onboarding } from "./Onboarding";
 import { ProfileTab } from "./ProfileTab";
 import { Sidebar } from "./Sidebar";
-import { StudioTab } from "./StudioTab";
+import { TabFallback } from "./TabFallback";
 import { Toasts } from "./Toasts";
+
+// 코드 스플리팅 — 가장 무겁고 드물게 여는 탭은 초기 번들에서 빼고 열 때 청크를
+// 받아온다 (첫 화면=World Feed의 TTI 개선). 클라이언트 전용이라 ssr:false.
+const StudioTab = dynamic(() => import("./StudioTab").then((m) => m.StudioTab), {
+  ssr: false,
+  loading: () => <TabFallback />,
+});
+const GraphTab = dynamic(() => import("./GraphTab").then((m) => m.GraphTab), {
+  ssr: false,
+  loading: () => <TabFallback />,
+});
 
 const ME_COMMENT = { bg: "#EDF3FD", avatarBg: "#D9E2F2" };
 const ACTOR_COMMENT = { bg: "#F8FAFD", avatarBg: "#AFC8F5" };

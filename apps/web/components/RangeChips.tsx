@@ -9,6 +9,7 @@
  */
 
 import { RANGE_LABELS, RANGES, type Range } from "@/lib/range";
+import { COLOR, RADIUS, WEIGHT } from "@/lib/tokens";
 
 import { Pressable } from "./Pressable";
 import styles from "./lf.module.css";
@@ -32,11 +33,11 @@ export function RangeChips({
             className={styles.press95}
             style={{
               padding: "4px 12px",
-              borderRadius: 9999,
+              borderRadius: RADIUS.pill,
               fontSize: 12,
-              fontWeight: 800,
-              background: selected ? "#EDF3FD" : "#F2F6FC",
-              color: selected ? "#5F7EC9" : "#8C97AF",
+              fontWeight: WEIGHT.heavy,
+              background: selected ? COLOR.primarySoft : COLOR.surface,
+              color: selected ? COLOR.primaryDeep : COLOR.faint,
               border: `1.5px solid ${selected ? "#CFE0F8" : "transparent"}`,
             }}
           >

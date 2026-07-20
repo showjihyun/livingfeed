@@ -14,7 +14,8 @@
     "@livingfeed/ui": "workspace:*",
     "next": "^15.3.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "swr": "^2.4.2"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
