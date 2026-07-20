@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { TOAST_DURATION_MS, WORLD_MIN_START, formatWorldTime } from "@/lib/data";
+import { TOAST_DURATION_MS } from "@/lib/data";
 import { useActorDirectory } from "@/lib/actors";
 import type { DerivedStories } from "@/lib/comments";
 import { fetchPostComments } from "@/lib/comments";
@@ -49,7 +49,6 @@ export function LivingFeedApp() {
   const [selectedCommunity, setSelectedCommunity] = useState<string | null>(null);
   const [profileRange, setProfileRange] = useState<Range>("all");
   const [topics, setTopics] = useState<string[]>(["직장 드라마"]);
-  const [worldMin, setWorldMin] = useState(WORLD_MIN_START);
   const [curateStep, setCurateStep] = useState(0);
 
   // 다중 대화 인박스 — 스레드 목록(threads API 실측) + 액터별 대화 상태.
@@ -96,13 +95,10 @@ export function LivingFeedApp() {
   }, []);
 
   useEffect(() => {
-    // 세계 시간: 3초마다 +4분 (현실 4배속)
-    const clock = window.setInterval(() => setWorldMin((m) => m + 4), 3000);
+    // 지연 콜백 타이머 정리 — 세계 시계는 리프(useWorldClock)로 분리해 3초 틱이
+    // 앱 전체를 리렌더하지 않게 했다 (world-clock-display.ts).
     const pending = timers.current;
-    return () => {
-      window.clearInterval(clock);
-      pending.forEach((t) => window.clearTimeout(t));
-    };
+    return () => pending.forEach((t) => window.clearTimeout(t));
   }, []);
 
   const toast = useCallback(
@@ -462,12 +458,24 @@ export function LivingFeedApp() {
     });
   }, [tab, openDmActor, dmUnread]);
 
-  const worldTime = formatWorldTime(worldMin);
   // 프로필의 "메시지 보내기" — 보고 있던 액터와의 스레드를 바로 연다
   const goDm = useCallback(() => {
     setTab("dm");
     openThread(FOCUS_ACTOR_ID);
   }, [openThread]);
+
+  // 자식 memo가 실제로 먹도록 인라인 화살표 prop을 안정화한다 (참조 고정)
+  const dismissCoach = useCallback(() => setCoachDismissed(true), []);
+  const goFeed = useCallback(() => setTab("feed"), []);
+  const closeThread = useCallback(() => setOpenDmActor(null), []);
+  const toggleFollow = useCallback(() => {
+    // 팔로우는 세계에 남는 선언 — 세션이 살아있으면 함께 보낸다 (오프라인은 로컬 토글)
+    setFollowing((prev) => {
+      const next = !prev;
+      session.setFollow(FOCUS_ACTOR_ID, next);
+      return next;
+    });
+  }, [session]);
 
   // 받은 것의 조회 범위 — 마지막 메시지의 세계 tick(서버 동봉 last_tick)으로
   // 클라에서 거른다. 목록이 로컬 우선(방금 오간 말의 낙관 갱신)이라 서버 재조회
@@ -491,18 +499,16 @@ export function LivingFeedApp() {
         <Onboarding
           topics={topics}
           onToggleTopic={toggleTopic}
-          worldTime={worldTime}
           onEnter={enterWorld}
         />
       )}
-      {screen === "curating" && <Curating step={curateStep} worldTime={worldTime} />}
+      {screen === "curating" && <Curating step={curateStep} />}
 
       <Sidebar
         tab={tab}
         onSelectTab={setTab}
         dmBadge={dmUnread.size > 0 ? String(dmUnread.size) : ""}
         hiddenUnlocked={hiddenUnlocked}
-        worldTime={worldTime}
         interventions={interventions}
       />
 
@@ -531,19 +537,13 @@ export function LivingFeedApp() {
             authorName={authorName}
             matchActorIds={matchActorIds}
             showCoach={screen === "app" && !coachDismissed}
-            onDismissCoach={() => setCoachDismissed(true)}
+            onDismissCoach={dismissCoach}
           />
         )}
         {tab === "profile" && (
           <ProfileTab
             following={following}
-            onToggleFollow={() => {
-              // 팔로우는 세계에 남는 선언이다 — 세션이 살아있으면 함께 보낸다
-              // (오프라인이면 로컬 토글만 — 조용한 강등)
-              const next = !following;
-              setFollowing(next);
-              session.setFollow(FOCUS_ACTOR_ID, next);
-            }}
+            onToggleFollow={toggleFollow}
             goDm={goDm}
             profile={focusProfile.profile}
             episodeRange={profileRange}
@@ -555,7 +555,6 @@ export function LivingFeedApp() {
         )}
         {tab === "dm" && (
           <DmTab
-            worldTime={worldTime}
             threads={displayThreads}
             emptyInbox={dmThreads.length === 0}
             range={dmRange}
@@ -574,7 +573,7 @@ export function LivingFeedApp() {
             loadingOlder={dmLoadingOlder}
             onLoadOlder={loadOlderDms}
             onOpenThread={openThread}
-            onBack={() => setOpenDmActor(null)}
+            onBack={closeThread}
           />
         )}
         {tab === "community" && (
@@ -597,7 +596,7 @@ export function LivingFeedApp() {
         )}
         {tab === "studio" && (
           // 창조자 도구 — 인물을 빚어 세계에 풀어놓는다. 데뷔는 World Feed에서 지켜본다.
-          <StudioTab enabled={screen === "app"} onGoWorldFeed={() => setTab("feed")} />
+          <StudioTab enabled={screen === "app"} onGoWorldFeed={goFeed} />
         )}
         {tab === "graph" && (
           <GraphTab

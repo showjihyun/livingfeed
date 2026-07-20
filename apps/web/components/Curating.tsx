@@ -1,3 +1,6 @@
+import { useWorldClock } from "@/lib/world-clock";
+import { useDemoWorldTime } from "@/lib/world-clock-display";
+
 import { Face } from "./Face";
 
 const TITLES = ["취향을 반영하는 중", "가장 갈등 밀도 높은 사건을 찾는 중", "찾았어요 — 갈등의 한가운데"];
@@ -10,10 +13,10 @@ const PROGRESS = ["18%", "62%", "100%"];
 
 interface CuratingProps {
   step: number;
-  worldTime: string;
 }
 
-export function Curating({ step, worldTime }: CuratingProps) {
+export function Curating({ step }: CuratingProps) {
+  const worldTime = useWorldClock(useDemoWorldTime());
   return (
     <div
       style={{

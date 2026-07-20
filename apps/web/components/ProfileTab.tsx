@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import { ICON } from "@/lib/data";
 import { relativeTime } from "@/lib/live-feed";
 import type { ActorProfile } from "@/lib/profile";
@@ -6,6 +8,7 @@ import type { Range } from "@/lib/range";
 
 import { Face } from "./Face";
 import { Icon } from "./Icon";
+import { Pressable } from "./Pressable";
 import { RangeChips } from "./RangeChips";
 import styles from "./lf.module.css";
 
@@ -24,7 +27,9 @@ interface ProfileTabProps {
   onLoadMoreEpisodes: () => void;
 }
 
-export function ProfileTab({
+export const ProfileTab = memo(ProfileTabInner);
+
+function ProfileTabInner({
   following,
   onToggleFollow,
   goDm,
@@ -94,8 +99,9 @@ export function ProfileTab({
             )}
           </div>
           <div style={{ display: "flex", gap: 10, paddingBottom: 8 }}>
-            <div
+            <Pressable
               onClick={onToggleFollow}
+              aria-pressed={following}
               className={styles.press95}
               style={{
                 padding: "10px 20px",
@@ -104,12 +110,11 @@ export function ProfileTab({
                 borderRadius: 9999,
                 fontSize: 14,
                 fontWeight: 800,
-                cursor: "pointer",
               }}
             >
               {following ? "팔로잉" : "팔로우"}
-            </div>
-            <div
+            </Pressable>
+            <Pressable
               onClick={goDm}
               className={styles.press95}
               style={{
@@ -119,11 +124,10 @@ export function ProfileTab({
                 borderRadius: 9999,
                 fontSize: 14,
                 fontWeight: 800,
-                cursor: "pointer",
               }}
             >
               DM 보내기
-            </div>
+            </Pressable>
           </div>
         </div>
 
@@ -315,8 +319,9 @@ export function ProfileTab({
           )}
           {episodes.length > 0 && hasMoreEpisodes && (
             // 과거 방향 커서 페이지네이션 — 오래된 기억을 목록 아래에 이어 붙인다
-            <div
-              onClick={loadingEpisodes ? undefined : onLoadMoreEpisodes}
+            <Pressable
+              onClick={onLoadMoreEpisodes}
+              disabled={loadingEpisodes}
               className={styles.press95}
               style={{
                 alignSelf: "center",
@@ -331,7 +336,7 @@ export function ProfileTab({
               }}
             >
               {loadingEpisodes ? "기억을 꺼내는 중..." : "기억 더 보기"}
-            </div>
+            </Pressable>
           )}
         </div>
       </div>

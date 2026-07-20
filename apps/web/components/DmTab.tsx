@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import type { KeyboardEvent } from "react";
 
 import { ICON } from "@/lib/data";
@@ -10,9 +10,12 @@ import { disablePush, enablePush, getPushState } from "@/lib/push";
 import type { PushState } from "@/lib/push";
 import type { Range } from "@/lib/range";
 import type { DmMessage } from "@/lib/types";
+import { useWorldClock } from "@/lib/world-clock";
+import { useDemoWorldTime } from "@/lib/world-clock-display";
 
 import { Face } from "./Face";
 import { Icon } from "./Icon";
+import { Pressable } from "./Pressable";
 import { RangeChips } from "./RangeChips";
 import styles from "./lf.module.css";
 
@@ -25,7 +28,6 @@ function avatarColor(seed: string): string {
 }
 
 interface DmTabProps {
-  worldTime: string;
   /** 인박스 스레드 목록 (최신 대화 순) — 표시 이름은 nameOf로 푼다 (하드코딩 금지) */
   threads: DmThread[];
   /** 실측 스레드가 하나도 없는가 — 빈 인박스 안내(데모 인트로 규약)를 띄우는 근거 */
@@ -89,9 +91,12 @@ function PushBell() {
     }
   };
   return (
-    <div
+    <Pressable
       onClick={toggle}
       title={title}
+      aria-label={title}
+      aria-pressed={on}
+      disabled={denied || busy}
       className={denied ? undefined : styles.press92}
       style={{
         width: 30,
@@ -111,11 +116,13 @@ function PushBell() {
         color={on ? "#5F7EC9" : "#8C97AF"}
         style={on ? { fill: "currentColor" } : undefined}
       />
-    </div>
+    </Pressable>
   );
 }
 
-export function DmTab(props: DmTabProps) {
+export const DmTab = memo(DmTabInner);
+
+function DmTabInner(props: DmTabProps) {
   return props.openActorId === null ? (
     <InboxList {...props} />
   ) : (
@@ -219,17 +226,18 @@ function InboxList({
             ? "입력 중..."
             : thread.lastText || "아직 나눈 말이 없어요 — 먼저 말을 걸어보세요";
           return (
-            <div
+            <Pressable
               key={thread.actorId}
               onClick={() => onOpenThread(thread.actorId)}
               className={styles.press95}
               style={{
+                width: "100%",
+                textAlign: "left",
                 display: "flex",
                 alignItems: "center",
                 gap: 12,
                 padding: "13px 14px",
                 borderRadius: 16,
-                cursor: "pointer",
                 background: isUnread ? "#F4F8FE" : "#fff",
                 border: `1.5px solid ${isUnread ? "#D9E5F9" : "#EEF3FB"}`,
               }}
@@ -288,7 +296,7 @@ function InboxList({
                   }}
                 />
               )}
-            </div>
+            </Pressable>
           );
         })}
       </div>
@@ -298,7 +306,6 @@ function InboxList({
 
 /** 대화 뷰 — 기존 1:1 대화 경험 그대로, 상대만 파라미터화 (뒤로가기로 목록 복귀) */
 function Conversation({
-  worldTime,
   nameOf,
   typingActors,
   openActorId,
@@ -311,6 +318,8 @@ function Conversation({
   onLoadOlder,
   onBack,
 }: DmTabProps & { openActorId: string }) {
+  // 세계 시각은 공용 스토어에서 — 루트 prop 대신 (앵커 전엔 데모 폴백)
+  const worldTime = useWorldClock(useDemoWorldTime());
   const partnerName = nameOf(openActorId);
   const typing = typingActors.has(openActorId);
   const partnerBg = avatarColor(openActorId);
@@ -329,8 +338,9 @@ function Conversation({
           borderBottom: "1.5px solid #EEF3FB",
         }}
       >
-        <div
+        <Pressable
           onClick={onBack}
+          aria-label="목록으로 돌아가기"
           className={styles.press92}
           style={{
             width: 34,
@@ -339,13 +349,12 @@ function Conversation({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            cursor: "pointer",
             background: "#F2F6FC",
             flexShrink: 0,
           }}
         >
           <Icon d={ICON.arrowLeft} size={16} color="#5F7EC9" />
-        </div>
+        </Pressable>
         <Face preset="dmHeader38" bg={partnerBg} />
         <div style={{ display: "flex", flexDirection: "column" }}>
           <div style={{ fontSize: 15, fontWeight: 800 }}>{partnerName}</div>
@@ -370,8 +379,9 @@ function Conversation({
       >
         {canLoadOlder && (
           // 과거 방향 커서 페이지네이션 — 과거 메시지를 목록 위에 이어 붙인다
-          <div
-            onClick={loadingOlder ? undefined : onLoadOlder}
+          <Pressable
+            onClick={onLoadOlder}
+            disabled={loadingOlder}
             className={styles.press95}
             style={{
               alignSelf: "center",
@@ -386,7 +396,7 @@ function Conversation({
             }}
           >
             {loadingOlder ? "이전 대화 불러오는 중..." : "이전 대화 더 보기"}
-          </div>
+          </Pressable>
         )}
 
         <div
@@ -511,8 +521,9 @@ function Conversation({
             fontWeight: 500,
           }}
         />
-        <div
+        <Pressable
           onClick={onSend}
+          aria-label="보내기"
           className={styles.press92}
           style={{
             width: 44,
@@ -522,12 +533,11 @@ function Conversation({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            cursor: "pointer",
             boxShadow: "0 4px 12px rgba(109,141,214,0.35)",
           }}
         >
           <Icon d={ICON.send} size={18} color="#fff" />
-        </div>
+        </Pressable>
       </div>
     </>
   );

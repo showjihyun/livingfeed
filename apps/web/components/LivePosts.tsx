@@ -19,6 +19,7 @@ import { useStory } from "@/lib/story";
 import type { FeedComment } from "@/lib/types";
 
 import { Icon } from "./Icon";
+import { Pressable } from "./Pressable";
 
 const STATUS_CHIP: Record<LiveStatus, { label: string; bg: string; color: string; dot: string }> = {
   live: { label: "LIVE — 세계와 연결됨", bg: "#E3F5EC", color: "#3E8A66", dot: "#5FBF95" },
@@ -395,8 +396,9 @@ function LivePostCard({
       </div>
       <div style={{ fontSize: 15, lineHeight: 1.65, fontWeight: 500 }}>{post.body}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div
+        <Pressable
           onClick={() => onLike(post)}
+          aria-pressed={liked}
           style={{
             display: "flex",
             alignItems: "center",
@@ -407,12 +409,11 @@ function LivePostCard({
             borderRadius: 9999,
             fontSize: 13,
             fontWeight: 800,
-            cursor: "pointer",
             userSelect: "none",
           }}
         >
           ♥ {liked ? "전달됨" : "좋아요"}
-        </div>
+        </Pressable>
         {commentable && comments.length > 0 && (
           <div
             style={{
@@ -431,8 +432,9 @@ function LivePostCard({
           </div>
         )}
         {canFollowStory && (
-          <div
+          <Pressable
             onClick={() => setStoryOpen((open) => !open)}
+            aria-expanded={storyOpen}
             style={{
               display: "flex",
               alignItems: "center",
@@ -443,18 +445,18 @@ function LivePostCard({
               borderRadius: 9999,
               fontSize: 13,
               fontWeight: 800,
-              cursor: "pointer",
               userSelect: "none",
             }}
           >
             <Icon d={ICON.gitBranch} size={14} />{" "}
             {storyOpen ? "이야기 접기" : "이야기 따라가기"}
-          </div>
+          </Pressable>
         )}
         {canFollowDialogue && (
           // 2차 사건의 존재 — 이 스레드의 대화가 세계에 후속 이야기를 낳았다
-          <div
+          <Pressable
             onClick={() => setDialogueOpen((open) => !open)}
+            aria-expanded={dialogueOpen}
             title={
               derived?.latestTitle
                 ? `가장 최근: ${derived.latestTitle}`
@@ -470,7 +472,6 @@ function LivePostCard({
               borderRadius: 9999,
               fontSize: 13,
               fontWeight: 800,
-              cursor: "pointer",
               userSelect: "none",
             }}
           >
@@ -480,7 +481,7 @@ function LivePostCard({
               : derived && derived.count > 1
                 ? `이 대화가 낳은 이야기 · ${derived.count}`
                 : "이 대화가 낳은 이야기"}
-          </div>
+          </Pressable>
         )}
       </div>
 
@@ -530,7 +531,7 @@ function LivePostCard({
               fontWeight: 500,
             }}
           />
-          <div
+          <Pressable
             onClick={submit}
             style={{
               padding: "10px 18px",
@@ -539,11 +540,10 @@ function LivePostCard({
               borderRadius: 9999,
               fontSize: 14,
               fontWeight: 800,
-              cursor: "pointer",
             }}
           >
             전송
-          </div>
+          </Pressable>
         </div>
       )}
     </div>

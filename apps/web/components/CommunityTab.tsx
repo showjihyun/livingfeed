@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 
 import type { Community, CommunityPost } from "@/lib/community";
 import { ICON } from "@/lib/data";
@@ -24,7 +24,9 @@ interface CommunityTabProps {
   nameOf: (actorId: string) => string;
 }
 
-export function CommunityTab({
+export const CommunityTab = memo(CommunityTabInner);
+
+function CommunityTabInner({
   communities,
   selectedId,
   onSelect,

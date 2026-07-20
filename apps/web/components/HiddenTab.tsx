@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import { ICON } from "@/lib/data";
 import type { HiddenItem } from "@/lib/hidden";
 import { relativeTime } from "@/lib/live-feed";
@@ -23,7 +25,9 @@ interface HiddenTabProps {
   onRangeChange: (range: Range) => void;
 }
 
-export function HiddenTab({ items, nameOf, range, onRangeChange }: HiddenTabProps) {
+export const HiddenTab = memo(HiddenTabInner);
+
+function HiddenTabInner({ items, nameOf, range, onRangeChange }: HiddenTabProps) {
   return (
     <>
       <div

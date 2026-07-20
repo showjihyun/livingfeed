@@ -10,6 +10,7 @@
 
 import { RANGE_LABELS, RANGES, type Range } from "@/lib/range";
 
+import { Pressable } from "./Pressable";
 import styles from "./lf.module.css";
 
 export function RangeChips({
@@ -24,23 +25,23 @@ export function RangeChips({
       {RANGES.map((range) => {
         const selected = range === value;
         return (
-          <div
+          <Pressable
             key={range}
             onClick={() => onChange(range)}
+            aria-pressed={selected}
             className={styles.press95}
             style={{
               padding: "4px 12px",
               borderRadius: 9999,
               fontSize: 12,
               fontWeight: 800,
-              cursor: "pointer",
               background: selected ? "#EDF3FD" : "#F2F6FC",
               color: selected ? "#5F7EC9" : "#8C97AF",
               border: `1.5px solid ${selected ? "#CFE0F8" : "transparent"}`,
             }}
           >
             {RANGE_LABELS[range]}
-          </div>
+          </Pressable>
         );
       })}
     </div>

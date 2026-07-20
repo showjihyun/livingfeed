@@ -1,9 +1,13 @@
+import { memo } from "react";
+
 import { ICON, NAV_DEFS } from "@/lib/data";
 import type { Tab } from "@/lib/types";
 import { useWorldClock } from "@/lib/world-clock";
+import { useDemoWorldTime } from "@/lib/world-clock-display";
 
 import { Face } from "./Face";
 import { Icon } from "./Icon";
+import { Pressable } from "./Pressable";
 import styles from "./lf.module.css";
 
 interface SidebarProps {
@@ -11,20 +15,21 @@ interface SidebarProps {
   onSelectTab: (tab: Tab) => void;
   dmBadge: string;
   hiddenUnlocked: boolean;
-  worldTime: string;
   interventions: number;
 }
 
-export function Sidebar({
+// 항상 마운트되어 루트 리렌더마다 다시 그려졌다 — props가 안정적이라 memo가 잘 먹는다
+export const Sidebar = memo(SidebarInner);
+
+function SidebarInner({
   tab,
   onSelectTab,
   dmBadge,
   hiddenUnlocked,
-  worldTime,
   interventions,
 }: SidebarProps) {
-  // 세계 시간의 진실은 엔진 tick이다 — 앵커 관측 전(연결 전)에는 기존 prop 시계로 폴백
-  const clock = useWorldClock(worldTime);
+  // 세계 시간의 진실은 엔진 tick이다 — 앵커 관측 전(연결 전)에는 데모 폴백 시계
+  const clock = useWorldClock(useDemoWorldTime());
   return (
     <div
       style={{
@@ -53,17 +58,18 @@ export function Sidebar({
         const active = tab === nav.key;
         const badge = nav.key === "dm" ? dmBadge : "";
         return (
-          <div
+          <Pressable
             key={nav.key}
             onClick={() => onSelectTab(nav.key)}
+            aria-current={active ? "page" : undefined}
             className={styles.navItem}
             style={{
+              width: "100%",
               display: "flex",
               alignItems: "center",
               gap: 10,
               padding: "11px 14px",
               borderRadius: 14,
-              cursor: "pointer",
               background: active ? "#ffffff" : undefined,
               color: active ? "#5F7EC9" : "#6B7691",
               boxShadow: active ? "0 4px 12px rgba(109,141,214,0.12)" : "none",
@@ -90,7 +96,7 @@ export function Sidebar({
                 {badge}
               </div>
             )}
-          </div>
+          </Pressable>
         );
       })}
 
@@ -110,16 +116,17 @@ export function Sidebar({
           <div style={{ fontSize: 11, fontWeight: 700 }}>신뢰로 언락</div>
         </div>
       ) : (
-        <div
+        <Pressable
           onClick={() => onSelectTab("hidden")}
+          aria-current={tab === "hidden" ? "page" : undefined}
           className={styles.navItem}
           style={{
+            width: "100%",
             display: "flex",
             alignItems: "center",
             gap: 10,
             padding: "11px 14px",
             borderRadius: 14,
-            cursor: "pointer",
             background: tab === "hidden" ? "#ffffff" : undefined,
             color: tab === "hidden" ? "#7a68b3" : "#6B7691",
             boxShadow: tab === "hidden" ? "0 4px 12px rgba(122,104,179,0.14)" : "none",
@@ -139,7 +146,7 @@ export function Sidebar({
           >
             NEW
           </div>
-        </div>
+        </Pressable>
       )}
 
       {/* 창조자 도구 — 관전 탭들과 결이 다르다: 세계를 보는 곳이 아니라 빚는 곳 (공방 톤) */}
@@ -156,16 +163,17 @@ export function Sidebar({
       >
         창조자 도구
       </div>
-      <div
+      <Pressable
         onClick={() => onSelectTab("studio")}
+        aria-current={tab === "studio" ? "page" : undefined}
         className={styles.navItem}
         style={{
+          width: "100%",
           display: "flex",
           alignItems: "center",
           gap: 10,
           padding: "11px 14px",
           borderRadius: 14,
-          cursor: "pointer",
           background: tab === "studio" ? "#ffffff" : undefined,
           color: tab === "studio" ? "#A97E2F" : "#6B7691",
           boxShadow: tab === "studio" ? "0 4px 12px rgba(176,132,48,0.14)" : "none",
@@ -173,7 +181,7 @@ export function Sidebar({
       >
         <Icon d={ICON.wrench} size={18} />
         <div style={{ fontSize: 15, fontWeight: 700, flex: 1 }}>스튜디오</div>
-      </div>
+      </Pressable>
 
       <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
         <div

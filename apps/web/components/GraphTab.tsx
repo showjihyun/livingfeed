@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ActorIdentity } from "@/lib/actors";
 import { PLAYER_ID } from "@/lib/config";
@@ -938,7 +938,9 @@ function ScopeChip({
   );
 }
 
-export function GraphTab({
+export const GraphTab = memo(GraphTabInner);
+
+function GraphTabInner({
   edges,
   available,
   world,

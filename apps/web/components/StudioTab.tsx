@@ -9,7 +9,7 @@
  * "게이트웨이 연결이 필요해요" 폴백 (기존 칩 규약).
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 
 import { PLAYER_ID } from "@/lib/config";
@@ -44,6 +44,7 @@ import type {
 } from "@/lib/studio";
 
 import { Icon } from "./Icon";
+import { Pressable } from "./Pressable";
 import styles from "./lf.module.css";
 
 /* ── 공방의 색 — 관전 탭(파랑·보라)과 구분되는 창조자 톤 ── */
@@ -179,23 +180,23 @@ function ChipSelect<T extends string>({
       {options.map((option) => {
         const selected = option === value;
         return (
-          <div
+          <Pressable
             key={option}
             onClick={() => onChange(option)}
+            aria-pressed={selected}
             className={styles.press95}
             style={{
               padding: small ? "4px 12px" : "7px 16px",
               borderRadius: 9999,
               fontSize: small ? 12 : 13,
               fontWeight: 800,
-              cursor: "pointer",
               background: selected ? AMBER.bg : "#F2F6FC",
               color: selected ? AMBER.text : "#8C97AF",
               border: `1.5px solid ${selected ? AMBER.border : "transparent"}`,
             }}
           >
             {labels[option]}
-          </div>
+          </Pressable>
         );
       })}
     </div>
@@ -204,7 +205,11 @@ function ChipSelect<T extends string>({
 
 function ActiveToggle({ on, busy, onToggle }: { on: boolean; busy: boolean; onToggle: () => void }) {
   return (
-    <div
+    <Pressable
+      role="switch"
+      aria-checked={on}
+      aria-label="세계에 활성"
+      disabled={busy}
       onClick={(e) => {
         e.stopPropagation();
         if (!busy) onToggle();
@@ -234,7 +239,7 @@ function ActiveToggle({ on, busy, onToggle }: { on: boolean; busy: boolean; onTo
           boxShadow: "0 1px 3px rgba(58,66,86,0.25)",
         }}
       />
-    </div>
+    </Pressable>
   );
 }
 
@@ -341,7 +346,7 @@ function PersonaEditor({
           borderBottom: "1.5px solid #EEF3FB",
         }}
       >
-        <div
+        <Pressable
           onClick={onBack}
           className={styles.press95}
           style={{
@@ -351,17 +356,17 @@ function PersonaEditor({
             color: "#6B7691",
             fontSize: 13,
             fontWeight: 800,
-            cursor: "pointer",
             flexShrink: 0,
           }}
         >
           ← 명단
-        </div>
+        </Pressable>
         <div style={{ fontSize: 18, fontWeight: 900, flex: 1 }}>
           {isNew ? "새 인물 빚기" : `${draft.name || "인물"} 다듬기`}
         </div>
-        <div
+        <Pressable
           onClick={() => void handleSave()}
+          disabled={saving}
           className={styles.press95}
           style={{
             padding: "10px 22px",
@@ -375,7 +380,7 @@ function PersonaEditor({
           }}
         >
           {saving ? "세계에 새기는 중…" : isNew ? "세계에 풀어놓기" : "변화를 새기기"}
-        </div>
+        </Pressable>
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "24px 32px", background: "#FDFBF6" }}>
@@ -554,8 +559,9 @@ function PersonaEditor({
                       })
                     }
                   />
-                  <div
+                  <Pressable
                     onClick={() => patch({ goals: draft.goals.filter((g) => g.id !== goal.id) })}
+                    aria-label="목표 삭제"
                     className={styles.press92}
                     style={{
                       width: 30,
@@ -568,12 +574,11 @@ function PersonaEditor({
                       justifyContent: "center",
                       fontSize: 16,
                       fontWeight: 800,
-                      cursor: "pointer",
                       flexShrink: 0,
                     }}
                   >
                     ×
-                  </div>
+                  </Pressable>
                 </div>
                 <FieldError error={fieldErrors[`goals.${i}.description`]} />
                 <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
@@ -606,7 +611,7 @@ function PersonaEditor({
                 <FieldError error={fieldErrors[`goals.${i}.need`]} />
               </div>
             ))}
-            <div
+            <Pressable
               onClick={() =>
                 patch({
                   goals: [
@@ -617,6 +622,7 @@ function PersonaEditor({
               }
               className={styles.press97}
               style={{
+                width: "100%",
                 border: "1.5px dashed #D8DEEA",
                 borderRadius: 14,
                 padding: "12px 16px",
@@ -624,11 +630,10 @@ function PersonaEditor({
                 fontSize: 13,
                 fontWeight: 800,
                 color: "#8C97AF",
-                cursor: "pointer",
               }}
             >
               ＋ 목표 추가
-            </div>
+            </Pressable>
           </SectionCard>
 
           <SectionCard
@@ -651,8 +656,9 @@ function PersonaEditor({
                       })
                     }
                   />
-                  <div
+                  <Pressable
                     onClick={() => patch({ secrets: draft.secrets.filter((s) => s.id !== secret.id) })}
+                    aria-label="비밀 삭제"
                     className={styles.press92}
                     style={{
                       width: 30,
@@ -665,22 +671,22 @@ function PersonaEditor({
                       justifyContent: "center",
                       fontSize: 16,
                       fontWeight: 800,
-                      cursor: "pointer",
                       flexShrink: 0,
                     }}
                   >
                     ×
-                  </div>
+                  </Pressable>
                 </div>
                 <FieldError error={fieldErrors[`secrets.${i}.description`]} />
               </div>
             ))}
-            <div
+            <Pressable
               onClick={() =>
                 patch({ secrets: [...draft.secrets, { id: freshId("s_"), description: "" }] })
               }
               className={styles.press97}
               style={{
+                width: "100%",
                 border: "1.5px dashed #D8DEEA",
                 borderRadius: 14,
                 padding: "12px 16px",
@@ -688,11 +694,10 @@ function PersonaEditor({
                 fontSize: 13,
                 fontWeight: 800,
                 color: "#8C97AF",
-                cursor: "pointer",
               }}
             >
               ＋ 비밀 추가
-            </div>
+            </Pressable>
           </SectionCard>
 
           <SectionCard title="내면" hint="이 사람의 안쪽 — 세계가 이 사람의 목소리를 빚을 때 읽는 원문">
@@ -752,8 +757,9 @@ function PersonaEditor({
                     이 사람의 글·관계가 세계의 모든 화면에서 사라집니다. 되돌릴 수 없어요.
                   </div>
                   <div style={{ display: "flex", gap: 10, marginTop: 2 }}>
-                    <div
+                    <Pressable
                       onClick={() => void handleRetire()}
+                      disabled={retiring}
                       className={styles.press95}
                       style={{
                         padding: "9px 18px",
@@ -766,8 +772,8 @@ function PersonaEditor({
                       }}
                     >
                       {retiring ? "세계가 놓아주는 중…" : "떠나보내기"}
-                    </div>
-                    <div
+                    </Pressable>
+                    <Pressable
                       onClick={() => {
                         if (retiring) return;
                         setConfirmingRetire(false);
@@ -781,15 +787,14 @@ function PersonaEditor({
                         color: "#6B7691",
                         fontSize: 13,
                         fontWeight: 800,
-                        cursor: "pointer",
                       }}
                     >
                       남겨두기
-                    </div>
+                    </Pressable>
                   </div>
                 </div>
               ) : (
-                <div
+                <Pressable
                   onClick={() => setConfirmingRetire(true)}
                   className={styles.press95}
                   style={{
@@ -801,11 +806,10 @@ function PersonaEditor({
                     color: "#77808F",
                     fontSize: 13,
                     fontWeight: 800,
-                    cursor: "pointer",
                   }}
                 >
                   세계에서 떠나보내기
-                </div>
+                </Pressable>
               )}
             </SectionCard>
           )}
@@ -830,7 +834,9 @@ interface StudioTabProps {
   onGoWorldFeed: () => void;
 }
 
-export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
+export const StudioTab = memo(StudioTabInner);
+
+function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
   const { personas, available, reload, applyLocal, removeLocal } = usePersonaRoster(enabled);
   const [view, setView] = useState<View>({ kind: "roster" });
   // 수정 저장 직후 명단 위에 뜨는 확인 — "세계가 받아들입니다" 결
@@ -997,7 +1003,7 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
             <br />첫 마디, 첫 만남 — 데뷔는 언제나 World Feed에 먼저 닿습니다.
           </div>
           <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
-            <div
+            <Pressable
               onClick={onGoWorldFeed}
               className={styles.press95}
               style={{
@@ -1007,12 +1013,11 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
                 color: "#fff",
                 fontSize: 14,
                 fontWeight: 800,
-                cursor: "pointer",
               }}
             >
               World Feed에서 데뷔를 지켜보세요
-            </div>
-            <div
+            </Pressable>
+            <Pressable
               onClick={() => setView({ kind: "roster" })}
               className={styles.press95}
               style={{
@@ -1022,11 +1027,10 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
                 color: "#6B7691",
                 fontSize: 14,
                 fontWeight: 800,
-                cursor: "pointer",
               }}
             >
               명단으로
-            </div>
+            </Pressable>
           </div>
         </div>
       </div>
@@ -1084,7 +1088,7 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
           <div style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600 }}>
             활성 {activeCount} / 전체 {personas.length}
           </div>
-          <div
+          <Pressable
             onClick={() => setView({ kind: "edit", initial: blankPersona(), isNew: true })}
             className={styles.press95}
             style={{
@@ -1094,11 +1098,10 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
               color: "#fff",
               fontSize: 13,
               fontWeight: 800,
-              cursor: "pointer",
             }}
           >
             ＋ 새 인물 빚기
-          </div>
+          </Pressable>
         </div>
       </div>
 
@@ -1135,12 +1138,13 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
             <div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: "#3E8A66", lineHeight: 1.6 }}>
               세계가 다음 순간 이 사람을 받아들입니다 — {savedName}의 변화가 스며들고 있어요
             </div>
-            <div
+            <Pressable
               onClick={() => setSavedName(null)}
-              style={{ color: "#3E8A66", cursor: "pointer", fontSize: 15, fontWeight: 800, padding: 4 }}
+              aria-label="닫기"
+              style={{ color: "#3E8A66", fontSize: 15, fontWeight: 800, padding: 4 }}
             >
               ×
-            </div>
+            </Pressable>
           </div>
         )}
 
@@ -1164,12 +1168,13 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
               세계가 이 사람을 기억에서 놓아줍니다 — {farewellName}의 흔적이 화면에서 조용히
               물러나요
             </div>
-            <div
+            <Pressable
               onClick={() => setFarewellName(null)}
-              style={{ color: "#6B7691", cursor: "pointer", fontSize: 15, fontWeight: 800, padding: 4 }}
+              aria-label="닫기"
+              style={{ color: "#6B7691", fontSize: 15, fontWeight: 800, padding: 4 }}
             >
               ×
-            </div>
+            </Pressable>
           </div>
         )}
 
@@ -1192,12 +1197,13 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
             >
               세계가 이 사람을 다시 기억해냅니다 — {returnedName}의 흔적이 돌아오고 있어요
             </div>
-            <div
+            <Pressable
               onClick={() => setReturnedName(null)}
-              style={{ color: AMBER.text, cursor: "pointer", fontSize: 15, fontWeight: 800, padding: 4 }}
+              aria-label="닫기"
+              style={{ color: AMBER.text, fontSize: 15, fontWeight: 800, padding: 4 }}
             >
               ×
-            </div>
+            </Pressable>
           </div>
         )}
 
@@ -1286,23 +1292,23 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
                       ? personas.length
                       : (groups.find((g) => g.key === key)?.personas.length ?? 0);
                   return (
-                    <div
+                    <Pressable
                       key={key ?? "__all"}
                       onClick={() => setGroup(key)}
+                      aria-pressed={selected}
                       className={styles.press95}
                       style={{
                         padding: "4px 12px",
                         borderRadius: 9999,
                         fontSize: 12,
                         fontWeight: 800,
-                        cursor: "pointer",
                         background: selected ? AMBER.bg : "#F2F6FC",
                         color: selected ? AMBER.text : "#8C97AF",
                         border: `1.5px solid ${selected ? AMBER.border : "transparent"}`,
                       }}
                     >
                       {key ?? "전체"} · {count}
-                    </div>
+                    </Pressable>
                   );
                 })}
               </div>
@@ -1351,7 +1357,17 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
             return (
               <div
                 key={persona.id}
+                // 카드 안에 ActiveToggle(button)이 있어 <button>으로 못 감싼다(중첩 인터랙티브
+                // 금지). 대신 role=button+tabIndex+키보드 핸들러로 키보드 접근성을 준다.
+                role="button"
+                tabIndex={0}
                 onClick={() => setView({ kind: "edit", initial: persona, isNew: false })}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setView({ kind: "edit", initial: persona, isNew: false });
+                  }
+                }}
                 className={styles.press97}
                 style={{
                   background: "#fff",
@@ -1458,15 +1474,16 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
               marginTop: 6,
             }}
           >
-            <div
+            <Pressable
               onClick={() => setRetiredOpen((open) => !open)}
+              aria-expanded={retiredOpen}
               className={styles.press97}
               style={{
+                width: "100%",
                 display: "flex",
                 alignItems: "center",
                 gap: 10,
                 padding: "14px 20px",
-                cursor: "pointer",
               }}
             >
               <Icon d={ICON.moon} size={14} color="#8C97AF" />
@@ -1476,7 +1493,7 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
               <div style={{ fontSize: 12, fontWeight: 800, color: "#A9B2C7" }}>
                 {retiredOpen ? "접기" : "펼치기"}
               </div>
-            </div>
+            </Pressable>
 
             {retiredOpen && (
               <div
@@ -1560,7 +1577,7 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
                           </div>
                         </div>
                         {!confirming && (
-                          <div
+                          <Pressable
                             onClick={() => {
                               setConfirmRestoreKey(entry.filename);
                               setRestoreError(null);
@@ -1574,12 +1591,11 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
                               color: AMBER.text,
                               fontSize: 13,
                               fontWeight: 800,
-                              cursor: "pointer",
                               flexShrink: 0,
                             }}
                           >
                             다시 불러오기
-                          </div>
+                          </Pressable>
                         )}
                       </div>
 
@@ -1607,8 +1623,9 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
                             관계도 함께 돌아옵니다.
                           </div>
                           <div style={{ display: "flex", gap: 10 }}>
-                            <div
+                            <Pressable
                               onClick={() => handleRestore(entry)}
+                              disabled={restoring}
                               className={styles.press95}
                               style={{
                                 padding: "8px 16px",
@@ -1621,8 +1638,8 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
                               }}
                             >
                               {restoring ? "돌아오는 중…" : "다시 불러오기"}
-                            </div>
-                            <div
+                            </Pressable>
+                            <Pressable
                               onClick={() => {
                                 if (restoring) return;
                                 setConfirmRestoreKey(null);
@@ -1636,11 +1653,10 @@ export function StudioTab({ enabled, onGoWorldFeed }: StudioTabProps) {
                                 color: "#6B7691",
                                 fontSize: 13,
                                 fontWeight: 800,
-                                cursor: "pointer",
                               }}
                             >
                               그대로 두기
-                            </div>
+                            </Pressable>
                           </div>
                         </div>
                       )}

@@ -21,6 +21,8 @@ import {
   readLastSeen,
 } from "@/lib/digest";
 
+import { Pressable } from "./Pressable";
+
 /** 갈래별 결 — 저자성(보라)·나를 향한 것(분홍)·세계의 마디(파랑), 기존 팔레트 그대로 */
 const SECTION_STYLE = {
   yours: { label: "당신이 빚은 인물", color: "#8A63D2", bg: "#FBFAFE", border: "#E9E1F8" },
@@ -153,9 +155,10 @@ export function Digest({ nameOf }: { nameOf: (actorId: string) => string }) {
         <Section kind="toYou" lines={digest.toYou} more={digest.toYouMore} nameOf={nameOf} />
         <Section kind="world" lines={digest.world} nameOf={nameOf} />
 
-        <div
+        <Pressable
           onClick={close}
           style={{
+            width: "100%",
             marginTop: 4,
             padding: "13px 18px",
             background: "#6D8DD6",
@@ -164,12 +167,11 @@ export function Digest({ nameOf }: { nameOf: (actorId: string) => string }) {
             fontSize: 15,
             fontWeight: 800,
             textAlign: "center",
-            cursor: "pointer",
             userSelect: "none",
           }}
         >
           세계로 돌아가기
-        </div>
+        </Pressable>
       </div>
     </div>
   );

@@ -2,6 +2,7 @@ import { TOAST_ICON_D } from "@/lib/data";
 import type { Toast } from "@/lib/types";
 
 import { Icon } from "./Icon";
+import { Pressable } from "./Pressable";
 
 interface ToastsProps {
   toasts: Toast[];
@@ -57,18 +58,18 @@ export function Toasts({ toasts, onClose }: ToastsProps) {
               {t.body}
             </div>
           </div>
-          <div
+          <Pressable
             onClick={() => onClose(t.id)}
+            aria-label="알림 닫기"
             style={{
               color: "#A9B2C7",
-              cursor: "pointer",
               fontSize: 14,
               fontWeight: 800,
               lineHeight: 1,
             }}
           >
             ×
-          </div>
+          </Pressable>
         </div>
       ))}
     </div>

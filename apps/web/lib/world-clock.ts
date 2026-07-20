@@ -65,6 +65,11 @@ export function worldNow(nowMs: number = Date.now()): number | null {
   return anchor === null ? null : worldTimeAt(anchor, nowMs);
 }
 
+/** tick 앵커가 관측됐는가 — 데모 폴백 시계가 멈출 시점 판단용 (world-clock-display). */
+export function hasAnchor(): boolean {
+  return anchor !== null;
+}
+
 /**
  * 현재 세계 tick — 앵커 그대로 (엔진이 진실, 보간은 표시용이다).
  * 조회 범위(lib/range)의 "오늘" 경계 계산이 이 좌표를 쓴다. 앵커 전엔 null.

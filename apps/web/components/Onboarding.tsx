@@ -1,19 +1,20 @@
 import { TOPIC_LIST } from "@/lib/data";
 import { useWorldClock } from "@/lib/world-clock";
+import { useDemoWorldTime } from "@/lib/world-clock-display";
 
 import { Face } from "./Face";
+import { Pressable } from "./Pressable";
 import styles from "./lf.module.css";
 
 interface OnboardingProps {
   topics: string[];
   onToggleTopic: (label: string) => void;
-  worldTime: string;
   onEnter: () => void;
 }
 
-export function Onboarding({ topics, onToggleTopic, worldTime, onEnter }: OnboardingProps) {
-  // 사이드바와 같은 원천 — tick 앵커가 없으면(연결 전이 보통) 기존 prop 시계로 폴백
-  const clock = useWorldClock(worldTime);
+export function Onboarding({ topics, onToggleTopic, onEnter }: OnboardingProps) {
+  // tick 앵커가 없으면(연결 전이 보통) 데모 폴백 시계 — 루트가 아닌 공용 스토어에서 온다
+  const clock = useWorldClock(useDemoWorldTime());
   return (
     <div
       style={{
@@ -55,9 +56,10 @@ export function Onboarding({ topics, onToggleTopic, worldTime, onEnter }: Onboar
           {TOPIC_LIST.map((label) => {
             const on = topics.includes(label);
             return (
-              <div
+              <Pressable
                 key={label}
                 onClick={() => onToggleTopic(label)}
+                aria-pressed={on}
                 style={{
                   padding: "10px 18px",
                   border: `1.5px solid ${on ? "#6D8DD6" : "#E2EAF6"}`,
@@ -66,12 +68,11 @@ export function Onboarding({ topics, onToggleTopic, worldTime, onEnter }: Onboar
                   borderRadius: 9999,
                   fontSize: 14,
                   fontWeight: 700,
-                  cursor: "pointer",
                   userSelect: "none",
                 }}
               >
                 {label}
-              </div>
+              </Pressable>
             );
           })}
         </div>
@@ -99,22 +100,22 @@ export function Onboarding({ topics, onToggleTopic, worldTime, onEnter }: Onboar
             지금 세계 시간 {clock} · 세계는 당신 없이도 제 갈 길을 가는 중
           </div>
         </div>
-        <div
+        <Pressable
           onClick={onEnter}
           className={`${styles.enterBtn} ${styles.press97}`}
           style={{
+            width: "100%",
             padding: "15px 0",
             color: "#fff",
             borderRadius: 9999,
             fontSize: 16,
             fontWeight: 800,
             textAlign: "center",
-            cursor: "pointer",
             boxShadow: "0 6px 16px rgba(109,141,214,0.35)",
           }}
         >
           세계로 들어가기
-        </div>
+        </Pressable>
       </div>
     </div>
   );

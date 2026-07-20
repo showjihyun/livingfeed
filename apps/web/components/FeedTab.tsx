@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 
 import type { DerivedStories } from "@/lib/comments";
 import type { LivePost, LiveStatus } from "@/lib/live-feed";
@@ -11,6 +11,7 @@ import type { FeedComment } from "@/lib/types";
 import { Icon } from "./Icon";
 import { ICON } from "@/lib/data";
 import { LivePosts, StoryThread } from "./LivePosts";
+import { Pressable } from "./Pressable";
 import { RangeChips } from "./RangeChips";
 
 interface FeedTabProps {
@@ -89,8 +90,9 @@ function SearchResultCard({
           {author}
         </div>
         {result.correlationId && (
-          <div
+          <Pressable
             onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -98,11 +100,10 @@ function SearchResultCard({
               fontSize: 12,
               fontWeight: 800,
               color: "#8B7BD8",
-              cursor: "pointer",
             }}
           >
             <Icon d={ICON.gitBranch} size={13} /> 이야기 따라가기
-          </div>
+          </Pressable>
         )}
       </div>
       {open && story && <StoryThread story={story} />}
@@ -110,7 +111,11 @@ function SearchResultCard({
   );
 }
 
-export function FeedTab({
+// 가장 무거운 탭 — 무관한 루트 상태 변화(토스트·타 탭 데이터)에 리렌더되지 않게 memo.
+// props는 전부 안정적(useCallback/원시)이라 실제로 memo가 먹는다.
+export const FeedTab = memo(FeedTabInner);
+
+function FeedTabInner({
   livePosts,
   liveStatus,
   range,
@@ -286,11 +291,11 @@ export function FeedTab({
                 당신을 알아차립니다.
               </div>
             </div>
-            <div
+            <Pressable
               onClick={onDismissCoach}
+              aria-label="코치 닫기"
               style={{
                 color: "#8C97AF",
-                cursor: "pointer",
                 fontSize: 16,
                 fontWeight: 800,
                 lineHeight: 1,
@@ -298,7 +303,7 @@ export function FeedTab({
               }}
             >
               ×
-            </div>
+            </Pressable>
           </div>
         )}
 
