@@ -89,3 +89,43 @@ def test_reloader_no_cap_loads_all(tmp_path):
     assert len(PersonaReloader(tmp_path).load()) == 12
     # 상한이 가용보다 크면 전원 로드
     assert len(PersonaReloader(tmp_path, max_actors=100).load()) == 12
+
+
+# ── 초기 Hot 상한 (LF_HOT_START_ACTORS) — tick당 LLM 폭주 방지 ─────────────────
+
+
+def _phases(n, hot_start_cap):
+    from lf_actor.persona import Persona
+    from lf_actor.phases import ActorPhases
+
+    personas = [
+        Persona(id=f"a_x{i:03d}", name=f"인물{i}", archetype="", identity_core="")
+        for i in range(n)
+    ]
+    # ai·memory는 __init__에서 저장만 될 뿐 호출되지 않는다 (대역 주입 가능)
+    return ActorPhases(personas, ai=object(), memory=object(), hot_start_cap=hot_start_cap)
+
+
+def test_hot_start_cap_bounds_initial_hot():
+    from lf_tick.lod import Tier
+
+    phases = _phases(30, hot_start_cap=8)
+    tiers = [phases._lods[f"a_x{i:03d}"].tier for i in range(30)]
+    assert sum(t is Tier.HOT for t in tiers) == 8  # 8명만 Hot
+    assert sum(t is Tier.WARM for t in tiers) == 22  # 나머지는 Warm
+    hot = sorted(a for a, lod in phases._lods.items() if lod.tier is Tier.HOT)
+    assert hot == [f"a_x{i:03d}" for i in range(8)]  # 앞 8명(id순) — 결정적
+
+
+def test_no_cap_starts_all_hot():
+    from lf_tick.lod import Tier
+
+    phases = _phases(30, hot_start_cap=None)  # 하위 호환 — 테스트 기본
+    assert all(lod.tier is Tier.HOT for lod in phases._lods.values())
+
+
+def test_cap_larger_than_world_starts_all_hot():
+    from lf_tick.lod import Tier
+
+    phases = _phases(5, hot_start_cap=8)  # 5 < 8 → 전원 Hot
+    assert all(lod.tier is Tier.HOT for lod in phases._lods.values())

@@ -258,6 +258,9 @@ services:
       LF_MAX_ACTORS: ${LF_MAX_ACTORS:-}
       # 로컬 LLM 모델 파라미터(B) — 알려주면 부팅 로그가 하한 위반을 경고한다 (선택)
       LF_MODEL_PARAMS_B: ${LF_MODEL_PARAMS_B:-}
+      # 초기 Hot 액터 상한 — 전원 Hot 시작은 tick당 LLM 폭주(GPU/비용). 기본 8명만
+      # Hot으로 시작하고 나머지는 Warm(개입·지목 시 즉시 Hot). 0이면 전원 Hot.
+      LF_HOT_START_ACTORS: ${LF_HOT_START_ACTORS:-8}
       LF_AI_TIMEOUT_S: ${LF_AI_TIMEOUT_S:-18}
       # Semantic 기억 (ADR-008) — 미가용이어도 tick은 흐른다 (회상만 비활성)
       LF_QDRANT_URL: http://qdrant:6333

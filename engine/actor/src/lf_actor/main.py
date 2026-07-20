@@ -63,6 +63,10 @@ async def run() -> None:
     max_actors = clamp_actor_count(int(max_actors_env)) if max_actors_env else None
     model_params_b_env = os.environ.get("LF_MODEL_PARAMS_B")
     model_params_b = float(model_params_b_env) if model_params_b_env else None
+    # 초기 Hot 상한 — 전원 Hot 시작은 tick당 LLM 폭주(GPU·비용). 앞의 N명만 Hot으로
+    # 시작하고 나머지는 Warm(개입·지목 시 즉시 Hot 승격). 0/미설정이면 전원 Hot.
+    hot_start_env = os.environ.get("LF_HOT_START_ACTORS", "8")
+    hot_start_cap = int(hot_start_env) if hot_start_env and int(hot_start_env) > 0 else None
 
     # 핫 리로드 감지기 — 스튜디오가 파일(SoT)을 바꾸면 tick 경계에서 세계에 반영된다
     reloader = PersonaReloader(personas_dir, max_actors=max_actors)
@@ -73,6 +77,12 @@ async def run() -> None:
     plan = recommend_capacity(len(personas), model_params_b)
     for line in format_plan(plan).splitlines():
         logger.info(line)
+    hot_now = min(hot_start_cap, len(personas)) if hot_start_cap else len(personas)
+    logger.info(
+        "초기 Hot %d/%d명 (나머지 Warm — 개입·지목 시 즉시 Hot 승격). "
+        "tick당 LLM 상한을 낮춰 GPU/비용을 아낀다 (LF_HOT_START_ACTORS)",
+        hot_now, len(personas),
+    )
     if max_actors is not None and len(personas) < max_actors:
         logger.warning(
             "요청 규모 %d명이나 가용 시드는 %d명입니다 — 더 필요하면 "
@@ -126,6 +136,7 @@ async def run() -> None:
             # OutreachLedger 배선 누락 사고의 교훈: composition root가 반영 지점이다)
             resonance=ResonanceStore(redis),
             shard_select=shard_select,
+            hot_start_cap=hot_start_cap,
         )
         barrier = (
             RedisShardBarrier(

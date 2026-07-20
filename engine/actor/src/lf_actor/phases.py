@@ -185,6 +185,7 @@ class ActorPhases:
         outreach: OutreachLedger | None = None,
         resonance: ResonanceStore | None = None,
         shard_select: Callable[[Persona], bool] | None = None,
+        hot_start_cap: int | None = None,
     ) -> None:
         if not personas:
             raise ValueError("액터가 없다 — 최소 1명의 페르소나가 필요하다")
@@ -214,9 +215,21 @@ class ActorPhases:
         # 정체성 선언 1회 발행 가드 — Redis SETNX(재시작·다중 워커) + in-memory(tick당 재확인 회피)
         self._identity_redis = identity_redis
         self._declared: set[str] = set()
-        # 첫 액터들은 세계의 주인공 — Hot으로 시작 (승격/강등은 관심 신호 소스가 생기면)
+        # 초기 티어 — 전원 Hot 시작은 대규모 세계에서 tick당 LLM 폭주다 (GPU·비용).
+        # hot_start_cap이 서면 앞의 N명(id순)만 Hot으로 시작하고 나머지는 Warm(10 tick
+        # 케이던스, 유휴 시 Cold로 강등)이다. 플레이어 개입·Director 지목은 여전히 즉시
+        # Hot 승격이라 세계는 살아 있다. None이면 전원 Hot (소규모·테스트 하위 호환).
+        hot_ids = (
+            set(sorted(self._personas)[:hot_start_cap])
+            if hot_start_cap is not None
+            else set(self._personas)
+        )
         self._lods: dict[str, ActorLod] = {
-            actor_id: ActorLod(tier=Tier.HOT, last_interest_tick=0) for actor_id in self._personas
+            actor_id: ActorLod(
+                tier=Tier.HOT if actor_id in hot_ids else Tier.WARM,
+                last_interest_tick=0,
+            )
+            for actor_id in self._personas
         }
         #: (actor_id, tier, payload[, causation_id, correlation_id]) — 여운 분출
         #: intent만 5-튜플로 원 대화의 인과·사슬을 실어 온다 (resolve가 관대하게 푼다)

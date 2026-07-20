@@ -38,7 +38,14 @@ docker compose down -v                       # 데이터까지 완전 삭제
 ```bash
 LF_MAX_ACTORS=30            # 액터 30명만 (범위 밖은 10/1000으로 클램프)
 LF_MODEL_PARAMS_B=8         # (선택) 내 로컬 모델 크기(B) — 하한 위반을 부팅 로그가 경고
+LF_HOT_START_ACTORS=8       # 초기 Hot 상한 (기본 8) — tick당 LLM 폭주 방지, 0=전원 Hot
 ```
+
+**GPU/비용 절감의 핵심 — `LF_HOT_START_ACTORS`**: 전원을 Hot으로 시작하면 매 tick
+액터 수만큼 LLM을 호출한다(100명 = 100 호출/tick). 기본값 8은 앞 8명만 Hot으로
+시작하고 나머지는 Warm(10 tick 케이던스, 유휴 시 Cold로 강등)이라 tick당 LLM 호출을
+크게 줄인다. 플레이어 개입·Director 지목을 받은 액터는 여전히 즉시 Hot으로 승격되어
+세계는 살아 있다. 로컬 LLM은 이 값을 낮게(예: 4~8) 두는 것을 권장한다.
 
 **LLM 모델 가이드** (운영 경험 기반):
 
