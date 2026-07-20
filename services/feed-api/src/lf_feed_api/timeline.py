@@ -13,10 +13,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from lf_projector.timeline import TimelineStore
+from lf_projector.timeline import TimelineStore, ulid_ms
 
 #: /feed의 types 중 타임라인이 서빙하는 등급 — OS 등급과 섞어 질의할 수 없다
 TIMELINE_KINDS = frozenset({"personal", "private"})
+
+#: 타임라인 원시 조회 상한 — ZSET은 쓰기 시 TIMELINE_CAP(500)로 잘리지만, 읽기에도
+#: 명시 상한을 둬 캡 변경·이상 상태에서도 조회가 무제한 fetch가 되지 않게 한다 (방어).
+#: kind/from_tick 필터가 조회 후라 페이지 크기보다 넉넉히 당겨야 하므로 캡과 같이 둔다.
+TIMELINE_MAX_SCAN = 500
 
 
 def entry_kind(doc: dict[str, Any]) -> str:
@@ -33,7 +38,16 @@ async def read_timeline(
     엔트리의 tick(모든 프로젝터 doc이 싣는다)으로 거른다. tick이 없는 엔트리는
     창에 놓을 수 없으니 범위 조회에서 제외한다 (정직한 침묵).
     """
-    raw = await redis.zrevrange(TimelineStore.timeline_key(world_id, player_id), 0, -1)
+    key = TimelineStore.timeline_key(world_id, player_id)
+    if cursor is not None:
+        # 커서(ULID)의 ms를 score 상한으로 — 이미 본 최신분을 서버에서 건너뛴다(키셋).
+        # 상한은 포함(같은 ms 엔트리 보존)이고, 동점 ms 안의 순서는 아래 event_id
+        # 비교가 마무리한다 — 필터·정렬 계약은 그대로다.
+        raw = await redis.zrevrangebyscore(
+            key, ulid_ms(cursor), "-inf", start=0, num=TIMELINE_MAX_SCAN
+        )
+    else:
+        raw = await redis.zrevrange(key, 0, TIMELINE_MAX_SCAN - 1)
     docs = sorted(
         (json.loads(entry) for entry in raw),
         key=lambda doc: doc["event_id"],

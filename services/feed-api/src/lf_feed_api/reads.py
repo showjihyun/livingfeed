@@ -46,10 +46,18 @@ FROM read.actor_arcs
 WHERE world_id = %s AND actor_id = %s
 """
 
+#: 인생 연대기 조회 상한 — append-only라 세계 수명 내내 자란다. 가장 최근 N개
+#: 장(章)만 당긴 뒤 오래된 순으로 되돌려 보여준다 (무제한 조회 방어, 화면엔 충분).
+_ARC_HISTORY_MAX = 200
+
 _ARC_HISTORY_SQL = """
-SELECT stage, intention, planned_at
-FROM read.actor_arc_history
-WHERE world_id = %s AND actor_id = %s
+SELECT stage, intention, planned_at FROM (
+    SELECT stage, intention, planned_at, event_id
+    FROM read.actor_arc_history
+    WHERE world_id = %s AND actor_id = %s
+    ORDER BY event_id DESC
+    LIMIT %s
+) recent
 ORDER BY event_id
 """
 
@@ -140,7 +148,7 @@ class ProfileReads:
                 _ARC_SQL, (world_id, actor_id)
             )).fetchone()
             arc_history = await (await conn.execute(
-                _ARC_HISTORY_SQL, (world_id, actor_id)
+                _ARC_HISTORY_SQL, (world_id, actor_id, _ARC_HISTORY_MAX)
             )).fetchall()
         identity = (
             dict(zip(_IDENTITY_COLS, identity_row, strict=True))

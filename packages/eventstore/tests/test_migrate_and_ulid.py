@@ -37,6 +37,30 @@ async def test_correlation_chain_index_exists(conn):
     assert "world_id, correlation_id" in row[0]
 
 
+async def test_redundant_correlation_index_dropped(conn):
+    """단독 events_by_correlation은 0003이 걷어낸다 — 복합 인덱스가 질의를 덮는다."""
+    cur = await conn.execute(
+        """
+        SELECT 1 FROM pg_indexes
+        WHERE schemaname = 'es' AND indexname = 'events_by_correlation'
+        """
+    )
+    assert await cur.fetchone() is None
+
+
+async def test_outbox_purge_index_exists(conn):
+    """발행 완료분 부분 인덱스 — purge_published의 기한 지난 행 정리를 받친다."""
+    cur = await conn.execute(
+        """
+        SELECT indexdef FROM pg_indexes
+        WHERE schemaname = 'es' AND indexname = 'outbox_published_at'
+        """
+    )
+    row = await cur.fetchone()
+    assert row is not None
+    assert "published_at IS NOT NULL" in row[0]
+
+
 def test_ulid_format():
     for _ in range(200):
         assert ULID_RE.match(new_ulid())

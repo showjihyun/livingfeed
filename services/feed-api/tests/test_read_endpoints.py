@@ -75,10 +75,21 @@ class FakeTimelineRedis:
     async def setex(self, key, ttl, value):
         pass
 
-    async def zrevrange(self, key, start, end):
-        docs = sorted(
+    def _sorted(self, key):
+        return sorted(
             self.timelines.get(key, []), key=lambda d: ulid_ms(d["event_id"]), reverse=True
         )
+
+    async def zrevrange(self, key, start, end):
+        docs = self._sorted(key)
+        sliced = docs[start:] if end == -1 else docs[start : end + 1]
+        return [json.dumps(d).encode() for d in sliced]
+
+    async def zrevrangebyscore(self, key, max, min, start=0, num=None):
+        lo = float("-inf") if min == "-inf" else float(min)
+        hi = float("inf") if max == "+inf" else float(max)
+        docs = [d for d in self._sorted(key) if lo <= ulid_ms(d["event_id"]) <= hi]
+        docs = docs[start:] if num is None else docs[start : start + num]
         return [json.dumps(d).encode() for d in docs]
 
 

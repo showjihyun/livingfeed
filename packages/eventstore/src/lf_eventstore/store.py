@@ -206,8 +206,14 @@ async def read_stream(
     stream_key: str,
     *,
     from_seq: int = 1,
+    limit: int | None = None,
 ) -> list[StoredEvent]:
-    """스트림 이벤트를 stream_seq 순으로 읽는다 — 재수화(rehydration) 경로 (ADR-002)."""
+    """스트림 이벤트를 stream_seq 순으로 읽는다 — 재수화(rehydration) 경로 (ADR-002).
+
+    재수화는 스트림 전체가 필요하므로 limit 기본은 None(전체)이다. from_seq(키셋)와
+    함께 쓰면 긴 스트림을 배치로 되감을 수 있다 — '마지막 N개 미리보기'처럼 창만
+    필요한 호출자는 limit로 조회를 명시적으로 잡는다 (무제한 조회 방어).
+    """
     cur = await conn.execute(
         """
         SELECT global_seq, stream_seq, event_id, type, schema_version, actor_id, tick,
@@ -215,8 +221,9 @@ async def read_stream(
         FROM es.events
         WHERE world_id = %s AND stream = %s AND stream_key = %s AND stream_seq >= %s
         ORDER BY stream_seq
+        LIMIT %s
         """,
-        (world_id, stream, stream_key, from_seq),
+        (world_id, stream, stream_key, from_seq, limit),
     )
     result: list[StoredEvent] = []
     async for row in cur:
