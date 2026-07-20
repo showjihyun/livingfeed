@@ -261,6 +261,11 @@ services:
       # 초기 Hot 액터 상한 — 전원 Hot 시작은 tick당 LLM 폭주(GPU/비용). 기본 8명만
       # Hot으로 시작하고 나머지는 Warm(개입·지목 시 즉시 Hot). 0이면 전원 Hot.
       LF_HOT_START_ACTORS: ${LF_HOT_START_ACTORS:-8}
+      # 세계 활기 모드 — idle(기본): 유휴 액터는 Cold로 강등, 개입할 때만 LLM(GPU 최소).
+      # lively: 앞 N명을 상시 Hot으로 고정해 ambient 활동 지속(GPU↑). LF_HOT_FLOOR로
+      # 상시 Hot 수를 직접 지정 가능(모드보다 우선).
+      LF_WORLD_MODE: ${LF_WORLD_MODE:-idle}
+      LF_HOT_FLOOR: ${LF_HOT_FLOOR:-}
       LF_AI_TIMEOUT_S: ${LF_AI_TIMEOUT_S:-18}
       # Semantic 기억 (ADR-008) — 미가용이어도 tick은 흐른다 (회상만 비활성)
       LF_QDRANT_URL: http://qdrant:6333

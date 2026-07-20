@@ -39,7 +39,17 @@ docker compose down -v                       # 데이터까지 완전 삭제
 LF_MAX_ACTORS=30            # 액터 30명만 (범위 밖은 10/1000으로 클램프)
 LF_MODEL_PARAMS_B=8         # (선택) 내 로컬 모델 크기(B) — 하한 위반을 부팅 로그가 경고
 LF_HOT_START_ACTORS=8       # 초기 Hot 상한 (기본 8) — tick당 LLM 폭주 방지, 0=전원 Hot
+LF_WORLD_MODE=idle          # idle(기본)=유휴 저전력 / lively=상시 활기 (아래)
 ```
+
+**활기 ↔ 유휴 저전력 (`LF_WORLD_MODE`)** — 세계가 유휴일 때 GPU를 얼마나 쓸지 정한다:
+- `idle` (기본, **권장**): 유휴 액터는 Cold로 강등되어 LLM을 쓰지 않는다. **개입(좋아요·
+  댓글·DM)할 때만** 대상 액터가 Hot으로 깨어나 LLM으로 반응한다 → 유휴 GPU 거의 0.
+- `lively`: 앞의 N명(기본 `LF_HOT_START_ACTORS` 수)을 **상시 Hot으로 고정**해, 개입이 없어도
+  계속 글·상호작용을 만든다 → 첫 화면부터 활발하지만 유휴에도 GPU를 계속 쓴다.
+- `LF_HOT_FLOOR=6` 으로 상시 Hot 수를 직접 지정할 수도 있다(모드보다 우선).
+
+로컬 LLM은 `idle` 권장. 데모로 활발한 첫 화면을 원하면 `lively`(+ 넉넉한 vRAM).
 
 **GPU/비용 절감의 핵심 — `LF_HOT_START_ACTORS`**: 전원을 Hot으로 시작하면 매 tick
 액터 수만큼 LLM을 호출한다(100명 = 100 호출/tick). 기본값 8은 앞 8명만 Hot으로

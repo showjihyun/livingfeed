@@ -94,7 +94,7 @@ def test_reloader_no_cap_loads_all(tmp_path):
 # ── 초기 Hot 상한 (LF_HOT_START_ACTORS) — tick당 LLM 폭주 방지 ─────────────────
 
 
-def _phases(n, hot_start_cap):
+def _phases(n, hot_start_cap, hot_floor=0):
     from lf_actor.persona import Persona
     from lf_actor.phases import ActorPhases
 
@@ -103,7 +103,10 @@ def _phases(n, hot_start_cap):
         for i in range(n)
     ]
     # ai·memory는 __init__에서 저장만 될 뿐 호출되지 않는다 (대역 주입 가능)
-    return ActorPhases(personas, ai=object(), memory=object(), hot_start_cap=hot_start_cap)
+    return ActorPhases(
+        personas, ai=object(), memory=object(),
+        hot_start_cap=hot_start_cap, hot_floor=hot_floor,
+    )
 
 
 def test_hot_start_cap_bounds_initial_hot():
@@ -129,3 +132,22 @@ def test_cap_larger_than_world_starts_all_hot():
 
     phases = _phases(5, hot_start_cap=8)  # 5 < 8 → 전원 Hot
     assert all(lod.tier is Tier.HOT for lod in phases._lods.values())
+
+
+# ── 활기/유휴 모드 (LF_HOT_FLOOR) — 상시 Hot 바닥 ─────────────────────────────
+
+
+def test_idle_mode_has_no_hot_floor():
+    phases = _phases(30, hot_start_cap=6, hot_floor=0)  # 기본 유휴
+    assert phases._hot_floor_ids == set()  # 아무도 상시 고정 안 됨
+
+
+def test_lively_floor_pins_actors_hot_beyond_start_cap():
+    """floor가 start_cap보다 커도 바닥 액터는 Hot으로 시작한다 (합집합)."""
+    from lf_tick.lod import Tier
+
+    phases = _phases(30, hot_start_cap=2, hot_floor=5)
+    floor = {f"a_x{i:03d}" for i in range(5)}
+    assert phases._hot_floor_ids == floor
+    # 바닥 5명은 start_cap(2)을 넘어도 전부 Hot으로 시작
+    assert all(phases._lods[a].tier is Tier.HOT for a in floor)

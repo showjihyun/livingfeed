@@ -68,6 +68,19 @@ async def run() -> None:
     hot_start_env = os.environ.get("LF_HOT_START_ACTORS", "8")
     hot_start_cap = int(hot_start_env) if hot_start_env and int(hot_start_env) > 0 else None
 
+    # 세계 활기 모드 — 유휴 저전력(idle, 기본) vs 활기(lively).
+    #   idle:   유휴 액터는 Cold로 강등, 개입할 때만 LLM이 돈다 (GPU 최소).
+    #   lively: 앞의 N명을 상시 Hot으로 고정해 계속 ambient 활동을 만든다 (GPU↑).
+    # LF_HOT_FLOOR로 상시 Hot 수를 직접 지정할 수도 있다 (모드보다 우선).
+    world_mode = os.environ.get("LF_WORLD_MODE", "idle").lower()
+    hot_floor_env = os.environ.get("LF_HOT_FLOOR")
+    if hot_floor_env is not None:
+        hot_floor = max(0, int(hot_floor_env))
+    elif world_mode == "lively":
+        hot_floor = hot_start_cap or 6
+    else:
+        hot_floor = 0
+
     # 핫 리로드 감지기 — 스튜디오가 파일(SoT)을 바꾸면 tick 경계에서 세계에 반영된다
     reloader = PersonaReloader(personas_dir, max_actors=max_actors)
     personas = reloader.load()
@@ -83,6 +96,13 @@ async def run() -> None:
         "tick당 LLM 상한을 낮춰 GPU/비용을 아낀다 (LF_HOT_START_ACTORS)",
         hot_now, len(personas),
     )
+    if hot_floor > 0:
+        logger.info(
+            "활기 모드 — 상시 Hot 바닥 %d명 (유휴여도 강등 안 함, ambient 활동 지속, GPU↑)",
+            min(hot_floor, len(personas)),
+        )
+    else:
+        logger.info("유휴 저전력 모드 — 유휴 액터는 Cold로 강등, 개입할 때만 LLM 작동 (GPU 최소)")
     if max_actors is not None and len(personas) < max_actors:
         logger.warning(
             "요청 규모 %d명이나 가용 시드는 %d명입니다 — 더 필요하면 "
@@ -137,6 +157,7 @@ async def run() -> None:
             resonance=ResonanceStore(redis),
             shard_select=shard_select,
             hot_start_cap=hot_start_cap,
+            hot_floor=hot_floor,
         )
         barrier = (
             RedisShardBarrier(

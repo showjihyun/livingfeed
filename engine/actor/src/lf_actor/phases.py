@@ -186,6 +186,7 @@ class ActorPhases:
         resonance: ResonanceStore | None = None,
         shard_select: Callable[[Persona], bool] | None = None,
         hot_start_cap: int | None = None,
+        hot_floor: int = 0,
     ) -> None:
         if not personas:
             raise ValueError("액터가 없다 — 최소 1명의 페르소나가 필요하다")
@@ -215,15 +216,23 @@ class ActorPhases:
         # 정체성 선언 1회 발행 가드 — Redis SETNX(재시작·다중 워커) + in-memory(tick당 재확인 회피)
         self._identity_redis = identity_redis
         self._declared: set[str] = set()
+        # 상시 Hot 바닥 (활기 모드) — 앞의 N명(id순)은 유휴여도 강등되지 않아 계속
+        # ambient 활동을 만든다 (perceive의 강등 분기에서 면제). 0이면 유휴 저전력:
+        # 모든 액터가 유휴 시 Cold로 강등되어 개입할 때만 깨어난다 (GPU 최소, 기본).
+        self._hot_floor_ids = (
+            set(sorted(self._personas)[: max(0, hot_floor)]) if hot_floor else set()
+        )
         # 초기 티어 — 전원 Hot 시작은 대규모 세계에서 tick당 LLM 폭주다 (GPU·비용).
         # hot_start_cap이 서면 앞의 N명(id순)만 Hot으로 시작하고 나머지는 Warm(10 tick
         # 케이던스, 유휴 시 Cold로 강등)이다. 플레이어 개입·Director 지목은 여전히 즉시
         # Hot 승격이라 세계는 살아 있다. None이면 전원 Hot (소규모·테스트 하위 호환).
-        hot_ids = (
+        # 바닥(floor) 액터는 항상 Hot으로 시작한다 (start_cap보다 커도 보장).
+        start_ids = (
             set(sorted(self._personas)[:hot_start_cap])
             if hot_start_cap is not None
             else set(self._personas)
         )
+        hot_ids = start_ids | self._hot_floor_ids
         self._lods: dict[str, ActorLod] = {
             actor_id: ActorLod(
                 tier=Tier.HOT if actor_id in hot_ids else Tier.WARM,
@@ -399,6 +408,10 @@ class ActorPhases:
                     self._lods[actor_id], attention, ctx.tick,
                     high_intensity=self._promote_intensity,
                 )
+            elif actor_id in self._hot_floor_ids:
+                # 활기 모드의 상시 Hot 바닥 — 유휴여도 강등하지 않고 Hot을 유지한다
+                # (ambient 활동 지속, GPU↑). 유휴 저전력 모드(floor=0)에선 이 분기가 없다.
+                self._lods[actor_id] = promote(self._lods[actor_id], ctx.tick)
             else:
                 self._lods[actor_id] = maybe_demote(self._lods[actor_id], ctx.tick)
             if promoted or items:
