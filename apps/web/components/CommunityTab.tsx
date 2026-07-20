@@ -3,10 +3,11 @@ import { memo, useEffect, useState } from "react";
 import type { Community, CommunityPost } from "@/lib/community";
 import { ICON } from "@/lib/data";
 import { relativeTime } from "@/lib/live-feed";
+import { COLOR } from "@/lib/tokens";
 
 import { Icon } from "./Icon";
 
-const AVATAR_COLORS = ["#CBBDE8", "#AFC8F5", "#F2B8CF", "#BFE3CF", "#E8D5A8"];
+const AVATAR_COLORS = ["#CBBDE8", COLOR.accent, "#F2B8CF", "#BFE3CF", "#E8D5A8"];
 
 function avatarColor(seed: string): string {
   let hash = 0;
@@ -71,7 +72,7 @@ function CommunityTabInner({
           </div>
         </div>
         {selected && (
-          <div style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600 }}>
+          <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: 600 }}>
             {selected.name} · {posts.length}개
           </div>
         )}
@@ -85,7 +86,7 @@ function CommunityTabInner({
           display: "flex",
           flexDirection: "column",
           gap: 16,
-          background: "#FBFAFE",
+          background: COLOR.surfaceAlt,
         }}
       >
         {/* 커뮤니티 선택 칩 */}
@@ -100,8 +101,8 @@ function CommunityTabInner({
                   padding: "8px 16px",
                   borderRadius: 9999,
                   border: active ? "1.5px solid #4a72b8" : "1.5px solid #E0E7F2",
-                  background: active ? "#4a72b8" : "#fff",
-                  color: active ? "#fff" : "#5A6478",
+                  background: active ? "#4a72b8" : COLOR.white,
+                  color: active ? COLOR.white : "#5A6478",
                   fontSize: 13,
                   fontWeight: 700,
                   cursor: "pointer",
@@ -114,7 +115,7 @@ function CommunityTabInner({
         </div>
 
         {selected && (
-          <div style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600, lineHeight: 1.6 }}>
+          <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: 600, lineHeight: 1.6 }}>
             {selected.description}
           </div>
         )}
@@ -139,7 +140,7 @@ function CommunityTabInner({
                 key={post.id}
                 style={{
                   border: "1.5px solid #E2E9F3",
-                  background: "#fff",
+                  background: COLOR.white,
                   borderRadius: 20,
                   padding: "20px 24px",
                   display: "flex",
@@ -160,7 +161,7 @@ function CommunityTabInner({
                       justifyContent: "center",
                       fontSize: 17,
                       fontWeight: 800,
-                      color: "#3A4256",
+                      color: COLOR.ink,
                       flexShrink: 0,
                     }}
                   >
@@ -168,7 +169,7 @@ function CommunityTabInner({
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                     <div style={{ fontSize: 15, fontWeight: 800 }}>{name}</div>
-                    <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}>
+                    <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: 600 }}>
                       {relativeTime(post.occurredAt)}
                     </div>
                   </div>
@@ -176,7 +177,7 @@ function CommunityTabInner({
                 {post.title && (
                   <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.5 }}>{post.title}</div>
                 )}
-                <div style={{ fontSize: 14, lineHeight: 1.65, fontWeight: 500, color: "#3A4256" }}>
+                <div style={{ fontSize: 14, lineHeight: 1.65, fontWeight: 500, color: COLOR.ink }}>
                   {post.body}
                 </div>
               </div>
@@ -196,11 +197,11 @@ function EmptyCard({ children }: { children: React.ReactNode }) {
         borderRadius: 20,
         padding: "40px 24px",
         textAlign: "center",
-        color: "#8C97AF",
+        color: COLOR.faint,
         fontSize: 14,
         fontWeight: 600,
         lineHeight: 1.7,
-        background: "#fff",
+        background: COLOR.white,
       }}
     >
       {children}

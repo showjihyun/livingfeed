@@ -1,5 +1,6 @@
 import { TOAST_ICON_D } from "@/lib/data";
 import type { Toast } from "@/lib/types";
+import { COLOR } from "@/lib/tokens";
 
 import { Icon } from "./Icon";
 import { Pressable } from "./Pressable";
@@ -27,7 +28,7 @@ export function Toasts({ toasts, onClose }: ToastsProps) {
         <div
           key={t.id}
           style={{
-            background: "#fff",
+            background: COLOR.white,
             border: "1.5px solid #E2EAF6",
             borderRadius: 18,
             padding: "14px 18px",
@@ -54,7 +55,7 @@ export function Toasts({ toasts, onClose }: ToastsProps) {
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
             <div style={{ fontSize: 13, fontWeight: 800 }}>{t.title}</div>
-            <div style={{ fontSize: 12, color: "#6B7691", lineHeight: 1.5, fontWeight: 600 }}>
+            <div style={{ fontSize: 12, color: COLOR.muted, lineHeight: 1.5, fontWeight: 600 }}>
               {t.body}
             </div>
           </div>
@@ -62,7 +63,7 @@ export function Toasts({ toasts, onClose }: ToastsProps) {
             onClick={() => onClose(t.id)}
             aria-label="알림 닫기"
             style={{
-              color: "#A9B2C7",
+              color: COLOR.fainter,
               fontSize: 14,
               fontWeight: 800,
               lineHeight: 1,

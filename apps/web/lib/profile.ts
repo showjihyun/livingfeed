@@ -8,11 +8,13 @@
  * 화면은 데모 서사를 유지한다 (라이브 피드·관계도와 같은 폴백 규약).
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo } from "react";
+import useSWRInfinite from "swr/infinite";
 
 import type { ActorIdentity } from "./actors";
 import { PLAYER_ID } from "./config";
 import { rangeTickBounds, type Range } from "./range";
+import { jsonFetcher } from "./swr";
 import { currentTick } from "./world-clock";
 
 const FEED_API_URL = process.env.NEXT_PUBLIC_LF_FEED_API_URL ?? "http://localhost:8001";
@@ -178,69 +180,46 @@ export function useActorProfile(
   loadingEpisodes: boolean;
   loadMoreEpisodes: () => void;
 } {
-  const [profile, setProfile] = useState<ActorProfile | null>(null);
-  const [episodeCursor, setEpisodeCursor] = useState<string | null>(null);
-  // 이번 조회의 tick 하한 — 첫 페이지에서 굳혀 더보기 페이지에도 같은 창을 쓴다
-  const [episodeFromTick, setEpisodeFromTick] = useState<number | null>(null);
-  const [loadingEpisodes, setLoadingEpisodes] = useState(false);
+  // 조회 범위의 tick 하한 — 첫 페이지에서 굳혀 더보기 페이지에도 같은 창을 쓴다.
+  // enabled=false면 getKey가 null을 반환해 조회하지 않는다 (SWR 조건부 key).
+  const fromTick = enabled ? (rangeTickBounds(range, currentTick())?.fromTick ?? null) : null;
+  const fromParam = fromTick === null ? "" : `&episode_from_tick=${fromTick}`;
+  const base = `${FEED_API_URL}/actors/${actorId}/profile?episode_limit=${EPISODE_PAGE_SIZE}`;
 
+  // useSWRInfinite: 페이지마다 전체 프로필 응답(정체성·신념+에피소드 한 쪽)을 받고,
+  // 에피소드만 누적한다. 이전 페이지가 덜 찼거나 커서가 없으면 다음 key=null(끝).
+  const getKey = (pageIndex: number, prev: ProfileResponse | null): string | null => {
+    if (!enabled) return null;
+    if (pageIndex === 0) return `${base}${fromParam}`;
+    const cursor = prev ? episodesNextCursor(prev.episodes) : null;
+    return cursor ? `${base}&episode_cursor=${cursor}${fromParam}` : null;
+  };
+
+  const { data, size, setSize, isValidating } = useSWRInfinite<ProfileResponse>(
+    getKey,
+    jsonFetcher,
+    { revalidateFirstPage: false }, // 더보기 시 0페이지 재요청 안 함
+  );
+
+  // 대상 액터·범위가 바뀌면 첫 페이지부터 — 누적 페이지 수 리셋
   useEffect(() => {
-    if (!enabled) return;
-    let cancelled = false;
-    // 대상 액터·범위가 바뀌면 이전 커서는 무효 — 첫 페이지부터 다시
-    setEpisodeCursor(null);
-    // 겪은 일(에피소드)의 조회 범위 — 세계 tick 하한 (lib/range, ADR-011 좌표계)
-    const bounds = rangeTickBounds(range, currentTick());
-    const fromTick = bounds?.fromTick ?? null;
-    setEpisodeFromTick(fromTick);
-    const fromParam = fromTick === null ? "" : `&episode_from_tick=${fromTick}`;
-    void (async () => {
-      try {
-        const response = await fetch(
-          `${FEED_API_URL}/actors/${actorId}/profile?episode_limit=${EPISODE_PAGE_SIZE}${fromParam}`,
-        );
-        if (!response.ok) throw new Error(`feed-api ${response.status}`);
-        const body = (await response.json()) as ProfileResponse;
-        if (cancelled) return;
-        setProfile(fromResponse(body));
-        setEpisodeCursor(episodesNextCursor(body.episodes));
-      } catch {
-        // 미가용 — 데모 서사 유지 (조용한 강등, 라이브 피드와 같은 규약)
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [actorId, enabled, range]);
+    void setSize(1);
+  }, [actorId, range, setSize]);
 
-  // 과거 기억 이어받기 — 같은 프로필 응답에서 에피소드 페이지만 취해 아래에 붙인다
-  const loadMoreEpisodes = useCallback(() => {
-    if (!episodeCursor || loadingEpisodes) return;
-    setLoadingEpisodes(true);
-    const fromParam = episodeFromTick === null ? "" : `&episode_from_tick=${episodeFromTick}`;
-    void (async () => {
-      try {
-        const response = await fetch(
-          `${FEED_API_URL}/actors/${actorId}/profile?episode_limit=${EPISODE_PAGE_SIZE}&episode_cursor=${episodeCursor}${fromParam}`,
-        );
-        if (!response.ok) throw new Error(`feed-api ${response.status}`);
-        const body = (await response.json()) as ProfileResponse;
-        const older = body.episodes.items.map(toEpisode);
-        setProfile((prev) => {
-          if (!prev) return prev;
-          // 중복(event id) 제거 — 커서 경계에서 같은 행이 두 번 오면 한 번만 남긴다
-          const seen = new Set(prev.episodes.map((e) => e.id));
-          return { ...prev, episodes: [...prev.episodes, ...older.filter((e) => !seen.has(e.id))] };
-        });
-        // 빈 페이지가 곧 끝 — 커서를 닫아 버튼을 숨긴다
-        setEpisodeCursor(older.length ? episodesNextCursor(body.episodes) : null);
-      } catch {
-        // 미가용 — 이미 보이는 기억은 유지, 커서도 남긴다 (재시도 가능)
-      } finally {
-        setLoadingEpisodes(false);
+  const profile = useMemo<ActorProfile | null>(() => {
+    if (!data || data.length === 0) return null;
+    const first = fromResponse(data[0]); // 정체성·신념·아크는 첫 페이지가 원천
+    const seen = new Set<string>();
+    const episodes: ActorEpisode[] = [];
+    for (const page of data) {
+      for (const episode of page.episodes.items.map(toEpisode)) {
+        if (seen.has(episode.id)) continue; // 커서 경계 중복 제거
+        seen.add(episode.id);
+        episodes.push(episode);
       }
-    })();
-  }, [actorId, episodeCursor, episodeFromTick, loadingEpisodes]);
+    }
+    return { ...first, episodes };
+  }, [data]);
 
   // 실측이 "있다"고 말하려면 내용이 있어야 한다 — 정체성·신념·기억·아크 중 하나라도
   const available =
@@ -249,10 +228,21 @@ export function useActorProfile(
       profile.episodes.length > 0 ||
       profile.beliefs.length > 0 ||
       profile.arc !== null);
+
+  // 마지막 받은 페이지에 다음 커서가 남았으면 더 있다 (빈/덜찬 페이지면 닫힌다)
+  const lastPage = data && data.length > 0 ? data[data.length - 1] : null;
+  const hasMoreEpisodes =
+    available && lastPage !== null && episodesNextCursor(lastPage.episodes) !== null;
+  const loadMoreEpisodes = useCallback(() => {
+    void setSize((s) => s + 1);
+  }, [setSize]);
+  // 첫 페이지 로딩은 profile=null로 이미 표현된다 — 여기선 '더 보기' 진행만 표시
+  const loadingEpisodes = isValidating && size > 1;
+
   return {
     profile: available ? profile : null,
     available,
-    hasMoreEpisodes: available && episodeCursor !== null,
+    hasMoreEpisodes,
     loadingEpisodes,
     loadMoreEpisodes,
   };

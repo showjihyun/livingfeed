@@ -4,11 +4,12 @@ import { ICON } from "@/lib/data";
 import type { HiddenItem } from "@/lib/hidden";
 import { relativeTime } from "@/lib/live-feed";
 import type { Range } from "@/lib/range";
+import { COLOR } from "@/lib/tokens";
 
 import { Icon } from "./Icon";
 import { RangeChips } from "./RangeChips";
 
-const AVATAR_COLORS = ["#CBBDE8", "#AFC8F5", "#F2B8CF", "#BFE3CF", "#E8D5A8"];
+const AVATAR_COLORS = ["#CBBDE8", COLOR.accent, "#F2B8CF", "#BFE3CF", "#E8D5A8"];
 
 function avatarColor(seed: string): string {
   let hash = 0;
@@ -48,7 +49,7 @@ function HiddenTabInner({ items, nameOf, range, onRangeChange }: HiddenTabProps)
               gap: 6,
               padding: "4px 12px",
               background: "#F1EDFB",
-              color: "#7a68b3",
+              color: COLOR.violet,
               borderRadius: 9999,
               fontSize: 12,
               fontWeight: 800,
@@ -57,7 +58,7 @@ function HiddenTabInner({ items, nameOf, range, onRangeChange }: HiddenTabProps)
             <Icon d={ICON.eye} size={12} /> 당신에게만 보여요
           </div>
         </div>
-        <div style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600 }}>
+        <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: 600 }}>
           당신에게만 닿은 이야기 · {items.length}개
         </div>
       </div>
@@ -70,13 +71,13 @@ function HiddenTabInner({ items, nameOf, range, onRangeChange }: HiddenTabProps)
           display: "flex",
           flexDirection: "column",
           gap: 16,
-          background: "#FBFAFE",
+          background: COLOR.surfaceAlt,
         }}
       >
         {/* 조회 범위 — 세계 시간의 창 (목록 상단, 모든 탭 공통 자리) */}
         <RangeChips value={range} onChange={onRangeChange} />
 
-        <div style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600, lineHeight: 1.6 }}>
+        <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: 600, lineHeight: 1.6 }}>
           세계에는 항상 보이는 것보다 많은 일이 일어나요. 액터가 당신에게만 비공개로 건넨
           이야기입니다 — 여기서 알게 된 것을 어떻게 쓸지는 당신의 선택이에요.
         </div>
@@ -88,11 +89,11 @@ function HiddenTabInner({ items, nameOf, range, onRangeChange }: HiddenTabProps)
               borderRadius: 20,
               padding: "40px 24px",
               textAlign: "center",
-              color: "#8C97AF",
+              color: COLOR.faint,
               fontSize: 14,
               fontWeight: 600,
               lineHeight: 1.7,
-              background: "#fff",
+              background: COLOR.white,
             }}
           >
             {range !== "all" ? (
@@ -113,7 +114,7 @@ function HiddenTabInner({ items, nameOf, range, onRangeChange }: HiddenTabProps)
                 key={item.id}
                 style={{
                   border: "1.5px solid #E0D8F5",
-                  background: "#fff",
+                  background: COLOR.white,
                   borderRadius: 20,
                   padding: "20px 24px",
                   display: "flex",
@@ -135,7 +136,7 @@ function HiddenTabInner({ items, nameOf, range, onRangeChange }: HiddenTabProps)
                         justifyContent: "center",
                         fontSize: 17,
                         fontWeight: 800,
-                        color: "#3A4256",
+                        color: COLOR.ink,
                         flexShrink: 0,
                       }}
                     >
@@ -148,7 +149,7 @@ function HiddenTabInner({ items, nameOf, range, onRangeChange }: HiddenTabProps)
                           style={{
                             padding: "2px 10px",
                             background: "#F1EDFB",
-                            color: "#7a68b3",
+                            color: COLOR.violet,
                             borderRadius: 9999,
                             fontSize: 11,
                             fontWeight: 800,
@@ -157,12 +158,12 @@ function HiddenTabInner({ items, nameOf, range, onRangeChange }: HiddenTabProps)
                           비공개 · 당신만
                         </div>
                       </div>
-                      <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}>
+                      <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: 600 }}>
                         {relativeTime(item.occurredAt)}
                       </div>
                     </div>
                   </div>
-                  <Icon d={ICON.lockOpen} size={18} color="#7a68b3" />
+                  <Icon d={ICON.lockOpen} size={18} color={COLOR.violet} />
                 </div>
                 <div style={{ fontSize: 15, lineHeight: 1.65, fontWeight: 500 }}>{item.body}</div>
               </div>

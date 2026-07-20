@@ -12,6 +12,7 @@ import type { Range } from "@/lib/range";
 import type { DmMessage } from "@/lib/types";
 import { useWorldClock } from "@/lib/world-clock";
 import { useDemoWorldTime } from "@/lib/world-clock-display";
+import { COLOR } from "@/lib/tokens";
 
 import { Face } from "./Face";
 import { Icon } from "./Icon";
@@ -19,7 +20,7 @@ import { Pressable } from "./Pressable";
 import { RangeChips } from "./RangeChips";
 import styles from "./lf.module.css";
 
-const AVATAR_COLORS = ["#AFC8F5", "#F2B8CF", "#BFE3CF", "#E8D5A8", "#CBBDE8", "#A8D8E8"];
+const AVATAR_COLORS = [COLOR.accent, "#F2B8CF", "#BFE3CF", "#E8D5A8", "#CBBDE8", "#A8D8E8"];
 
 function avatarColor(seed: string): string {
   let hash = 0;
@@ -106,14 +107,14 @@ function PushBell() {
         alignItems: "center",
         justifyContent: "center",
         cursor: denied ? "default" : "pointer",
-        background: on ? "#EDF3FD" : "#F2F6FC",
+        background: on ? COLOR.primarySoft : COLOR.surface,
         opacity: denied ? 0.45 : busy ? 0.6 : 1,
       }}
     >
       <Icon
         d={ICON.bell}
         size={15}
-        color={on ? "#5F7EC9" : "#8C97AF"}
+        color={on ? COLOR.primaryDeep : COLOR.faint}
         style={on ? { fill: "currentColor" } : undefined}
       />
     </Pressable>
@@ -154,7 +155,7 @@ function InboxList({
       >
         <div style={{ fontSize: 20, fontWeight: 800 }}>받은 것</div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600 }}>
+          <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: 600 }}>
             {/* 빈 인박스의 시작점 카드(데모 인트로)는 아직 대화가 아니다 */}
             대화 {emptyInbox ? 0 : threads.length}개
           </div>
@@ -183,7 +184,7 @@ function InboxList({
               borderRadius: 18,
               padding: "26px 22px",
               textAlign: "center",
-              color: "#8C97AF",
+              color: COLOR.faint,
               fontSize: 13,
               fontWeight: 600,
               lineHeight: 1.7,
@@ -203,7 +204,7 @@ function InboxList({
               borderRadius: 18,
               padding: "26px 22px",
               textAlign: "center",
-              color: "#8C97AF",
+              color: COLOR.faint,
               fontSize: 13,
               fontWeight: 600,
               lineHeight: 1.7,
@@ -238,8 +239,8 @@ function InboxList({
                 gap: 12,
                 padding: "13px 14px",
                 borderRadius: 16,
-                background: isUnread ? "#F4F8FE" : "#fff",
-                border: `1.5px solid ${isUnread ? "#D9E5F9" : "#EEF3FB"}`,
+                background: isUnread ? "#F4F8FE" : COLOR.white,
+                border: `1.5px solid ${isUnread ? "#D9E5F9" : COLOR.borderSoft}`,
               }}
             >
               <div
@@ -253,7 +254,7 @@ function InboxList({
                   justifyContent: "center",
                   fontSize: 16,
                   fontWeight: 800,
-                  color: "#3A4256",
+                  color: COLOR.ink,
                   flexShrink: 0,
                 }}
               >
@@ -261,11 +262,11 @@ function InboxList({
               </div>
               <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{ fontSize: 14, fontWeight: 800, color: "#3A4256" }}>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: COLOR.ink }}>
                     {nameOf(thread.actorId)}
                   </div>
                   {thread.lastAt && (
-                    <div style={{ fontSize: 11, color: "#A9B2C7", fontWeight: 600 }}>
+                    <div style={{ fontSize: 11, color: COLOR.fainter, fontWeight: 600 }}>
                       {relativeTime(thread.lastAt)}
                     </div>
                   )}
@@ -274,7 +275,7 @@ function InboxList({
                   style={{
                     fontSize: 13,
                     fontWeight: fromActor || typing ? 600 : 500,
-                    color: typing ? "#5F7EC9" : fromActor ? "#3A4256" : "#8C97AF",
+                    color: typing ? COLOR.primaryDeep : fromActor ? COLOR.ink : COLOR.faint,
                     fontStyle: typing ? "italic" : undefined,
                     whiteSpace: "nowrap",
                     overflow: "hidden",
@@ -291,7 +292,7 @@ function InboxList({
                     width: 9,
                     height: 9,
                     borderRadius: "50%",
-                    background: "#6D8DD6",
+                    background: COLOR.primary,
                     flexShrink: 0,
                   }}
                 />
@@ -349,18 +350,18 @@ function Conversation({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            background: "#F2F6FC",
+            background: COLOR.surface,
             flexShrink: 0,
           }}
         >
-          <Icon d={ICON.arrowLeft} size={16} color="#5F7EC9" />
+          <Icon d={ICON.arrowLeft} size={16} color={COLOR.primaryDeep} />
         </Pressable>
         <Face preset="dmHeader38" bg={partnerBg} />
         <div style={{ display: "flex", flexDirection: "column" }}>
           <div style={{ fontSize: 15, fontWeight: 800 }}>{partnerName}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Icon d={ICON.moon} size={12} color="#8C97AF" />
-            <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}>
+            <Icon d={ICON.moon} size={12} color={COLOR.faint} />
+            <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: 600 }}>
               답장이 느릴 수 있어요
             </div>
           </div>
@@ -386,8 +387,8 @@ function Conversation({
             style={{
               alignSelf: "center",
               fontSize: 12,
-              color: "#5F7EC9",
-              background: "#EDF3FD",
+              color: COLOR.primaryDeep,
+              background: COLOR.primarySoft,
               padding: "5px 14px",
               borderRadius: 9999,
               fontWeight: 700,
@@ -403,8 +404,8 @@ function Conversation({
           style={{
             alignSelf: "center",
             fontSize: 12,
-            color: "#8C97AF",
-            background: "#F2F6FC",
+            color: COLOR.faint,
+            background: COLOR.surface,
             padding: "5px 14px",
             borderRadius: 9999,
             fontWeight: 700,
@@ -432,8 +433,8 @@ function Conversation({
               <div
                 style={{
                   maxWidth: 440,
-                  background: mine ? "#6D8DD6" : "#F2F6FC",
-                  color: mine ? "#ffffff" : "#3A4256",
+                  background: mine ? COLOR.primary : COLOR.surface,
+                  color: mine ? COLOR.white : COLOR.ink,
                   padding: "12px 17px",
                   borderRadius: mine ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
                   fontSize: 14,
@@ -456,7 +457,7 @@ function Conversation({
                 gap: 4,
                 alignItems: "center",
                 padding: "11px 15px",
-                background: "#F2F6FC",
+                background: COLOR.surface,
                 borderRadius: "18px 18px 18px 4px",
               }}
             >
@@ -465,7 +466,7 @@ function Conversation({
                   width: 7,
                   height: 7,
                   borderRadius: "50%",
-                  background: "#6B7691",
+                  background: COLOR.muted,
                   animation: "lf-blink 1s infinite",
                 }}
               />
@@ -488,7 +489,7 @@ function Conversation({
                 }}
               />
             </div>
-            <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}>
+            <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: 600 }}>
               {partnerName}가 입력 중...
             </div>
           </div>
@@ -511,13 +512,13 @@ function Conversation({
           placeholder={`${partnerName}에게 답장하기...`}
           style={{
             flex: 1,
-            background: "#F2F6FC",
+            background: COLOR.surface,
             border: "none",
             outline: "none",
             borderRadius: 9999,
             padding: "13px 20px",
             fontSize: 14,
-            color: "#3A4256",
+            color: COLOR.ink,
             fontWeight: 500,
           }}
         />
@@ -528,7 +529,7 @@ function Conversation({
           style={{
             width: 44,
             height: 44,
-            background: "#6D8DD6",
+            background: COLOR.primary,
             borderRadius: "50%",
             display: "flex",
             alignItems: "center",
@@ -536,7 +537,7 @@ function Conversation({
             boxShadow: "0 4px 12px rgba(109,141,214,0.35)",
           }}
         >
-          <Icon d={ICON.send} size={18} color="#fff" />
+          <Icon d={ICON.send} size={18} color={COLOR.white} />
         </Pressable>
       </div>
     </>

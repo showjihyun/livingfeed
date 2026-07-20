@@ -17,17 +17,18 @@ import { relativeTime } from "@/lib/live-feed";
 import type { StoryTimeline } from "@/lib/story";
 import { useStory } from "@/lib/story";
 import type { FeedComment } from "@/lib/types";
+import { COLOR } from "@/lib/tokens";
 
 import { Icon } from "./Icon";
 import { Pressable } from "./Pressable";
 
 const STATUS_CHIP: Record<LiveStatus, { label: string; bg: string; color: string; dot: string }> = {
-  live: { label: "LIVE — 세계와 연결됨", bg: "#E3F5EC", color: "#3E8A66", dot: "#5FBF95" },
+  live: { label: "LIVE — 세계와 연결됨", bg: COLOR.successSoft, color: COLOR.success, dot: COLOR.successBright },
   connecting: { label: "연결 중...", bg: "#FFF6DE", color: "#A87F24", dot: "#E0B84F" },
-  offline: { label: "오프라인 — 세계와 끊김", bg: "#F2F6FC", color: "#8C97AF", dot: "#B7C2D8" },
+  offline: { label: "오프라인 — 세계와 끊김", bg: COLOR.surface, color: COLOR.faint, dot: "#B7C2D8" },
 };
 
-const AVATAR_COLORS = ["#AFC8F5", "#F2B8CF", "#BFE3CF", "#E8D5A8", "#CBBDE8", "#A8D8E8"];
+const AVATAR_COLORS = [COLOR.accent, "#F2B8CF", "#BFE3CF", "#E8D5A8", "#CBBDE8", "#A8D8E8"];
 
 function avatarColor(seed: string): string {
   let hash = 0;
@@ -104,7 +105,7 @@ function Avatar({ seed, label, size }: { seed: string; label: string; size: numb
         justifyContent: "center",
         fontSize: size * 0.4,
         fontWeight: 800,
-        color: "#3A4256",
+        color: COLOR.ink,
         flexShrink: 0,
       }}
     >
@@ -125,7 +126,7 @@ export function StoryThread({ story }: { story: StoryTimeline }) {
   return (
     <div
       style={{
-        background: "#FBFAFE",
+        background: COLOR.surfaceAlt,
         border: "1.5px solid #E9E1F8",
         borderRadius: 14,
         padding: "14px 16px",
@@ -172,7 +173,7 @@ export function StoryThread({ story }: { story: StoryTimeline }) {
                 style={{
                   fontSize: 12,
                   fontWeight: 800,
-                  color: isOrigin ? STORY_VIOLET : "#6B7691",
+                  color: isOrigin ? STORY_VIOLET : COLOR.muted,
                   display: "flex",
                   gap: 8,
                   alignItems: "center",
@@ -185,7 +186,7 @@ export function StoryThread({ story }: { story: StoryTimeline }) {
                     style={{
                       padding: "1px 8px",
                       background: STORY_VIOLET,
-                      color: "#fff",
+                      color: COLOR.white,
                       borderRadius: 9999,
                       fontSize: 10,
                       fontWeight: 800,
@@ -198,7 +199,7 @@ export function StoryThread({ story }: { story: StoryTimeline }) {
                   {relativeTime(item.occurredAt)}
                 </span>
               </div>
-              <div style={{ fontSize: 13.5, lineHeight: 1.55, fontWeight: 500, color: "#3A4256" }}>
+              <div style={{ fontSize: 13.5, lineHeight: 1.55, fontWeight: 500, color: COLOR.ink }}>
                 {item.summary}
               </div>
             </div>
@@ -228,7 +229,7 @@ function TypingDots() {
           gap: 4,
           alignItems: "center",
           padding: "8px 12px",
-          background: "#F2F6FC",
+          background: COLOR.surface,
           borderRadius: 9999,
         }}
       >
@@ -239,13 +240,13 @@ function TypingDots() {
               width: 6,
               height: 6,
               borderRadius: "50%",
-              background: ["#6B7691", "#9AA6BF", "#CBD5E8"][i],
+              background: [COLOR.muted, "#9AA6BF", "#CBD5E8"][i],
               animation: patient ? undefined : `lf-blink 1s ${delay}s infinite`,
             }}
           />
         ))}
       </div>
-      <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}>
+      <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: 600 }}>
         {patient
           ? "전해졌어요 — 답장은 그 사람의 시간에 맞춰 와요"
           : "답을 쓰고 있어요..."}
@@ -315,7 +316,7 @@ function LivePostCard({
           : isArcTransition
             ? "1.5px solid #D8CCF2"
             : "1.5px solid #E2EAF6",
-        background: isDebut ? "#FAFEFB" : isArcTransition ? "#FBFAFE" : undefined,
+        background: isDebut ? "#FAFEFB" : isArcTransition ? COLOR.surfaceAlt : undefined,
         borderRadius: 20,
         padding: "18px 24px",
         display: "flex",
@@ -363,7 +364,7 @@ function LivePostCard({
                 style={{
                   padding: "2px 10px",
                   background: STORY_VIOLET,
-                  color: "#fff",
+                  color: COLOR.white,
                   borderRadius: 9999,
                   fontSize: 11,
                   fontWeight: 800,
@@ -378,7 +379,7 @@ function LivePostCard({
                 style={{
                   padding: "2px 10px",
                   background: STORY_VIOLET,
-                  color: "#fff",
+                  color: COLOR.white,
                   borderRadius: 9999,
                   fontSize: 11,
                   fontWeight: 800,
@@ -388,7 +389,7 @@ function LivePostCard({
               </div>
             )}
           </div>
-          <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}>
+          <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: 600 }}>
             {relativeTime(post.occurredAt)} · 드라마 {Math.round(post.dramaScore * 100)}
             {post.tags.map((tag) => ` · #${tag}`).join("")}
           </div>
@@ -404,8 +405,8 @@ function LivePostCard({
             alignItems: "center",
             gap: 6,
             padding: "6px 13px",
-            background: liked ? "#C76F93" : "#FDEDF3",
-            color: liked ? "#ffffff" : "#C76F93",
+            background: liked ? COLOR.pink : "#FDEDF3",
+            color: liked ? COLOR.white : COLOR.pink,
             borderRadius: 9999,
             fontSize: 13,
             fontWeight: 800,
@@ -421,8 +422,8 @@ function LivePostCard({
               alignItems: "center",
               gap: 6,
               padding: "6px 13px",
-              background: "#F2F6FC",
-              color: "#6B7691",
+              background: COLOR.surface,
+              color: COLOR.muted,
               borderRadius: 9999,
               fontSize: 13,
               fontWeight: 800,
@@ -441,7 +442,7 @@ function LivePostCard({
               gap: 6,
               padding: "6px 13px",
               background: storyOpen ? STORY_VIOLET : "#F4EFFC",
-              color: storyOpen ? "#fff" : STORY_VIOLET,
+              color: storyOpen ? COLOR.white : STORY_VIOLET,
               borderRadius: 9999,
               fontSize: 13,
               fontWeight: 800,
@@ -468,7 +469,7 @@ function LivePostCard({
               gap: 6,
               padding: "6px 13px",
               background: dialogueOpen ? STORY_VIOLET : "#F4EFFC",
-              color: dialogueOpen ? "#fff" : STORY_VIOLET,
+              color: dialogueOpen ? COLOR.white : STORY_VIOLET,
               borderRadius: 9999,
               fontSize: 13,
               fontWeight: 800,
@@ -521,13 +522,13 @@ function LivePostCard({
             placeholder={`${authorLabel}에게 댓글 남기기... (개입은 흔적을 남겨요)`}
             style={{
               flex: 1,
-              background: "#F2F6FC",
+              background: COLOR.surface,
               border: "none",
               outline: "none",
               borderRadius: 9999,
               padding: "11px 18px",
               fontSize: 14,
-              color: "#3A4256",
+              color: COLOR.ink,
               fontWeight: 500,
             }}
           />
@@ -535,8 +536,8 @@ function LivePostCard({
             onClick={submit}
             style={{
               padding: "10px 18px",
-              background: "#6D8DD6",
-              color: "#fff",
+              background: COLOR.primary,
+              color: COLOR.white,
               borderRadius: 9999,
               fontSize: 14,
               fontWeight: 800,
@@ -579,7 +580,7 @@ export function LivePosts({
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ fontSize: 14, fontWeight: 800, color: "#3A4256" }}>지금 세계에서</div>
+        <div style={{ fontSize: 14, fontWeight: 800, color: COLOR.ink }}>지금 세계에서</div>
         <div
           style={{
             display: "inline-flex",
@@ -612,7 +613,7 @@ export function LivePosts({
             borderRadius: 18,
             padding: "28px 24px",
             textAlign: "center",
-            color: "#8C97AF",
+            color: COLOR.faint,
             fontSize: 14,
             fontWeight: 600,
           }}

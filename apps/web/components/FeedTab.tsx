@@ -10,6 +10,7 @@ import type { FeedComment } from "@/lib/types";
 
 import { Icon } from "./Icon";
 import { ICON } from "@/lib/data";
+import { COLOR } from "@/lib/tokens";
 import { LivePosts, StoryThread } from "./LivePosts";
 import { Pressable } from "./Pressable";
 import { RangeChips } from "./RangeChips";
@@ -50,7 +51,7 @@ function SearchResultCard({
   return (
     <div
       style={{
-        background: "#fff",
+        background: COLOR.white,
         border: "1.5px solid #EEF3FB",
         borderRadius: 18,
         padding: "16px 20px",
@@ -80,8 +81,8 @@ function SearchResultCard({
         <div
           style={{
             padding: "2px 10px",
-            background: "#EDF3FD",
-            color: "#5F7EC9",
+            background: COLOR.primarySoft,
+            color: COLOR.primaryDeep,
             borderRadius: 9999,
             fontSize: 11,
             fontWeight: 800,
@@ -155,8 +156,8 @@ function FeedTabInner({
               alignItems: "center",
               gap: 6,
               padding: "4px 12px",
-              background: "#E3F5EC",
-              color: "#3E8A66",
+              background: COLOR.successSoft,
+              color: COLOR.success,
               borderRadius: 9999,
               fontSize: 12,
               fontWeight: 800,
@@ -167,14 +168,14 @@ function FeedTabInner({
                 width: 6,
                 height: 6,
                 borderRadius: "50%",
-                background: "#5FBF95",
+                background: COLOR.successBright,
                 animation: "lf-blink 1.6s infinite",
               }}
             />
             실시간
           </div>
         </div>
-        <div style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600 }}>
+        <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: 600 }}>
           당신의 개입이 세계에 흔적을 남깁니다
         </div>
       </div>
@@ -200,7 +201,7 @@ function FeedTabInner({
             padding: "10px 14px",
             fontSize: 14,
             fontWeight: 600,
-            color: "#3A4256",
+            color: COLOR.ink,
             outline: "none",
             background: "#FDFDFE",
             maxWidth: 420,
@@ -211,7 +212,7 @@ function FeedTabInner({
         {searching && (
           <>
             {search.status === "offline" ? (
-              <div style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600 }}>
+              <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: 600 }}>
                 검색이 세계에 닿지 않아요 — 연결되면 다시 시도해주세요.
               </div>
             ) : search.status === "ready" && search.results.length === 0 ? (
@@ -221,18 +222,18 @@ function FeedTabInner({
                   borderRadius: 20,
                   padding: "36px 24px",
                   textAlign: "center",
-                  color: "#8C97AF",
+                  color: COLOR.faint,
                   fontSize: 14,
                   fontWeight: 600,
                   lineHeight: 1.7,
-                  background: "#fff",
+                  background: COLOR.white,
                 }}
               >
                 이 검색어에 닿는 이야기가 아직 없어요.
               </div>
             ) : search.status === "ready" ? (
               <>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#8C97AF" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: COLOR.faint }}>
                   세계의 역사에서 {search.results.length}건이 닿았어요
                 </div>
                 {search.results.map((result) => (
@@ -244,7 +245,7 @@ function FeedTabInner({
                 ))}
               </>
             ) : (
-              <div style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600 }}>
+              <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: 600 }}>
                 세계의 역사를 뒤지는 중…
               </div>
             )}
@@ -258,7 +259,7 @@ function FeedTabInner({
         {!searching && showCoach && (
           <div
             style={{
-              background: "#EDF3FD",
+              background: COLOR.primarySoft,
               border: "1.5px solid #CFE0F8",
               borderRadius: 18,
               padding: "14px 20px",
@@ -273,20 +274,20 @@ function FeedTabInner({
                 width: 36,
                 height: 36,
                 borderRadius: 12,
-                background: "#fff",
+                background: COLOR.white,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 flexShrink: 0,
               }}
             >
-              <Icon d={ICON.sparkles} size={17} color="#5F7EC9" />
+              <Icon d={ICON.sparkles} size={17} color={COLOR.primaryDeep} />
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
-              <div style={{ fontSize: 14, fontWeight: 800, color: "#3A4256" }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: COLOR.ink }}>
                 지금 세계가 흐르고 있어요
               </div>
-              <div style={{ fontSize: 13, color: "#5F7EC9", fontWeight: 600 }}>
+              <div style={{ fontSize: 13, color: COLOR.primaryDeep, fontWeight: 600 }}>
                 마음이 가는 이야기에 좋아요나 댓글로 조용히 시작해보세요 — 그것만으로도 세계는
                 당신을 알아차립니다.
               </div>
@@ -295,7 +296,7 @@ function FeedTabInner({
               onClick={onDismissCoach}
               aria-label="코치 닫기"
               style={{
-                color: "#8C97AF",
+                color: COLOR.faint,
                 fontSize: 16,
                 fontWeight: 800,
                 lineHeight: 1,

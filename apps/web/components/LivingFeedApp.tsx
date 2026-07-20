@@ -20,6 +20,7 @@ import { rangeTickBounds, type Range } from "@/lib/range";
 import { naturalDelayMs, useActorSession } from "@/lib/session";
 import type { DmMessage, FeedComment, Screen, Tab, Toast } from "@/lib/types";
 import { currentTick } from "@/lib/world-clock";
+import { COLOR } from "@/lib/tokens";
 
 import { Curating } from "./Curating";
 import { Digest } from "./Digest";
@@ -44,8 +45,8 @@ const GraphTab = dynamic(() => import("./GraphTab").then((m) => m.GraphTab), {
   loading: () => <TabFallback />,
 });
 
-const ME_COMMENT = { bg: "#EDF3FD", avatarBg: "#D9E2F2" };
-const ACTOR_COMMENT = { bg: "#F8FAFD", avatarBg: "#AFC8F5" };
+const ME_COMMENT = { bg: COLOR.primarySoft, avatarBg: "#D9E2F2" };
+const ACTOR_COMMENT = { bg: "#F8FAFD", avatarBg: COLOR.accent };
 // 내 댓글의 자기표시 — 표시명은 config seam에서 온다 (원시 id 노출 금지)
 const MY_COMMENT_AUTHOR = `${PLAYER_NAME} (나)`;
 
@@ -402,8 +403,8 @@ export function LivingFeedApp() {
         setTypingPosts((prev) => new Set(prev).add(post.id));
         toast({
           icon: "check",
-          iconBg: "#E3F5EC",
-          iconColor: "#3E8A66",
+          iconBg: COLOR.successSoft,
+          iconColor: COLOR.success,
           title: "댓글이 전달되었어요",
           body: `${authorName(post.authorId)}에게 닿았어요 — 개입은 흔적을 남겨요`,
         });
@@ -526,7 +527,7 @@ export function LivingFeedApp() {
       <div
         style={{
           flex: 1,
-          background: "#fff",
+          background: COLOR.white,
           borderLeft: "1.5px solid #E2EAF6",
           display: "flex",
           flexDirection: "column",

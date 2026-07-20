@@ -14,6 +14,7 @@ import type { CSSProperties } from "react";
 
 import { PLAYER_ID } from "@/lib/config";
 import { ICON } from "@/lib/data";
+import { COLOR } from "@/lib/tokens";
 import {
   BIG_FIVE_LABELS,
   GROUP_AXIS_LABELS,
@@ -65,7 +66,7 @@ const FAREWELL = {
   solid: "#A34D5F",
 };
 
-const AVATAR_COLORS = ["#E8D5A8", "#F5C8B8", "#BFE3D0", "#AFC8F5", "#CBBDE8"];
+const AVATAR_COLORS = ["#E8D5A8", "#F5C8B8", "#BFE3D0", COLOR.accent, "#CBBDE8"];
 
 function avatarColor(seed: string): string {
   let hash = 0;
@@ -79,7 +80,7 @@ const INPUT_STYLE: CSSProperties = {
   padding: "10px 14px",
   fontSize: 14,
   fontWeight: 600,
-  color: "#3A4256",
+  color: COLOR.ink,
   outline: "none",
   background: "#FDFDFE",
   width: "100%",
@@ -102,14 +103,14 @@ function FieldError({ error }: { error?: string }) {
 }
 
 function FieldLabel({ text }: { text: string }) {
-  return <div style={{ fontSize: 12, fontWeight: 800, color: "#6B7691" }}>{text}</div>;
+  return <div style={{ fontSize: 12, fontWeight: 800, color: COLOR.muted }}>{text}</div>;
 }
 
 function SectionCard({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
     <div
       style={{
-        background: "#fff",
+        background: COLOR.white,
         border: "1.5px solid #EEF3FB",
         borderRadius: 20,
         padding: "20px 24px",
@@ -120,8 +121,8 @@ function SectionCard({ title, hint, children }: { title: string; hint?: string; 
       }}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        <div style={{ fontSize: 13, fontWeight: 800, color: "#8C97AF" }}>{title}</div>
-        {hint && <div style={{ fontSize: 12, fontWeight: 600, color: "#A9B2C7", lineHeight: 1.55 }}>{hint}</div>}
+        <div style={{ fontSize: 13, fontWeight: 800, color: COLOR.faint }}>{title}</div>
+        {hint && <div style={{ fontSize: 12, fontWeight: 600, color: COLOR.fainter, lineHeight: 1.55 }}>{hint}</div>}
       </div>
       {children}
     </div>
@@ -143,7 +144,7 @@ function SliderRow({
 }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-      <div style={{ width: 52, fontSize: 13, fontWeight: 800, color: "#6B7691", flexShrink: 0 }}>
+      <div style={{ width: 52, fontSize: 13, fontWeight: 800, color: COLOR.muted, flexShrink: 0 }}>
         {label}
       </div>
       <input
@@ -155,7 +156,7 @@ function SliderRow({
         onChange={(e) => onChange(Number(e.target.value))}
         style={{ flex: 1, accentColor: accent, cursor: "pointer" }}
       />
-      <div style={{ width: 44, textAlign: "right", fontSize: 12, fontWeight: 800, color: "#8C97AF", flexShrink: 0 }}>
+      <div style={{ width: 44, textAlign: "right", fontSize: 12, fontWeight: 800, color: COLOR.faint, flexShrink: 0 }}>
         {badge}
       </div>
     </div>
@@ -190,8 +191,8 @@ function ChipSelect<T extends string>({
               borderRadius: 9999,
               fontSize: small ? 12 : 13,
               fontWeight: 800,
-              background: selected ? AMBER.bg : "#F2F6FC",
-              color: selected ? AMBER.text : "#8C97AF",
+              background: selected ? AMBER.bg : COLOR.surface,
+              color: selected ? AMBER.text : COLOR.faint,
               border: `1.5px solid ${selected ? AMBER.border : "transparent"}`,
             }}
           >
@@ -218,7 +219,7 @@ function ActiveToggle({ on, busy, onToggle }: { on: boolean; busy: boolean; onTo
         width: 44,
         height: 26,
         borderRadius: 9999,
-        background: on ? "#5FBF95" : "#D8DEEA",
+        background: on ? COLOR.successBright : COLOR.borderMuted,
         position: "relative",
         cursor: "pointer",
         transition: "background 0.2s ease",
@@ -234,7 +235,7 @@ function ActiveToggle({ on, busy, onToggle }: { on: boolean; busy: boolean; onTo
           width: 20,
           height: 20,
           borderRadius: "50%",
-          background: "#fff",
+          background: COLOR.white,
           transition: "left 0.2s ease",
           boxShadow: "0 1px 3px rgba(58,66,86,0.25)",
         }}
@@ -352,8 +353,8 @@ function PersonaEditor({
           style={{
             padding: "7px 14px",
             borderRadius: 9999,
-            background: "#F2F6FC",
-            color: "#6B7691",
+            background: COLOR.surface,
+            color: COLOR.muted,
             fontSize: 13,
             fontWeight: 800,
             flexShrink: 0,
@@ -371,8 +372,8 @@ function PersonaEditor({
           style={{
             padding: "10px 22px",
             borderRadius: 9999,
-            background: saving ? "#D8DEEA" : AMBER.solid,
-            color: "#fff",
+            background: saving ? COLOR.borderMuted : AMBER.solid,
+            color: COLOR.white,
             fontSize: 14,
             fontWeight: 800,
             cursor: saving ? "default" : "pointer",
@@ -396,7 +397,7 @@ function PersonaEditor({
           {formMessage && (
             <div
               style={{
-                background: "#FBECF0",
+                background: COLOR.pinkSoft,
                 border: "1.5px solid #F2CBD7",
                 borderRadius: 16,
                 padding: "13px 18px",
@@ -453,12 +454,12 @@ function PersonaEditor({
                       onChange={(e) => onIdInput(e.target.value)}
                     />
                   </div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "#A9B2C7" }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: COLOR.fainter }}>
                     로마자 소문자·숫자·밑줄 — 세계가 쓰는 내부 이름이라 나중에 못 바꿔요
                   </div>
                 </>
               ) : (
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#8C97AF" }}>{draft.id}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: COLOR.faint }}>{draft.id}</div>
               )}
               <FieldError error={fieldErrors.id} />
             </div>
@@ -524,7 +525,7 @@ function PersonaEditor({
                   label={NEEDS_LABELS[need]}
                   value={draft.needs_bias[need]}
                   badge={`${Math.round(draft.needs_bias[need] * 100)}%`}
-                  accent="#6D8DD6"
+                  accent={COLOR.primary}
                   onChange={(v) => patch({ needs_bias: { ...draft.needs_bias, [need]: v } })}
                 />
                 <FieldError error={fieldErrors[`needs_bias.${need}`]} />
@@ -567,8 +568,8 @@ function PersonaEditor({
                       width: 30,
                       height: 30,
                       borderRadius: 10,
-                      background: "#F2F6FC",
-                      color: "#8C97AF",
+                      background: COLOR.surface,
+                      color: COLOR.faint,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -587,7 +588,7 @@ function PersonaEditor({
                       label="비중"
                       value={goal.priority}
                       badge={`${Math.round(goal.priority * 100)}%`}
-                      accent="#6D8DD6"
+                      accent={COLOR.primary}
                       onChange={(v) =>
                         patch({
                           goals: draft.goals.map((g) => (g.id === goal.id ? { ...g, priority: v } : g)),
@@ -629,7 +630,7 @@ function PersonaEditor({
                 textAlign: "center",
                 fontSize: 13,
                 fontWeight: 800,
-                color: "#8C97AF",
+                color: COLOR.faint,
               }}
             >
               ＋ 목표 추가
@@ -643,7 +644,7 @@ function PersonaEditor({
             {draft.secrets.map((secret, i) => (
               <div key={secret.id} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <Icon d={ICON.lock} size={15} color="#A9B2C7" />
+                  <Icon d={ICON.lock} size={15} color={COLOR.fainter} />
                   <input
                     style={INPUT_STYLE}
                     value={secret.description}
@@ -664,8 +665,8 @@ function PersonaEditor({
                       width: 30,
                       height: 30,
                       borderRadius: 10,
-                      background: "#F2F6FC",
-                      color: "#8C97AF",
+                      background: COLOR.surface,
+                      color: COLOR.faint,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -693,7 +694,7 @@ function PersonaEditor({
                 textAlign: "center",
                 fontSize: 13,
                 fontWeight: 800,
-                color: "#8C97AF",
+                color: COLOR.faint,
               }}
             >
               ＋ 비밀 추가
@@ -718,7 +719,7 @@ function PersonaEditor({
               {retireError && (
                 <div
                   style={{
-                    background: "#FBECF0",
+                    background: COLOR.pinkSoft,
                     border: "1.5px solid #F2CBD7",
                     borderRadius: 14,
                     padding: "12px 16px",
@@ -764,8 +765,8 @@ function PersonaEditor({
                       style={{
                         padding: "9px 18px",
                         borderRadius: 9999,
-                        background: retiring ? "#D8DEEA" : FAREWELL.solid,
-                        color: "#fff",
+                        background: retiring ? COLOR.borderMuted : FAREWELL.solid,
+                        color: COLOR.white,
                         fontSize: 13,
                         fontWeight: 800,
                         cursor: retiring ? "default" : "pointer",
@@ -783,8 +784,8 @@ function PersonaEditor({
                       style={{
                         padding: "9px 18px",
                         borderRadius: 9999,
-                        background: "#F2F6FC",
-                        color: "#6B7691",
+                        background: COLOR.surface,
+                        color: COLOR.muted,
                         fontSize: 13,
                         fontWeight: 800,
                       }}
@@ -801,7 +802,7 @@ function PersonaEditor({
                     alignSelf: "flex-start",
                     padding: "9px 18px",
                     borderRadius: 9999,
-                    background: "#fff",
+                    background: COLOR.white,
                     border: "1.5px solid #D8DEEA",
                     color: "#77808F",
                     fontSize: 13,
@@ -998,7 +999,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
           <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.4 }}>
             세계가 다음 순간 이 사람을 받아들입니다
           </div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: "#6B7691", lineHeight: 1.7 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: COLOR.muted, lineHeight: 1.7 }}>
             이제 {view.name || "이 사람"}의 시간이 세계 속에서 흐르기 시작해요.
             <br />첫 마디, 첫 만남 — 데뷔는 언제나 World Feed에 먼저 닿습니다.
           </div>
@@ -1009,8 +1010,8 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
               style={{
                 padding: "11px 22px",
                 borderRadius: 9999,
-                background: "#6D8DD6",
-                color: "#fff",
+                background: COLOR.primary,
+                color: COLOR.white,
                 fontSize: 14,
                 fontWeight: 800,
               }}
@@ -1023,8 +1024,8 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
               style={{
                 padding: "11px 22px",
                 borderRadius: 9999,
-                background: "#F2F6FC",
-                color: "#6B7691",
+                background: COLOR.surface,
+                color: COLOR.muted,
                 fontSize: 14,
                 fontWeight: 800,
               }}
@@ -1073,8 +1074,8 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                 alignItems: "center",
                 gap: 6,
                 padding: "4px 12px",
-                background: "#F2F6FC",
-                color: "#8C97AF",
+                background: COLOR.surface,
+                color: COLOR.faint,
                 borderRadius: 9999,
                 fontSize: 12,
                 fontWeight: 800,
@@ -1085,7 +1086,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600 }}>
+          <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: 600 }}>
             활성 {activeCount} / 전체 {personas.length}
           </div>
           <Pressable
@@ -1095,7 +1096,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
               padding: "9px 18px",
               borderRadius: 9999,
               background: AMBER.solid,
-              color: "#fff",
+              color: COLOR.white,
               fontSize: 13,
               fontWeight: 800,
             }}
@@ -1116,7 +1117,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
           background: "#FDFBF6",
         }}
       >
-        <div style={{ fontSize: 13, color: "#8C97AF", fontWeight: 600, lineHeight: 1.6 }}>
+        <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: 600, lineHeight: 1.6 }}>
           이곳은 세계 바깥의 작업대예요. 인물을 빚어 풀어놓으면, 세계는 다음 순간부터 그 사람의
           시간을 흘려보냅니다.
         </div>
@@ -1124,7 +1125,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
         {savedName && (
           <div
             style={{
-              background: "#E3F5EC",
+              background: COLOR.successSoft,
               border: "1.5px solid #BFE3D0",
               borderRadius: 16,
               padding: "13px 18px",
@@ -1134,14 +1135,14 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
               animation: "lf-pop 0.35s ease-out",
             }}
           >
-            <Icon d="M20 6 9 17l-5-5" size={16} color="#3E8A66" />
-            <div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: "#3E8A66", lineHeight: 1.6 }}>
+            <Icon d="M20 6 9 17l-5-5" size={16} color={COLOR.success} />
+            <div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: COLOR.success, lineHeight: 1.6 }}>
               세계가 다음 순간 이 사람을 받아들입니다 — {savedName}의 변화가 스며들고 있어요
             </div>
             <Pressable
               onClick={() => setSavedName(null)}
               aria-label="닫기"
-              style={{ color: "#3E8A66", fontSize: 15, fontWeight: 800, padding: 4 }}
+              style={{ color: COLOR.success, fontSize: 15, fontWeight: 800, padding: 4 }}
             >
               ×
             </Pressable>
@@ -1161,7 +1162,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
               animation: "lf-pop 0.35s ease-out",
             }}
           >
-            <Icon d={ICON.moon} size={16} color="#6B7691" />
+            <Icon d={ICON.moon} size={16} color={COLOR.muted} />
             <div
               style={{ flex: 1, fontSize: 13, fontWeight: 700, color: "#5A6478", lineHeight: 1.6 }}
             >
@@ -1171,7 +1172,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
             <Pressable
               onClick={() => setFarewellName(null)}
               aria-label="닫기"
-              style={{ color: "#6B7691", fontSize: 15, fontWeight: 800, padding: 4 }}
+              style={{ color: COLOR.muted, fontSize: 15, fontWeight: 800, padding: 4 }}
             >
               ×
             </Pressable>
@@ -1210,7 +1211,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
         {rosterError && (
           <div
             style={{
-              background: "#FBECF0",
+              background: COLOR.pinkSoft,
               border: "1.5px solid #F2CBD7",
               borderRadius: 16,
               padding: "13px 18px",
@@ -1231,11 +1232,11 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
               borderRadius: 20,
               padding: "40px 24px",
               textAlign: "center",
-              color: "#8C97AF",
+              color: COLOR.faint,
               fontSize: 14,
               fontWeight: 600,
               lineHeight: 1.7,
-              background: "#fff",
+              background: COLOR.white,
             }}
           >
             스튜디오는 게이트웨이 연결이 필요해요.
@@ -1249,11 +1250,11 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
               borderRadius: 20,
               padding: "40px 24px",
               textAlign: "center",
-              color: "#8C97AF",
+              color: COLOR.faint,
               fontSize: 14,
               fontWeight: 600,
               lineHeight: 1.7,
-              background: "#fff",
+              background: COLOR.white,
             }}
           >
             아직 이 세계에 인물이 없어요.
@@ -1270,7 +1271,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                 onChange={(e) => setQuery(e.target.value)}
               />
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <div style={{ fontSize: 12, fontWeight: 800, color: "#6B7691", flexShrink: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: COLOR.muted, flexShrink: 0 }}>
                   그룹 기준
                 </div>
                 <ChipSelect
@@ -1302,8 +1303,8 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                         borderRadius: 9999,
                         fontSize: 12,
                         fontWeight: 800,
-                        background: selected ? AMBER.bg : "#F2F6FC",
-                        color: selected ? AMBER.text : "#8C97AF",
+                        background: selected ? AMBER.bg : COLOR.surface,
+                        color: selected ? AMBER.text : COLOR.faint,
                         border: `1.5px solid ${selected ? AMBER.border : "transparent"}`,
                       }}
                     >
@@ -1321,11 +1322,11 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                   borderRadius: 20,
                   padding: "40px 24px",
                   textAlign: "center",
-                  color: "#8C97AF",
+                  color: COLOR.faint,
                   fontSize: 14,
                   fontWeight: 600,
                   lineHeight: 1.7,
-                  background: "#fff",
+                  background: COLOR.white,
                 }}
               >
                 이 결에 닿는 사람이 아직 없어요.
@@ -1344,7 +1345,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                         {section.key} · {section.personas.length}명
                       </div>
                     ) : (
-                      <div style={{ fontSize: 12, fontWeight: 700, color: "#8C97AF" }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: COLOR.faint }}>
                         {visible.length}명이 조건에 닿았어요
                       </div>
                     )}
@@ -1370,8 +1371,8 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                 }}
                 className={styles.press97}
                 style={{
-                  background: "#fff",
-                  border: `1.5px solid ${mine ? AMBER.border : "#EEF3FB"}`,
+                  background: COLOR.white,
+                  border: `1.5px solid ${mine ? AMBER.border : COLOR.borderSoft}`,
                   borderRadius: 20,
                   padding: "16px 22px",
                   display: "flex",
@@ -1392,7 +1393,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                     justifyContent: "center",
                     fontSize: 17,
                     fontWeight: 800,
-                    color: "#3A4256",
+                    color: COLOR.ink,
                     flexShrink: 0,
                     opacity: persona.active ? 1 : 0.55,
                   }}
@@ -1419,8 +1420,8 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                     <div
                       style={{
                         padding: "2px 10px",
-                        background: "#EDF3FD",
-                        color: "#5F7EC9",
+                        background: COLOR.primarySoft,
+                        color: COLOR.primaryDeep,
                         borderRadius: 9999,
                         fontSize: 11,
                         fontWeight: 800,
@@ -1432,7 +1433,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                   <div
                     style={{
                       fontSize: 13,
-                      color: "#6B7691",
+                      color: COLOR.muted,
                       fontWeight: 600,
                       whiteSpace: "nowrap",
                       overflow: "hidden",
@@ -1443,7 +1444,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: persona.active ? "#3E8A66" : "#A9B2C7" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: persona.active ? COLOR.success : COLOR.fainter }}>
                     {persona.active ? "세계에 살고 있음" : "잠들어 있음"}
                   </div>
                   <ActiveToggle
@@ -1486,11 +1487,11 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                 padding: "14px 20px",
               }}
             >
-              <Icon d={ICON.moon} size={14} color="#8C97AF" />
-              <div style={{ flex: 1, fontSize: 13, fontWeight: 800, color: "#6B7691" }}>
+              <Icon d={ICON.moon} size={14} color={COLOR.faint} />
+              <div style={{ flex: 1, fontSize: 13, fontWeight: 800, color: COLOR.muted }}>
                 떠난 사람들 · {retired.length}
               </div>
-              <div style={{ fontSize: 12, fontWeight: 800, color: "#A9B2C7" }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: COLOR.fainter }}>
                 {retiredOpen ? "접기" : "펼치기"}
               </div>
             </Pressable>
@@ -1504,14 +1505,14 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                   gap: 10,
                 }}
               >
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#8C97AF", lineHeight: 1.6 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: COLOR.faint, lineHeight: 1.6 }}>
                   세계를 떠났지만 기록은 남아 있어요 — 다시 불러오면 글과 관계도 함께 돌아옵니다.
                 </div>
 
                 {restoreError && (
                   <div
                     style={{
-                      background: "#FBECF0",
+                      background: COLOR.pinkSoft,
                       border: "1.5px solid #F2CBD7",
                       borderRadius: 14,
                       padding: "11px 15px",
@@ -1532,7 +1533,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                     <div
                       key={entry.filename}
                       style={{
-                        background: "#fff",
+                        background: COLOR.white,
                         border: "1.5px solid #E8EBF2",
                         borderRadius: 16,
                         padding: "12px 16px",
@@ -1553,7 +1554,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                             justifyContent: "center",
                             fontSize: 14,
                             fontWeight: 800,
-                            color: "#8C97AF",
+                            color: COLOR.faint,
                             flexShrink: 0,
                           }}
                         >
@@ -1567,7 +1568,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                             style={{
                               fontSize: 12,
                               fontWeight: 600,
-                              color: "#A9B2C7",
+                              color: COLOR.fainter,
                               whiteSpace: "nowrap",
                               overflow: "hidden",
                               textOverflow: "ellipsis",
@@ -1586,7 +1587,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                             style={{
                               padding: "8px 16px",
                               borderRadius: 9999,
-                              background: "#fff",
+                              background: COLOR.white,
                               border: `1.5px solid ${AMBER.border}`,
                               color: AMBER.text,
                               fontSize: 13,
@@ -1630,8 +1631,8 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                               style={{
                                 padding: "8px 16px",
                                 borderRadius: 9999,
-                                background: restoring ? "#D8DEEA" : AMBER.solid,
-                                color: "#fff",
+                                background: restoring ? COLOR.borderMuted : AMBER.solid,
+                                color: COLOR.white,
                                 fontSize: 13,
                                 fontWeight: 800,
                                 cursor: restoring ? "default" : "pointer",
@@ -1649,8 +1650,8 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                               style={{
                                 padding: "8px 16px",
                                 borderRadius: 9999,
-                                background: "#F2F6FC",
-                                color: "#6B7691",
+                                background: COLOR.surface,
+                                color: COLOR.muted,
                                 fontSize: 13,
                                 fontWeight: 800,
                               }}

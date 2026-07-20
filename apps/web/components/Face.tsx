@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { COLOR } from "@/lib/tokens";
 
 /** 디자인 핸드오프의 블롭 얼굴 아바타 — 눈/입/눈썹/볼터치를 절대 배치로 그린다.
  *  수치는 프로토타입(docs/design-handoff)의 픽셀 값을 그대로 옮긴 프리셋이다. */
@@ -19,14 +20,14 @@ interface FaceSpec {
   blush?: { w: number; h: number; x: number; top: number };
 }
 
-const INK = "#3A4256";
+const INK = COLOR.ink;
 
 export const FACE = {
   /** 온보딩 헤더 로고 (34px 둥근 사각형) */
   logo34: {
     size: 34,
     radius: "12px",
-    bg: "#AFC8F5",
+    bg: COLOR.accent,
     eye: { size: 4, x: 9, top: 13 },
     mouth: { kind: "smile", w: 8, h: 4, stroke: 2, r: 8, top: 20 },
   },
@@ -34,7 +35,7 @@ export const FACE = {
   logo30: {
     size: 30,
     radius: "10px",
-    bg: "#AFC8F5",
+    bg: COLOR.accent,
     eye: { size: 3.5, x: 8, top: 11 },
     mouth: { kind: "smile", w: 7, h: 3.5, stroke: 2, r: 7, top: 18 },
   },
@@ -42,7 +43,7 @@ export const FACE = {
   curateA: {
     size: 52,
     radius: "50%",
-    bg: "#AFC8F5",
+    bg: COLOR.accent,
     eye: { size: 5.5, x: 14, top: 20 },
     mouth: { kind: "frown", w: 9, h: 4, stroke: 2, r: 8, top: 32 },
   },
@@ -72,7 +73,7 @@ export const FACE = {
   dmHeader38: {
     size: 38,
     radius: "50%",
-    bg: "#AFC8F5",
+    bg: COLOR.accent,
     eye: { size: 4.5, x: 10, top: 14 },
     mouth: { kind: "frown", w: 8, h: 4, stroke: 2, r: 8, top: 23 },
   },
@@ -80,7 +81,7 @@ export const FACE = {
   dm30: {
     size: 30,
     radius: "50%",
-    bg: "#AFC8F5",
+    bg: COLOR.accent,
     eye: { size: 3.5, x: 8, top: 11 },
     mouth: { kind: "smile", w: 6, h: 3, stroke: 1.5, r: 6, top: 18 },
   },
@@ -88,7 +89,7 @@ export const FACE = {
   profile88: {
     size: 88,
     radius: "50%",
-    bg: "#AFC8F5",
+    bg: COLOR.accent,
     border: "5px solid #fff",
     eye: { size: 8, x: 24, top: 34 },
     mouth: { kind: "frown", w: 15, h: 7, stroke: 3, r: 13, top: 52 },

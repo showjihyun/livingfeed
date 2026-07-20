@@ -1,6 +1,7 @@
 import { TOPIC_LIST } from "@/lib/data";
 import { useWorldClock } from "@/lib/world-clock";
 import { useDemoWorldTime } from "@/lib/world-clock-display";
+import { COLOR } from "@/lib/tokens";
 
 import { Face } from "./Face";
 import { Pressable } from "./Pressable";
@@ -30,7 +31,7 @@ export function Onboarding({ topics, onToggleTopic, onEnter }: OnboardingProps) 
       <div
         style={{
           width: 560,
-          background: "#fff",
+          background: COLOR.white,
           border: "1.5px solid #E2EAF6",
           borderRadius: 28,
           padding: "44px 48px",
@@ -48,7 +49,7 @@ export function Onboarding({ topics, onToggleTopic, onEnter }: OnboardingProps) 
           <div style={{ fontSize: 30, fontWeight: 900, lineHeight: 1.25 }}>
             어떤 이야기가 끌리나요?
           </div>
-          <div style={{ fontSize: 14, color: "#6B7691", lineHeight: 1.6, fontWeight: 500 }}>
+          <div style={{ fontSize: 14, color: COLOR.muted, lineHeight: 1.6, fontWeight: 500 }}>
             최대 2개. 첫 피드를 고르는 데만 쓰여요. 질문은 이것뿐 — 세계는 이미 진행 중입니다.
           </div>
         </div>
@@ -62,9 +63,9 @@ export function Onboarding({ topics, onToggleTopic, onEnter }: OnboardingProps) 
                 aria-pressed={on}
                 style={{
                   padding: "10px 18px",
-                  border: `1.5px solid ${on ? "#6D8DD6" : "#E2EAF6"}`,
-                  background: on ? "#EDF3FD" : "#ffffff",
-                  color: on ? "#5F7EC9" : "#6B7691",
+                  border: `1.5px solid ${on ? COLOR.primary : COLOR.border}`,
+                  background: on ? COLOR.primarySoft : COLOR.white,
+                  color: on ? COLOR.primaryDeep : COLOR.muted,
                   borderRadius: 9999,
                   fontSize: 14,
                   fontWeight: 700,
@@ -92,11 +93,11 @@ export function Onboarding({ topics, onToggleTopic, onEnter }: OnboardingProps) 
               width: 8,
               height: 8,
               borderRadius: "50%",
-              background: "#5FBF95",
+              background: COLOR.successBright,
               animation: "lf-blink 1.6s infinite",
             }}
           />
-          <div style={{ fontSize: 13, color: "#6B7691", fontWeight: 600 }}>
+          <div style={{ fontSize: 13, color: COLOR.muted, fontWeight: 600 }}>
             지금 세계 시간 {clock} · 세계는 당신 없이도 제 갈 길을 가는 중
           </div>
         </div>
@@ -106,7 +107,7 @@ export function Onboarding({ topics, onToggleTopic, onEnter }: OnboardingProps) 
           style={{
             width: "100%",
             padding: "15px 0",
-            color: "#fff",
+            color: COLOR.white,
             borderRadius: 9999,
             fontSize: 16,
             fontWeight: 800,

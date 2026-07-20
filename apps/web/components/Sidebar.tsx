@@ -4,6 +4,7 @@ import { ICON, NAV_DEFS } from "@/lib/data";
 import type { Tab } from "@/lib/types";
 import { useWorldClock } from "@/lib/world-clock";
 import { useDemoWorldTime } from "@/lib/world-clock-display";
+import { COLOR } from "@/lib/tokens";
 
 import { Face } from "./Face";
 import { Icon } from "./Icon";
@@ -70,8 +71,8 @@ function SidebarInner({
               gap: 10,
               padding: "11px 14px",
               borderRadius: 14,
-              background: active ? "#ffffff" : undefined,
-              color: active ? "#5F7EC9" : "#6B7691",
+              background: active ? COLOR.white : undefined,
+              color: active ? COLOR.primaryDeep : COLOR.muted,
               boxShadow: active ? "0 4px 12px rgba(109,141,214,0.12)" : "none",
             }}
           >
@@ -108,7 +109,7 @@ function SidebarInner({
             gap: 10,
             padding: "11px 14px",
             borderRadius: 14,
-            color: "#A9B2C7",
+            color: COLOR.fainter,
           }}
         >
           <Icon d={ICON.lock} size={18} />
@@ -127,8 +128,8 @@ function SidebarInner({
             gap: 10,
             padding: "11px 14px",
             borderRadius: 14,
-            background: tab === "hidden" ? "#ffffff" : undefined,
-            color: tab === "hidden" ? "#7a68b3" : "#6B7691",
+            background: tab === "hidden" ? COLOR.white : undefined,
+            color: tab === "hidden" ? COLOR.violet : COLOR.muted,
             boxShadow: tab === "hidden" ? "0 4px 12px rgba(122,104,179,0.14)" : "none",
           }}
         >
@@ -157,7 +158,7 @@ function SidebarInner({
           paddingTop: 10,
           fontSize: 11,
           fontWeight: 800,
-          color: "#A9B2C7",
+          color: COLOR.fainter,
           letterSpacing: 0.5,
         }}
       >
@@ -174,8 +175,8 @@ function SidebarInner({
           gap: 10,
           padding: "11px 14px",
           borderRadius: 14,
-          background: tab === "studio" ? "#ffffff" : undefined,
-          color: tab === "studio" ? "#A97E2F" : "#6B7691",
+          background: tab === "studio" ? COLOR.white : undefined,
+          color: tab === "studio" ? "#A97E2F" : COLOR.muted,
           boxShadow: tab === "studio" ? "0 4px 12px rgba(176,132,48,0.14)" : "none",
         }}
       >
@@ -186,7 +187,7 @@ function SidebarInner({
       <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
         <div
           style={{
-            background: "#fff",
+            background: COLOR.white,
             borderRadius: 16,
             padding: "14px 16px",
             display: "flex",
@@ -196,11 +197,11 @@ function SidebarInner({
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Icon d={ICON.clock} size={14} color="#8C97AF" />
-            <div style={{ fontSize: 12, fontWeight: 800, color: "#8C97AF" }}>세계 시간</div>
+            <Icon d={ICON.clock} size={14} color={COLOR.faint} />
+            <div style={{ fontSize: 12, fontWeight: 800, color: COLOR.faint }}>세계 시간</div>
           </div>
           <div style={{ fontSize: 19, fontWeight: 800 }}>{clock}</div>
-          <div style={{ fontSize: 12, color: "#8C97AF", fontWeight: 600 }}>
+          <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: 600 }}>
             현실의 4배속으로 흐르는 중
           </div>
         </div>
@@ -208,7 +209,7 @@ function SidebarInner({
           <Face preset="user30" />
           <div style={{ display: "flex", flexDirection: "column" }}>
             <div style={{ fontSize: 14, fontWeight: 800 }}>관찰자_0417</div>
-            <div style={{ fontSize: 11, color: "#8C97AF", fontWeight: 600 }}>
+            <div style={{ fontSize: 11, color: COLOR.faint, fontWeight: 600 }}>
               참견러 · 개입 {interventions}회
             </div>
           </div>

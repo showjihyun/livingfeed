@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 
 import type { DigestLine, PersonalDigest } from "@/lib/digest";
+import { COLOR } from "@/lib/tokens";
 import {
   ABSENCE_THRESHOLD_MS,
   digestSentence,
@@ -25,9 +26,9 @@ import { Pressable } from "./Pressable";
 
 /** 갈래별 결 — 저자성(보라)·나를 향한 것(분홍)·세계의 마디(파랑), 기존 팔레트 그대로 */
 const SECTION_STYLE = {
-  yours: { label: "당신이 빚은 인물", color: "#8A63D2", bg: "#FBFAFE", border: "#E9E1F8" },
-  toYou: { label: "당신에게 닿은 것", color: "#C76F93", bg: "#FDF7FA", border: "#F4DEE8" },
-  world: { label: "세계의 마디", color: "#6D8DD6", bg: "#F7FAFE", border: "#E2EAF6" },
+  yours: { label: "당신이 빚은 인물", color: "#8A63D2", bg: COLOR.surfaceAlt, border: "#E9E1F8" },
+  toYou: { label: "당신에게 닿은 것", color: COLOR.pink, bg: "#FDF7FA", border: "#F4DEE8" },
+  world: { label: "세계의 마디", color: COLOR.primary, bg: "#F7FAFE", border: COLOR.border },
 } as const;
 
 function Section({
@@ -70,13 +71,13 @@ function Section({
               flexShrink: 0,
             }}
           />
-          <div style={{ fontSize: 14, lineHeight: 1.6, fontWeight: 600, color: "#3A4256" }}>
+          <div style={{ fontSize: 14, lineHeight: 1.6, fontWeight: 600, color: COLOR.ink }}>
             {digestSentence(line, nameOf)}
           </div>
         </div>
       ))}
       {(more ?? 0) > 0 && (
-        <div style={{ fontSize: 12.5, fontWeight: 600, color: "#8C97AF", paddingLeft: 15 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: COLOR.faint, paddingLeft: 15 }}>
           외 {more}건이 더 있어요
         </div>
       )}
@@ -133,7 +134,7 @@ export function Digest({ nameOf }: { nameOf: (actorId: string) => string }) {
           width: 560,
           maxHeight: "84vh",
           overflowY: "auto",
-          background: "#fff",
+          background: COLOR.white,
           border: "1.5px solid #E2EAF6",
           borderRadius: 28,
           padding: "36px 40px",
@@ -146,7 +147,7 @@ export function Digest({ nameOf }: { nameOf: (actorId: string) => string }) {
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ fontSize: 26, fontWeight: 900, lineHeight: 1.3 }}>당신이 없는 동안</div>
-          <div style={{ fontSize: 14, color: "#6B7691", lineHeight: 1.6, fontWeight: 500 }}>
+          <div style={{ fontSize: 14, color: COLOR.muted, lineHeight: 1.6, fontWeight: 500 }}>
             세계는 계속 흐르고 있었어요 — 그동안의 마디를 모아왔어요.
           </div>
         </div>
@@ -161,8 +162,8 @@ export function Digest({ nameOf }: { nameOf: (actorId: string) => string }) {
             width: "100%",
             marginTop: 4,
             padding: "13px 18px",
-            background: "#6D8DD6",
-            color: "#fff",
+            background: COLOR.primary,
+            color: COLOR.white,
             borderRadius: 9999,
             fontSize: 15,
             fontWeight: 800,
