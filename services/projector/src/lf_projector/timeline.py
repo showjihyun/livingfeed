@@ -246,14 +246,35 @@ class TimelineStore:
         await self._redis.zremrangebyrank(key, 0, -(TIMELINE_CAP + 1))
 
     async def fan_out_post(self, envelope: dict[str, Any]) -> int:
-        """포스트를 작성자·참여자의 팔로워 타임라인에 싣는다. 반환: 실린 타임라인 수."""
+        """포스트를 작성자·참여자의 팔로워 타임라인에 싣는다. 반환: 실린 타임라인 수.
+
+        팔로워 조회(관계자별 smembers)와 배달(팔로워별 zadd+zremrangebyrank)을 각각
+        하나의 파이프라인으로 묶는다 — 직렬 await는 관계자·팔로워 수만큼 RTT를 쌓지만,
+        인기 글일수록(팔로워 多) 그 비용이 커진다. doc은 전 팔로워 공통이라 직렬화·
+        스코어는 한 번만 계산한다.
+        """
         world_id = envelope["world_id"]
         doc = envelope_to_doc(envelope)
+        # 작성자 + 참여자의 팔로워를 한 파이프라인으로 모은다
+        actors = sorted({envelope["actor_id"], *envelope["payload"]["participants"]})
+        pipe = self._redis.pipeline()
+        for actor_id in actors:
+            pipe.smembers(self.follower_key(world_id, actor_id))
         interested: set[str] = set()
-        for actor_id in {envelope["actor_id"], *envelope["payload"]["participants"]}:
-            interested |= await self.followers(world_id, actor_id)
+        for members in await pipe.execute():
+            interested |= {m.decode() if isinstance(m, bytes) else m for m in members}
+        if not interested:
+            return 0
+        # 팬아웃 배달도 한 파이프라인으로 — 팔로워 N명 × (zadd+zremrangebyrank)를
+        # 2N 왕복이 아니라 1왕복으로 (push의 로직을 배치로 인라인한다)
+        payload = json.dumps(doc, ensure_ascii=False)
+        score = ulid_ms(doc["event_id"])
+        pipe = self._redis.pipeline()
         for player_id in sorted(interested):
-            await self.push(world_id, player_id, doc)
+            key = self.timeline_key(world_id, player_id)
+            pipe.zadd(key, {payload: score})
+            pipe.zremrangebyrank(key, 0, -(TIMELINE_CAP + 1))
+        await pipe.execute()
         return len(interested)
 
     async def push_reply(self, envelope: dict[str, Any]) -> None:

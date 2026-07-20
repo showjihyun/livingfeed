@@ -64,6 +64,31 @@ class Mailbox:
         raw, _ = await pipe.execute()
         return [json.loads(item) for item in raw]
 
+    async def drain_many(
+        self, world_id: str, actor_ids: list[str]
+    ) -> dict[str, list[dict[str, Any]]]:
+        """여러 액터의 수신함을 한 파이프라인으로 비운다 (drain의 배치판, ADR-012).
+
+        perceive는 매 tick 전 액터를 도는데, 액터마다 왕복하면 비용이 액터 수에
+        비례한 RTT다 (유휴 세계에선 대부분 빈 수신함을 하나씩 확인하는 낭비).
+        lrange+delete 쌍을 전 액터에 대해 하나의 파이프라인으로 묶어 1왕복으로
+        줄인다. redis-py 파이프라인은 기본 MULTI/EXEC 트랜잭션이라 각 쌍의
+        원자성(읽은 뒤 삭제)은 drain과 동일하게 보존된다. 항목 없는 액터는 빈 리스트.
+        """
+        if not actor_ids:
+            return {}
+        pipe = self._redis.pipeline()
+        for actor_id in actor_ids:
+            key = self._key(world_id, actor_id)
+            pipe.lrange(key, 0, -1)
+            pipe.delete(key)
+        results = await pipe.execute()
+        # results는 [lrange_0, delete_0, lrange_1, delete_1, …] — lrange만 취한다
+        return {
+            actor_id: [json.loads(item) for item in results[i * 2]]
+            for i, actor_id in enumerate(actor_ids)
+        }
+
 
 async def route_targets(
     envelope: dict[str, Any], fanout: FeedFanout | None

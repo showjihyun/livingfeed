@@ -391,8 +391,14 @@ class ActorPhases:
         self._pending_greetings = []
         if not self._ledger_loaded:
             await self._hydrate_ledger(ctx.world_id)
-        for actor_id in self._personas:
-            items = await self._mailbox.drain(ctx.world_id, actor_id) if self._mailbox else []
+        # 전 액터 수신함을 한 파이프라인으로 비운다 — 액터 수만큼 왕복하던 drain을
+        # 1왕복으로 (유휴 세계의 빈 수신함 순회 비용 제거, ADR-012)
+        actor_ids = list(self._personas)
+        drained = (
+            await self._mailbox.drain_many(ctx.world_id, actor_ids) if self._mailbox else {}
+        )
+        for actor_id in actor_ids:
+            items = drained.get(actor_id, [])
             # Director의 제어 신호(승격·아크)는 지각이 아니다 — 지각 항목과 분리한다 (ADR-013)
             promoted = any(e["type"] == SPOTLIGHT_TYPE for e in items)
             arcs = [e for e in items if e["type"] == ARC_TYPE]
