@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from functools import cache
 from typing import Any
 
 from jsonschema import Draft202012Validator
@@ -60,6 +61,20 @@ def _build_envelope(event: NewEvent, occurred_at: datetime) -> dict[str, Any]:
     }
 
 
+# 검증기는 스키마당 한 번만 컴파일한다 — Draft202012Validator 생성은 메타스키마
+# 처리·$ref 해석을 매번 다시 하므로, append마다 새로 만들면 핫패스에 낭비가 쌓인다.
+# 스키마 원천(lf_schemas.registry)이 @cache라 프로세스 수명 내 불변이므로 안전하다.
+@cache
+def _envelope_validator() -> Draft202012Validator:
+    return Draft202012Validator(registry.envelope_schema())
+
+
+@cache
+def _payload_validator(event_type: str) -> Draft202012Validator:
+    # KeyError(미등록 타입)는 캐시되지 않는다 — 호출자가 UnknownEventType으로 변환한다
+    return Draft202012Validator(registry.payload_schema(event_type))
+
+
 def _validate(principal: str, event: NewEvent, envelope: dict[str, Any]) -> None:
     if not event.type.startswith(f"{event.stream}."):
         raise ValidationFailed(
@@ -70,17 +85,17 @@ def _validate(principal: str, event: NewEvent, envelope: dict[str, Any]) -> None
             f"principal '{principal}'은 '{event.type}'을 발행할 수 없다 (permissions.yaml)"
         )
     try:
-        payload_schema = registry.payload_schema(event.type)
+        payload_validator = _payload_validator(event.type)
     except KeyError as e:
         raise UnknownEventType(str(e)) from None
 
     errors = [
         f"envelope: {'/'.join(map(str, err.absolute_path)) or '(root)'}: {err.message}"
-        for err in Draft202012Validator(registry.envelope_schema()).iter_errors(envelope)
+        for err in _envelope_validator().iter_errors(envelope)
     ]
     errors += [
         f"payload: {'/'.join(map(str, err.absolute_path)) or '(root)'}: {err.message}"
-        for err in Draft202012Validator(payload_schema).iter_errors(event.payload)
+        for err in payload_validator.iter_errors(event.payload)
     ]
     if errors:
         raise ValidationFailed(f"'{event.type}' 스키마 위반: " + "; ".join(errors))

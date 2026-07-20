@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from functools import cache
 from typing import Any
 
 from jsonschema import Draft202012Validator
@@ -31,6 +32,14 @@ class EnvelopeGateError(Exception):
     """relay 방어선의 봉투 검증 실패 — DLQ 대상 (ADR-017 §2)."""
 
 
+# 봉투 검증기는 한 번만 컴파일한다 — relay는 발행 행마다 _gate를 도는 핫패스라,
+# append마다 새 Draft202012Validator를 만들면 메타스키마·$ref 처리가 매번 낭비된다.
+# 스키마 원천(lf_schemas.registry)이 @cache라 프로세스 수명 내 불변이다.
+@cache
+def _envelope_validator() -> Draft202012Validator:
+    return Draft202012Validator(registry.envelope_schema())
+
+
 def _gate(env: str, envelope: dict[str, Any]) -> str:
     """봉투를 재검증하고 발행 subject를 반환한다.
 
@@ -39,7 +48,7 @@ def _gate(env: str, envelope: dict[str, Any]) -> str:
     """
     errors = [
         f"{'/'.join(map(str, err.absolute_path)) or '(root)'}: {err.message}"
-        for err in Draft202012Validator(registry.envelope_schema()).iter_errors(envelope)
+        for err in _envelope_validator().iter_errors(envelope)
     ]
     if errors:
         raise EnvelopeGateError("; ".join(errors))
