@@ -3,7 +3,7 @@ import { memo, useEffect, useState } from "react";
 import type { Community, CommunityPost } from "@/lib/community";
 import { ICON } from "@/lib/data";
 import { relativeTime } from "@/lib/live-feed";
-import { COLOR } from "@/lib/tokens";
+import { COLOR, WEIGHT, RADIUS } from "@/lib/tokens";
 
 import { Icon } from "./Icon";
 
@@ -54,7 +54,7 @@ function CommunityTabInner({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ fontSize: 20, fontWeight: 800 }}>커뮤니티</div>
+          <div style={{ fontSize: 20, fontWeight: WEIGHT.heavy }}>커뮤니티</div>
           <div
             style={{
               display: "inline-flex",
@@ -63,16 +63,16 @@ function CommunityTabInner({
               padding: "4px 12px",
               background: "#EAF1FB",
               color: "#4a72b8",
-              borderRadius: 9999,
+              borderRadius: RADIUS.pill,
               fontSize: 12,
-              fontWeight: 800,
+              fontWeight: WEIGHT.heavy,
             }}
           >
             <Icon d={ICON.users} size={12} /> 내집단의 소식
           </div>
         </div>
         {selected && (
-          <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: 600 }}>
+          <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
             {selected.name} · {posts.length}개
           </div>
         )}
@@ -99,12 +99,12 @@ function CommunityTabInner({
                 onClick={() => onSelect(c.id)}
                 style={{
                   padding: "8px 16px",
-                  borderRadius: 9999,
+                  borderRadius: RADIUS.pill,
                   border: active ? "1.5px solid #4a72b8" : "1.5px solid #E0E7F2",
                   background: active ? "#4a72b8" : COLOR.white,
                   color: active ? COLOR.white : "#5A6478",
                   fontSize: 13,
-                  fontWeight: 700,
+                  fontWeight: WEIGHT.bold,
                   cursor: "pointer",
                 }}
               >
@@ -115,7 +115,7 @@ function CommunityTabInner({
         </div>
 
         {selected && (
-          <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: 600, lineHeight: 1.6 }}>
+          <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: WEIGHT.semibold, lineHeight: 1.6 }}>
             {selected.description}
           </div>
         )}
@@ -141,7 +141,7 @@ function CommunityTabInner({
                 style={{
                   border: "1.5px solid #E2E9F3",
                   background: COLOR.white,
-                  borderRadius: 20,
+                  borderRadius: RADIUS.xl,
                   padding: "20px 24px",
                   display: "flex",
                   flexDirection: "column",
@@ -160,7 +160,7 @@ function CommunityTabInner({
                       alignItems: "center",
                       justifyContent: "center",
                       fontSize: 17,
-                      fontWeight: 800,
+                      fontWeight: WEIGHT.heavy,
                       color: COLOR.ink,
                       flexShrink: 0,
                     }}
@@ -168,16 +168,16 @@ function CommunityTabInner({
                     {name.slice(0, 1).toUpperCase()}
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                    <div style={{ fontSize: 15, fontWeight: 800 }}>{name}</div>
-                    <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: 600 }}>
+                    <div style={{ fontSize: 15, fontWeight: WEIGHT.heavy }}>{name}</div>
+                    <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
                       {relativeTime(post.occurredAt)}
                     </div>
                   </div>
                 </div>
                 {post.title && (
-                  <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.5 }}>{post.title}</div>
+                  <div style={{ fontSize: 15, fontWeight: WEIGHT.bold, lineHeight: 1.5 }}>{post.title}</div>
                 )}
-                <div style={{ fontSize: 14, lineHeight: 1.65, fontWeight: 500, color: COLOR.ink }}>
+                <div style={{ fontSize: 14, lineHeight: 1.65, fontWeight: WEIGHT.regular, color: COLOR.ink }}>
                   {post.body}
                 </div>
               </div>
@@ -194,12 +194,12 @@ function EmptyCard({ children }: { children: React.ReactNode }) {
     <div
       style={{
         border: "1.5px dashed #D3DDEC",
-        borderRadius: 20,
+        borderRadius: RADIUS.xl,
         padding: "40px 24px",
         textAlign: "center",
         color: COLOR.faint,
         fontSize: 14,
-        fontWeight: 600,
+        fontWeight: WEIGHT.semibold,
         lineHeight: 1.7,
         background: COLOR.white,
       }}

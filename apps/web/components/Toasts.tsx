@@ -1,6 +1,6 @@
 import { TOAST_ICON_D } from "@/lib/data";
 import type { Toast } from "@/lib/types";
-import { COLOR } from "@/lib/tokens";
+import { COLOR, WEIGHT, RADIUS } from "@/lib/tokens";
 
 import { Icon } from "./Icon";
 import { Pressable } from "./Pressable";
@@ -30,7 +30,7 @@ export function Toasts({ toasts, onClose }: ToastsProps) {
           style={{
             background: COLOR.white,
             border: "1.5px solid #E2EAF6",
-            borderRadius: 18,
+            borderRadius: RADIUS.lg,
             padding: "14px 18px",
             display: "flex",
             gap: 12,
@@ -43,7 +43,7 @@ export function Toasts({ toasts, onClose }: ToastsProps) {
             style={{
               width: 34,
               height: 34,
-              borderRadius: 12,
+              borderRadius: RADIUS.xs,
               background: t.iconBg,
               display: "flex",
               alignItems: "center",
@@ -54,8 +54,8 @@ export function Toasts({ toasts, onClose }: ToastsProps) {
             <Icon d={TOAST_ICON_D[t.icon]} size={16} color={t.iconColor} />
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
-            <div style={{ fontSize: 13, fontWeight: 800 }}>{t.title}</div>
-            <div style={{ fontSize: 12, color: COLOR.muted, lineHeight: 1.5, fontWeight: 600 }}>
+            <div style={{ fontSize: 13, fontWeight: WEIGHT.heavy }}>{t.title}</div>
+            <div style={{ fontSize: 12, color: COLOR.muted, lineHeight: 1.5, fontWeight: WEIGHT.semibold }}>
               {t.body}
             </div>
           </div>
@@ -65,7 +65,7 @@ export function Toasts({ toasts, onClose }: ToastsProps) {
             style={{
               color: COLOR.fainter,
               fontSize: 14,
-              fontWeight: 800,
+              fontWeight: WEIGHT.heavy,
               lineHeight: 1,
             }}
           >

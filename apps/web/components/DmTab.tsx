@@ -12,7 +12,7 @@ import type { Range } from "@/lib/range";
 import type { DmMessage } from "@/lib/types";
 import { useWorldClock } from "@/lib/world-clock";
 import { useDemoWorldTime } from "@/lib/world-clock-display";
-import { COLOR } from "@/lib/tokens";
+import { COLOR, WEIGHT, RADIUS } from "@/lib/tokens";
 
 import { Face } from "./Face";
 import { Icon } from "./Icon";
@@ -153,9 +153,9 @@ function InboxList({
           borderBottom: "1.5px solid #EEF3FB",
         }}
       >
-        <div style={{ fontSize: 20, fontWeight: 800 }}>받은 것</div>
+        <div style={{ fontSize: 20, fontWeight: WEIGHT.heavy }}>받은 것</div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: 600 }}>
+          <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
             {/* 빈 인박스의 시작점 카드(데모 인트로)는 아직 대화가 아니다 */}
             대화 {emptyInbox ? 0 : threads.length}개
           </div>
@@ -181,12 +181,12 @@ function InboxList({
           <div
             style={{
               border: "1.5px dashed #D5DEEE",
-              borderRadius: 18,
+              borderRadius: RADIUS.lg,
               padding: "26px 22px",
               textAlign: "center",
               color: COLOR.faint,
               fontSize: 13,
-              fontWeight: 600,
+              fontWeight: WEIGHT.semibold,
               lineHeight: 1.7,
               background: "#FBFCFE",
               marginBottom: 6,
@@ -201,12 +201,12 @@ function InboxList({
           <div
             style={{
               border: "1.5px dashed #D5DEEE",
-              borderRadius: 18,
+              borderRadius: RADIUS.lg,
               padding: "26px 22px",
               textAlign: "center",
               color: COLOR.faint,
               fontSize: 13,
-              fontWeight: 600,
+              fontWeight: WEIGHT.semibold,
               lineHeight: 1.7,
               background: "#FBFCFE",
               marginBottom: 6,
@@ -238,7 +238,7 @@ function InboxList({
                 alignItems: "center",
                 gap: 12,
                 padding: "13px 14px",
-                borderRadius: 16,
+                borderRadius: RADIUS.md,
                 background: isUnread ? "#F4F8FE" : COLOR.white,
                 border: `1.5px solid ${isUnread ? "#D9E5F9" : COLOR.borderSoft}`,
               }}
@@ -253,7 +253,7 @@ function InboxList({
                   alignItems: "center",
                   justifyContent: "center",
                   fontSize: 16,
-                  fontWeight: 800,
+                  fontWeight: WEIGHT.heavy,
                   color: COLOR.ink,
                   flexShrink: 0,
                 }}
@@ -262,11 +262,11 @@ function InboxList({
               </div>
               <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{ fontSize: 14, fontWeight: 800, color: COLOR.ink }}>
+                  <div style={{ fontSize: 14, fontWeight: WEIGHT.heavy, color: COLOR.ink }}>
                     {nameOf(thread.actorId)}
                   </div>
                   {thread.lastAt && (
-                    <div style={{ fontSize: 11, color: COLOR.fainter, fontWeight: 600 }}>
+                    <div style={{ fontSize: 11, color: COLOR.fainter, fontWeight: WEIGHT.semibold }}>
                       {relativeTime(thread.lastAt)}
                     </div>
                   )}
@@ -358,10 +358,10 @@ function Conversation({
         </Pressable>
         <Face preset="dmHeader38" bg={partnerBg} />
         <div style={{ display: "flex", flexDirection: "column" }}>
-          <div style={{ fontSize: 15, fontWeight: 800 }}>{partnerName}</div>
+          <div style={{ fontSize: 15, fontWeight: WEIGHT.heavy }}>{partnerName}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Icon d={ICON.moon} size={12} color={COLOR.faint} />
-            <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: 600 }}>
+            <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
               답장이 느릴 수 있어요
             </div>
           </div>
@@ -390,8 +390,8 @@ function Conversation({
               color: COLOR.primaryDeep,
               background: COLOR.primarySoft,
               padding: "5px 14px",
-              borderRadius: 9999,
-              fontWeight: 700,
+              borderRadius: RADIUS.pill,
+              fontWeight: WEIGHT.bold,
               cursor: loadingOlder ? "default" : "pointer",
               opacity: loadingOlder ? 0.6 : 1,
             }}
@@ -407,8 +407,8 @@ function Conversation({
             color: COLOR.faint,
             background: COLOR.surface,
             padding: "5px 14px",
-            borderRadius: 9999,
-            fontWeight: 700,
+            borderRadius: RADIUS.pill,
+            fontWeight: WEIGHT.bold,
           }}
         >
           오늘 · 세계 시간 {worldTime}
@@ -439,7 +439,7 @@ function Conversation({
                   borderRadius: mine ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
                   fontSize: 14,
                   lineHeight: 1.55,
-                  fontWeight: 500,
+                  fontWeight: WEIGHT.regular,
                   animation: "lf-pop 0.25s ease-out",
                 }}
               >
@@ -489,7 +489,7 @@ function Conversation({
                 }}
               />
             </div>
-            <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: 600 }}>
+            <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
               {partnerName}가 입력 중...
             </div>
           </div>
@@ -515,11 +515,11 @@ function Conversation({
             background: COLOR.surface,
             border: "none",
             outline: "none",
-            borderRadius: 9999,
+            borderRadius: RADIUS.pill,
             padding: "13px 20px",
             fontSize: 14,
             color: COLOR.ink,
-            fontWeight: 500,
+            fontWeight: WEIGHT.regular,
           }}
         />
         <Pressable

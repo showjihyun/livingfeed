@@ -39,13 +39,15 @@ export const COLOR = {
   violet: "#7a68b3",
 } as const;
 
-/** 모서리 반경 — pill(알약)이 압도적으로 많다 */
+/** 모서리 반경 — pill(알약)이 압도적으로 많다. 나머지는 내림차순 스케일. */
 export const RADIUS = {
   pill: 9999,
-  lg: 20,
+  xl: 20,
+  lg: 18,
   md: 16,
   sm: 14,
-  xs: 10,
+  xs: 12,
+  xxs: 10,
 } as const;
 
 /** 글자 굵기 — 인라인에 반복되는 400~900 */

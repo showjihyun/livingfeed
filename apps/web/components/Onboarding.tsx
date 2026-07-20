@@ -1,7 +1,7 @@
 import { TOPIC_LIST } from "@/lib/data";
 import { useWorldClock } from "@/lib/world-clock";
 import { useDemoWorldTime } from "@/lib/world-clock-display";
-import { COLOR } from "@/lib/tokens";
+import { COLOR, WEIGHT, RADIUS } from "@/lib/tokens";
 
 import { Face } from "./Face";
 import { Pressable } from "./Pressable";
@@ -43,13 +43,13 @@ export function Onboarding({ topics, onToggleTopic, onEnter }: OnboardingProps) 
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <Face preset="logo34" />
-          <div style={{ fontSize: 18, fontWeight: 800 }}>LivingFeed</div>
+          <div style={{ fontSize: 18, fontWeight: WEIGHT.heavy }}>LivingFeed</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ fontSize: 30, fontWeight: 900, lineHeight: 1.25 }}>
+          <div style={{ fontSize: 30, fontWeight: WEIGHT.black, lineHeight: 1.25 }}>
             어떤 이야기가 끌리나요?
           </div>
-          <div style={{ fontSize: 14, color: COLOR.muted, lineHeight: 1.6, fontWeight: 500 }}>
+          <div style={{ fontSize: 14, color: COLOR.muted, lineHeight: 1.6, fontWeight: WEIGHT.regular }}>
             최대 2개. 첫 피드를 고르는 데만 쓰여요. 질문은 이것뿐 — 세계는 이미 진행 중입니다.
           </div>
         </div>
@@ -66,9 +66,9 @@ export function Onboarding({ topics, onToggleTopic, onEnter }: OnboardingProps) 
                   border: `1.5px solid ${on ? COLOR.primary : COLOR.border}`,
                   background: on ? COLOR.primarySoft : COLOR.white,
                   color: on ? COLOR.primaryDeep : COLOR.muted,
-                  borderRadius: 9999,
+                  borderRadius: RADIUS.pill,
                   fontSize: 14,
-                  fontWeight: 700,
+                  fontWeight: WEIGHT.bold,
                   userSelect: "none",
                 }}
               >
@@ -81,7 +81,7 @@ export function Onboarding({ topics, onToggleTopic, onEnter }: OnboardingProps) 
           style={{
             background: "#F8FBFF",
             border: "1.5px solid #E2EAF6",
-            borderRadius: 16,
+            borderRadius: RADIUS.md,
             padding: "14px 18px",
             display: "flex",
             alignItems: "center",
@@ -97,7 +97,7 @@ export function Onboarding({ topics, onToggleTopic, onEnter }: OnboardingProps) 
               animation: "lf-blink 1.6s infinite",
             }}
           />
-          <div style={{ fontSize: 13, color: COLOR.muted, fontWeight: 600 }}>
+          <div style={{ fontSize: 13, color: COLOR.muted, fontWeight: WEIGHT.semibold }}>
             지금 세계 시간 {clock} · 세계는 당신 없이도 제 갈 길을 가는 중
           </div>
         </div>
@@ -108,9 +108,9 @@ export function Onboarding({ topics, onToggleTopic, onEnter }: OnboardingProps) 
             width: "100%",
             padding: "15px 0",
             color: COLOR.white,
-            borderRadius: 9999,
+            borderRadius: RADIUS.pill,
             fontSize: 16,
-            fontWeight: 800,
+            fontWeight: WEIGHT.heavy,
             textAlign: "center",
             boxShadow: "0 6px 16px rgba(109,141,214,0.35)",
           }}

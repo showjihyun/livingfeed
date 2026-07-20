@@ -13,7 +13,7 @@
 import { useEffect, useState } from "react";
 
 import type { DigestLine, PersonalDigest } from "@/lib/digest";
-import { COLOR } from "@/lib/tokens";
+import { COLOR, WEIGHT, RADIUS } from "@/lib/tokens";
 import {
   ABSENCE_THRESHOLD_MS,
   digestSentence,
@@ -49,14 +49,14 @@ function Section({
       style={{
         background: s.bg,
         border: `1.5px solid ${s.border}`,
-        borderRadius: 16,
+        borderRadius: RADIUS.md,
         padding: "14px 18px",
         display: "flex",
         flexDirection: "column",
         gap: 8,
       }}
     >
-      <div style={{ fontSize: 11, fontWeight: 800, color: s.color, letterSpacing: 0.4 }}>
+      <div style={{ fontSize: 11, fontWeight: WEIGHT.heavy, color: s.color, letterSpacing: 0.4 }}>
         {s.label}
       </div>
       {lines.map((line, i) => (
@@ -71,13 +71,13 @@ function Section({
               flexShrink: 0,
             }}
           />
-          <div style={{ fontSize: 14, lineHeight: 1.6, fontWeight: 600, color: COLOR.ink }}>
+          <div style={{ fontSize: 14, lineHeight: 1.6, fontWeight: WEIGHT.semibold, color: COLOR.ink }}>
             {digestSentence(line, nameOf)}
           </div>
         </div>
       ))}
       {(more ?? 0) > 0 && (
-        <div style={{ fontSize: 12.5, fontWeight: 600, color: COLOR.faint, paddingLeft: 15 }}>
+        <div style={{ fontSize: 12.5, fontWeight: WEIGHT.semibold, color: COLOR.faint, paddingLeft: 15 }}>
           외 {more}건이 더 있어요
         </div>
       )}
@@ -146,8 +146,8 @@ export function Digest({ nameOf }: { nameOf: (actorId: string) => string }) {
         }}
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ fontSize: 26, fontWeight: 900, lineHeight: 1.3 }}>당신이 없는 동안</div>
-          <div style={{ fontSize: 14, color: COLOR.muted, lineHeight: 1.6, fontWeight: 500 }}>
+          <div style={{ fontSize: 26, fontWeight: WEIGHT.black, lineHeight: 1.3 }}>당신이 없는 동안</div>
+          <div style={{ fontSize: 14, color: COLOR.muted, lineHeight: 1.6, fontWeight: WEIGHT.regular }}>
             세계는 계속 흐르고 있었어요 — 그동안의 마디를 모아왔어요.
           </div>
         </div>
@@ -164,9 +164,9 @@ export function Digest({ nameOf }: { nameOf: (actorId: string) => string }) {
             padding: "13px 18px",
             background: COLOR.primary,
             color: COLOR.white,
-            borderRadius: 9999,
+            borderRadius: RADIUS.pill,
             fontSize: 15,
-            fontWeight: 800,
+            fontWeight: WEIGHT.heavy,
             textAlign: "center",
             userSelect: "none",
           }}

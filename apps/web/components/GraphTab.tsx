@@ -5,7 +5,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ActorIdentity } from "@/lib/actors";
 import { PLAYER_ID } from "@/lib/config";
 import type { LiveRelEdge, RelDimensions, WorldGraphState, WorldRelEdge } from "@/lib/graph";
-import { COLOR } from "@/lib/tokens";
+import { COLOR, WEIGHT, RADIUS } from "@/lib/tokens";
 
 import styles from "./lf.module.css";
 
@@ -700,46 +700,46 @@ function RelationshipPanel({
     <>
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ fontSize: 18, fontWeight: 900 }}>{name}</div>
+          <div style={{ fontSize: 18, fontWeight: WEIGHT.black }}>{name}</div>
           <div
             style={{
               padding: "3px 12px",
               background: COLOR.primarySoft,
               color: COLOR.primaryDeep,
-              borderRadius: 9999,
+              borderRadius: RADIUS.pill,
               fontSize: 12,
-              fontWeight: 800,
+              fontWeight: WEIGHT.heavy,
             }}
           >
             {STAGE_KO[edge.stage] ?? edge.stage}
           </div>
         </div>
-        <div style={{ fontSize: 13, fontWeight: 800, color: COLOR.muted }}>
+        <div style={{ fontSize: 13, fontWeight: WEIGHT.heavy, color: COLOR.muted }}>
           관계도 {Math.round(edge.strength * 100)}%
         </div>
       </div>
 
       {identity?.bio && (
-        <div style={{ fontSize: 13, lineHeight: 1.6, color: COLOR.muted, fontWeight: 600 }}>
+        <div style={{ fontSize: 13, lineHeight: 1.6, color: COLOR.muted, fontWeight: WEIGHT.semibold }}>
           {identity.bio}
         </div>
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ fontSize: 12, fontWeight: 800, color: COLOR.faint }}>관계의 결 (실측)</div>
+        <div style={{ fontSize: 12, fontWeight: WEIGHT.heavy, color: COLOR.faint }}>관계의 결 (실측)</div>
         {DIM_META.map((dim) => {
           const value = edge.dimensions[dim.key];
           const magnitude = Math.min(1, Math.abs(value));
           return (
             <div key={dim.key} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ width: 34, fontSize: 12, fontWeight: 700, color: COLOR.muted }}>
+              <div style={{ width: 34, fontSize: 12, fontWeight: WEIGHT.bold, color: COLOR.muted }}>
                 {dim.label}
               </div>
               <div
                 style={{
                   flex: 1,
                   height: 8,
-                  borderRadius: 9999,
+                  borderRadius: RADIUS.pill,
                   background: COLOR.borderSoft,
                   overflow: "hidden",
                 }}
@@ -748,12 +748,12 @@ function RelationshipPanel({
                   style={{
                     width: `${Math.round(magnitude * 100)}%`,
                     height: "100%",
-                    borderRadius: 9999,
+                    borderRadius: RADIUS.pill,
                     background: value < 0 ? "#C0808F" : dim.color,
                   }}
                 />
               </div>
-              <div style={{ width: 40, textAlign: "right", fontSize: 12, fontWeight: 700, color: COLOR.faint }}>
+              <div style={{ width: 40, textAlign: "right", fontSize: 12, fontWeight: WEIGHT.bold, color: COLOR.faint }}>
                 {value >= 0 ? "" : "−"}
                 {Math.round(magnitude * 100)}
               </div>
@@ -765,15 +765,15 @@ function RelationshipPanel({
       <div
         style={{
           background: COLOR.primarySoft,
-          borderRadius: 16,
+          borderRadius: RADIUS.md,
           padding: "13px 15px",
           fontSize: 12,
           lineHeight: 1.55,
           color: COLOR.muted,
-          fontWeight: 600,
+          fontWeight: WEIGHT.semibold,
         }}
       >
-        <span style={{ fontWeight: 800, color: COLOR.ink }}>개입할 수 있어요</span> — DM이나 댓글로
+        <span style={{ fontWeight: WEIGHT.heavy, color: COLOR.ink }}>개입할 수 있어요</span> — DM이나 댓글로
         {` ${name}`}과의 관계가 실제로 움직입니다. 개입은 흔적을 남겨요.
       </div>
     </>
@@ -784,12 +784,12 @@ function RelationshipPanel({
 
 const panelButtonStyle: React.CSSProperties = {
   padding: "8px 14px",
-  borderRadius: 12,
+  borderRadius: RADIUS.xs,
   border: "1.5px solid #E2EAF6",
   background: COLOR.white,
   color: COLOR.primaryDeep,
   fontSize: 12.5,
-  fontWeight: 800,
+  fontWeight: WEIGHT.heavy,
   cursor: "pointer",
   textAlign: "left",
 };
@@ -810,7 +810,7 @@ function WorldPairPanel({
   return (
     <>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ fontSize: 17, fontWeight: 900 }}>
+        <div style={{ fontSize: 17, fontWeight: WEIGHT.black }}>
           {displayName(pair.a)} ↔ {displayName(pair.b)}
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -820,9 +820,9 @@ function WorldPairPanel({
               background: COLOR.white,
               border: `1.5px solid ${toneColor}`,
               color: toneColor,
-              borderRadius: 9999,
+              borderRadius: RADIUS.pill,
               fontSize: 12,
-              fontWeight: 800,
+              fontWeight: WEIGHT.heavy,
             }}
           >
             {tone}
@@ -832,9 +832,9 @@ function WorldPairPanel({
               padding: "3px 12px",
               background: COLOR.primarySoft,
               color: COLOR.primaryDeep,
-              borderRadius: 9999,
+              borderRadius: RADIUS.pill,
               fontSize: 12,
-              fontWeight: 800,
+              fontWeight: WEIGHT.heavy,
             }}
           >
             {STAGE_KO[pair.stage] ?? pair.stage}
@@ -843,7 +843,7 @@ function WorldPairPanel({
       </div>
 
       {texture && (
-        <div style={{ fontSize: 13, lineHeight: 1.6, color: COLOR.muted, fontWeight: 600 }}>
+        <div style={{ fontSize: 13, lineHeight: 1.6, color: COLOR.muted, fontWeight: WEIGHT.semibold }}>
           {texture}
         </div>
       )}
@@ -851,12 +851,12 @@ function WorldPairPanel({
       <div
         style={{
           background: COLOR.primarySoft,
-          borderRadius: 16,
+          borderRadius: RADIUS.md,
           padding: "13px 15px",
           fontSize: 12,
           lineHeight: 1.55,
           color: COLOR.muted,
-          fontWeight: 600,
+          fontWeight: WEIGHT.semibold,
         }}
       >
         {touchesYou
@@ -889,10 +889,10 @@ function WorldFocusPanel({
   const isYou = focus === PLAYER_ID;
   return (
     <>
-      <div style={{ fontSize: 17, fontWeight: 900 }}>
+      <div style={{ fontSize: 17, fontWeight: WEIGHT.black }}>
         {displayName(focus)}의 자리에서 본 관계망
       </div>
-      <div style={{ fontSize: 13, lineHeight: 1.7, color: COLOR.faint, fontWeight: 600 }}>
+      <div style={{ fontSize: 13, lineHeight: 1.7, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
         {isYou
           ? "당신을 중심으로 세계를 보고 있어요. 관계의 결을 자세히 보려면 '나의 관계'가 더 깊습니다."
           : "가까운 인연일수록 안쪽 궤도에 있어요. 선을 클릭하면 그 인연의 결이 나타납니다."}
@@ -925,12 +925,12 @@ function ScopeChip({
       onClick={onClick}
       style={{
         padding: "7px 16px",
-        borderRadius: 9999,
+        borderRadius: RADIUS.pill,
         border: active ? "1.5px solid #6D8DD6" : "1.5px solid #E2EAF6",
         background: active ? COLOR.primarySoft : COLOR.white,
         color: active ? COLOR.ink : COLOR.faint,
         fontSize: 13,
-        fontWeight: 800,
+        fontWeight: WEIGHT.heavy,
         cursor: "pointer",
       }}
     >
@@ -1007,7 +1007,7 @@ function GraphTabInner({
           borderBottom: "1.5px solid #EEF3FB",
         }}
       >
-        <div style={{ fontSize: 18, fontWeight: 900 }}>관계 그래프</div>
+        <div style={{ fontSize: 18, fontWeight: WEIGHT.black }}>관계 그래프</div>
         <div style={{ display: "flex", gap: 8 }}>
           <ScopeChip active={!isWorld} onClick={() => switchScope("mine")}>
             나의 관계
@@ -1016,7 +1016,7 @@ function GraphTabInner({
             세계의 관계
           </ScopeChip>
         </div>
-        <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: 600 }}>
+        <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
           {isWorld
             ? "세계가 스스로 엮어온 관계망 — 인물을 클릭해 그 중심으로 보세요"
             : "노드를 클릭해 그 관계의 결을 보세요"}
@@ -1059,7 +1059,7 @@ function GraphTabInner({
                 textAlign: "center",
                 color: COLOR.faint,
                 fontSize: 14,
-                fontWeight: 600,
+                fontWeight: WEIGHT.semibold,
                 lineHeight: 1.7,
               }}
             >
@@ -1089,7 +1089,7 @@ function GraphTabInner({
               gap: 14,
               background: "rgba(255,255,255,0.85)",
               border: "1.5px solid #E2EAF6",
-              borderRadius: 9999,
+              borderRadius: RADIUS.pill,
               padding: "7px 14px",
               backdropFilter: "blur(4px)",
               pointerEvents: "none",
@@ -1101,19 +1101,19 @@ function GraphTabInner({
                   style={{
                     width: 16,
                     height: 4,
-                    borderRadius: 9999,
+                    borderRadius: RADIUS.pill,
                     background: `linear-gradient(90deg, ${KIND_STYLE[item.kind].from}, ${KIND_STYLE[item.kind].to})`,
                   }}
                 />
-                <div style={{ fontSize: 11.5, fontWeight: 800, color: COLOR.muted }}>{item.label}</div>
+                <div style={{ fontSize: 11.5, fontWeight: WEIGHT.heavy, color: COLOR.muted }}>{item.label}</div>
               </div>
             ))}
             <div style={{ width: 1, height: 14, background: COLOR.border }} />
-            <div style={{ fontSize: 11.5, fontWeight: 700, color: COLOR.faint }}>
+            <div style={{ fontSize: 11.5, fontWeight: WEIGHT.bold, color: COLOR.faint }}>
               드래그 회전 · 휠 확대 · 더블클릭 초기화
             </div>
             <div style={{ width: 1, height: 14, background: COLOR.border }} />
-            <div style={{ fontSize: 11.5, fontWeight: 800, color: liveOk ? COLOR.success : COLOR.faint }}>
+            <div style={{ fontSize: 11.5, fontWeight: WEIGHT.heavy, color: liveOk ? COLOR.success : COLOR.faint }}>
               {liveOk ? "관계도 실측 연결됨" : "관계 데이터 대기 중"}
             </div>
           </div>
@@ -1142,7 +1142,7 @@ function GraphTabInner({
                 onGoMine={() => switchScope("mine")}
               />
             ) : (
-              <div style={{ fontSize: 13, lineHeight: 1.7, color: COLOR.faint, fontWeight: 600 }}>
+              <div style={{ fontSize: 13, lineHeight: 1.7, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
                 {pairs.length > 0 ? (
                   <>
                     당신이 없는 곳에서도 관계는 자라요. 인물을 클릭하면 그 중심으로 다시 보고,
@@ -1167,7 +1167,7 @@ function GraphTabInner({
               name={nameOf(selectedEdge.actorId)}
             />
           ) : (
-            <div style={{ fontSize: 13, lineHeight: 1.7, color: COLOR.faint, fontWeight: 600 }}>
+            <div style={{ fontSize: 13, lineHeight: 1.7, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
               {edges.length > 0
                 ? "왼쪽 그래프에서 인물을 클릭하면, 그 관계의 실측 결(신뢰·친밀·원한)과 현재 단계가 여기 나타납니다."
                 : "아직 관계가 없어요. 세계에 개입하면 관계망이 자라납니다."}

@@ -5,7 +5,7 @@ import { relativeTime } from "@/lib/live-feed";
 import type { ActorProfile } from "@/lib/profile";
 import { ARC_STAGE_LABELS, FADED_BELIEF_MAX, humanize } from "@/lib/profile";
 import type { Range } from "@/lib/range";
-import { COLOR } from "@/lib/tokens";
+import { COLOR, WEIGHT, RADIUS } from "@/lib/tokens";
 
 import { Face } from "./Face";
 import { Icon } from "./Icon";
@@ -76,24 +76,24 @@ function ProfileTabInner({
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ fontSize: 26, fontWeight: 900 }}>{displayName}</div>
+              <div style={{ fontSize: 26, fontWeight: WEIGHT.black }}>{displayName}</div>
               <div
                 style={{
                   padding: "3px 12px",
                   background: COLOR.primarySoft,
                   color: COLOR.primaryDeep,
-                  borderRadius: 9999,
+                  borderRadius: RADIUS.pill,
                   fontSize: 12,
-                  fontWeight: 800,
+                  fontWeight: WEIGHT.heavy,
                 }}
               >
                 당신이 지켜보는 사람
               </div>
             </div>
-            <div style={{ fontSize: 14, color: COLOR.muted, fontWeight: 600 }}>{displayBio}</div>
+            <div style={{ fontSize: 14, color: COLOR.muted, fontWeight: WEIGHT.semibold }}>{displayBio}</div>
             {tagline && (
               <div
-                style={{ fontSize: 13, color: COLOR.faint, fontWeight: 600, fontStyle: "italic" }}
+                style={{ fontSize: 13, color: COLOR.faint, fontWeight: WEIGHT.semibold, fontStyle: "italic" }}
               >
                 {tagline}
               </div>
@@ -108,9 +108,9 @@ function ProfileTabInner({
                 padding: "10px 20px",
                 background: following ? COLOR.surface : COLOR.primary,
                 color: following ? COLOR.primaryDeep : COLOR.white,
-                borderRadius: 9999,
+                borderRadius: RADIUS.pill,
                 fontSize: 14,
-                fontWeight: 800,
+                fontWeight: WEIGHT.heavy,
               }}
             >
               {following ? "팔로잉" : "팔로우"}
@@ -122,9 +122,9 @@ function ProfileTabInner({
                 padding: "10px 20px",
                 background: COLOR.primary,
                 color: COLOR.white,
-                borderRadius: 9999,
+                borderRadius: RADIUS.pill,
                 fontSize: 14,
-                fontWeight: 800,
+                fontWeight: WEIGHT.heavy,
               }}
             >
               DM 보내기
@@ -139,27 +139,27 @@ function ProfileTabInner({
             gap: 12,
             padding: "13px 18px",
             background: "#FFF6DE",
-            borderRadius: 16,
+            borderRadius: RADIUS.md,
           }}
         >
           <Icon d={ICON.journey} size={18} color="#A87F24" />
           {aboutMe.length > 0 ? (
             // 실측 — 이 액터가 나에 대해 실제로 형성한 신념 (reflection, ADR-008)
-            <div style={{ fontSize: 13, color: COLOR.muted, fontWeight: 600 }}>
-              <span style={{ fontWeight: 800, color: COLOR.ink }}>{displayName}의 마음속</span>
+            <div style={{ fontSize: 13, color: COLOR.muted, fontWeight: WEIGHT.semibold }}>
+              <span style={{ fontWeight: WEIGHT.heavy, color: COLOR.ink }}>{displayName}의 마음속</span>
               {aboutMe.map((b) =>
                 b.confidence <= FADED_BELIEF_MAX ? (
                   // 철회된 신념 — 잔불로 남은 흔적 (ADR-008 신념 폐기)
                   <span key={b.kind} style={{ color: "#B7C2D8", fontStyle: "italic" }}>
                     {" · "}
                     {humanize(b.statement)}{" "}
-                    <span style={{ fontWeight: 700 }}>(흐려진 믿음)</span>
+                    <span style={{ fontWeight: WEIGHT.bold }}>(흐려진 믿음)</span>
                   </span>
                 ) : (
                   <span key={b.kind}>
                     {" · "}
                     {humanize(b.statement)}{" "}
-                    <span style={{ color: "#A87F24", fontWeight: 700 }}>
+                    <span style={{ color: "#A87F24", fontWeight: WEIGHT.bold }}>
                       (확신 {Math.round(b.confidence * 100)}%
                       {b.revisions > 1 ? ` · ${b.revisions}번 곱씹음` : ""})
                     </span>
@@ -169,8 +169,8 @@ function ProfileTabInner({
             </div>
           ) : (
             // 실측이 없으면 없다고 말한다 — 가공의 역사를 그리지 않는다
-            <div style={{ fontSize: 13, color: COLOR.muted, fontWeight: 600 }}>
-              <span style={{ fontWeight: 800, color: COLOR.ink }}>당신과의 역사</span> · 아직
+            <div style={{ fontSize: 13, color: COLOR.muted, fontWeight: WEIGHT.semibold }}>
+              <span style={{ fontWeight: WEIGHT.heavy, color: COLOR.ink }}>당신과의 역사</span> · 아직
               형성된 마음이 없어요 — 댓글이나 DM이 쌓이면 {displayName}이(가) 당신을
               곱씹기 시작합니다
             </div>
@@ -178,11 +178,11 @@ function ProfileTabInner({
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ fontSize: 14, fontWeight: 800 }}>인생의 장</div>
+          <div style={{ fontSize: 14, fontWeight: WEIGHT.heavy }}>인생의 장</div>
           <div
             style={{
               fontSize: 11,
-              fontWeight: 800,
+              fontWeight: WEIGHT.heavy,
               color: arc ? COLOR.success : COLOR.faint,
             }}
           >
@@ -195,7 +195,7 @@ function ProfileTabInner({
           <div
             style={{
               border: "1.5px solid #E2EAF6",
-              borderRadius: 18,
+              borderRadius: RADIUS.lg,
               padding: "16px 20px",
               display: "flex",
               flexDirection: "column",
@@ -208,18 +208,18 @@ function ProfileTabInner({
                   padding: "3px 12px",
                   background: COLOR.primarySoft,
                   color: COLOR.primaryDeep,
-                  borderRadius: 9999,
+                  borderRadius: RADIUS.pill,
                   fontSize: 12,
-                  fontWeight: 800,
+                  fontWeight: WEIGHT.heavy,
                 }}
               >
                 {ARC_STAGE_LABELS[arc.stage] ?? arc.stage}
               </div>
-              <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: 700 }}>
+              <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: WEIGHT.bold }}>
                 {relativeTime(arc.plannedAt)} 그려진 방향
               </div>
             </div>
-            <div style={{ fontSize: 14, lineHeight: 1.65, fontWeight: 500 }}>
+            <div style={{ fontSize: 14, lineHeight: 1.65, fontWeight: WEIGHT.regular }}>
               {humanize(arc.intention)}
             </div>
             {pastChapters.length > 0 && (
@@ -236,9 +236,9 @@ function ProfileTabInner({
                 {pastChapters.map((chapter, i) => (
                   <div
                     key={`${chapter.plannedAt}-${i}`}
-                    style={{ fontSize: 12, color: COLOR.faint, fontWeight: 600 }}
+                    style={{ fontSize: 12, color: COLOR.faint, fontWeight: WEIGHT.semibold }}
                   >
-                    <span style={{ color: "#7B62C9", fontWeight: 800 }}>
+                    <span style={{ color: "#7B62C9", fontWeight: WEIGHT.heavy }}>
                       {ARC_STAGE_LABELS[chapter.stage] ?? chapter.stage}
                     </span>
                     {" — "}
@@ -252,12 +252,12 @@ function ProfileTabInner({
           <div
             style={{
               border: "1.5px dashed #D8E1F0",
-              borderRadius: 18,
+              borderRadius: RADIUS.lg,
               padding: "24px 20px",
               textAlign: "center",
               color: COLOR.faint,
               fontSize: 14,
-              fontWeight: 600,
+              fontWeight: WEIGHT.semibold,
             }}
           >
             아직 그려진 인생의 장이 없어요 — 지금은 그저 일상을 살고 있습니다.
@@ -265,11 +265,11 @@ function ProfileTabInner({
         )}
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ fontSize: 14, fontWeight: 800 }}>{displayName}의 기억</div>
+          <div style={{ fontSize: 14, fontWeight: WEIGHT.heavy }}>{displayName}의 기억</div>
           <div
             style={{
               fontSize: 11,
-              fontWeight: 800,
+              fontWeight: WEIGHT.heavy,
               color: episodes.length > 0 ? COLOR.success : COLOR.faint,
             }}
           >
@@ -286,17 +286,17 @@ function ProfileTabInner({
                 key={ep.id}
                 style={{
                   border: "1.5px solid #E2EAF6",
-                  borderRadius: 18,
+                  borderRadius: RADIUS.lg,
                   padding: "16px 20px",
                   display: "flex",
                   flexDirection: "column",
                   gap: 8,
                 }}
               >
-                <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: 700 }}>
+                <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: WEIGHT.bold }}>
                   {relativeTime(ep.occurredAt)} · 마음에 남은 정도 {Math.round(ep.importance * 100)}%
                 </div>
-                <div style={{ fontSize: 14, lineHeight: 1.65, fontWeight: 500 }}>
+                <div style={{ fontSize: 14, lineHeight: 1.65, fontWeight: WEIGHT.regular }}>
                   {humanize(ep.summary)}
                 </div>
               </div>
@@ -305,12 +305,12 @@ function ProfileTabInner({
             <div
               style={{
                 border: "1.5px dashed #D8E1F0",
-                borderRadius: 18,
+                borderRadius: RADIUS.lg,
                 padding: "24px 20px",
                 textAlign: "center",
                 color: COLOR.faint,
                 fontSize: 14,
-                fontWeight: 600,
+                fontWeight: WEIGHT.semibold,
               }}
             >
               {episodeRange !== "all"
@@ -329,9 +329,9 @@ function ProfileTabInner({
                 padding: "9px 22px",
                 background: COLOR.surface,
                 color: COLOR.primaryDeep,
-                borderRadius: 9999,
+                borderRadius: RADIUS.pill,
                 fontSize: 13,
-                fontWeight: 800,
+                fontWeight: WEIGHT.heavy,
                 cursor: loadingEpisodes ? "default" : "pointer",
                 opacity: loadingEpisodes ? 0.6 : 1,
               }}

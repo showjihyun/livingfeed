@@ -1,6 +1,6 @@
 import { useWorldClock } from "@/lib/world-clock";
 import { useDemoWorldTime } from "@/lib/world-clock-display";
-import { COLOR } from "@/lib/tokens";
+import { COLOR, WEIGHT, RADIUS } from "@/lib/tokens";
 
 import { Face } from "./Face";
 
@@ -46,15 +46,15 @@ export function Curating({ step }: CuratingProps) {
           <Face preset="curateC" style={{ animation: "lf-pop 0.6s ease-out" }} />
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ fontSize: 22, fontWeight: 900 }}>{TITLES[step]}</div>
-          <div style={{ fontSize: 14, color: COLOR.muted, fontWeight: 600 }}>{SUBS[step]}</div>
+          <div style={{ fontSize: 22, fontWeight: WEIGHT.black }}>{TITLES[step]}</div>
+          <div style={{ fontSize: 14, color: COLOR.muted, fontWeight: WEIGHT.semibold }}>{SUBS[step]}</div>
         </div>
         <div
           style={{
             width: 260,
             height: 8,
             background: COLOR.border,
-            borderRadius: 9999,
+            borderRadius: RADIUS.pill,
             overflow: "hidden",
           }}
         >
@@ -63,7 +63,7 @@ export function Curating({ step }: CuratingProps) {
               width: PROGRESS[step],
               height: "100%",
               background: COLOR.primary,
-              borderRadius: 9999,
+              borderRadius: RADIUS.pill,
               transition: "width 0.6s ease",
             }}
           />
@@ -76,7 +76,7 @@ export function Curating({ step }: CuratingProps) {
             padding: "8px 16px",
             background: COLOR.white,
             border: "1.5px solid #E2EAF6",
-            borderRadius: 9999,
+            borderRadius: RADIUS.pill,
           }}
         >
           <div
@@ -88,7 +88,7 @@ export function Curating({ step }: CuratingProps) {
               animation: "lf-blink 1.4s infinite",
             }}
           />
-          <div style={{ fontSize: 12, color: COLOR.muted, fontWeight: 700 }}>
+          <div style={{ fontSize: 12, color: COLOR.muted, fontWeight: WEIGHT.bold }}>
             그동안에도 세계 시간은 흐르고 있어요 · {worldTime}
           </div>
         </div>
