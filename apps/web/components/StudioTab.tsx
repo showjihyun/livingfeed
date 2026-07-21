@@ -29,6 +29,7 @@ import {
   groupPersonas,
   personaMatches,
   personalityPreview,
+  purgeRetired,
   restorePersona,
   savePersona,
   traitBand,
@@ -853,6 +854,10 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
   const [confirmRestoreKey, setConfirmRestoreKey] = useState<string | null>(null);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
+  // 영구 삭제 — 보관본을 지워 다시 부를 수 없게 한다(되돌릴 수 없어 확인 한 단계).
+  // filename이 키다: 같은 id의 보관본이 여럿이면 그중 하나만 지운다.
+  const [confirmPurgeKey, setConfirmPurgeKey] = useState<string | null>(null);
+  const [purgingFilename, setPurgingFilename] = useState<string | null>(null);
   const [togglingIds, setTogglingIds] = useState<ReadonlySet<string>>(new Set());
   const [rosterError, setRosterError] = useState<string | null>(null);
   // 명단 조회 — 검색어, 그룹 기준(성격의 결·아키타입·생활 리듬), 선택 그룹(null=전체)
@@ -953,6 +958,26 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
       });
     },
     [restoringId, reload, refreshRetired],
+  );
+
+  const handlePurge = useCallback(
+    (entry: RetiredPersona) => {
+      if (purgingFilename !== null) return;
+      setPurgingFilename(entry.filename);
+      setRestoreError(null); // 섹션의 오류 슬롯을 공유한다 (복원/삭제 중 하나만 진행)
+      void purgeRetired(entry.filename).then((result) => {
+        setPurgingFilename(null);
+        if (result.ok) {
+          setConfirmPurgeKey(null);
+          // 방금 지운 보관본만 목록에서 내린다 (같은 id의 다른 보관본은 남는다)
+          setRetired((list) => list.filter((r) => r.filename !== entry.filename));
+        } else {
+          setRestoreError(result.message);
+          if (!result.offline) refreshRetired(); // 보관함 실측과 어긋난 상태 — 다시 본다
+        }
+      });
+    },
+    [purgingFilename, refreshRetired],
   );
 
   if (view.kind === "edit") {
@@ -1507,6 +1532,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
               >
                 <div style={{ fontSize: 12, fontWeight: WEIGHT.semibold, color: COLOR.faint, lineHeight: 1.6 }}>
                   세계를 떠났지만 기록은 남아 있어요 — 다시 불러오면 글과 관계도 함께 돌아옵니다.
+                  다시 부를 일이 없다면 영구 삭제로 보관본을 지울 수 있어요 (되돌릴 수 없어요).
                 </div>
 
                 {restoreError && (
@@ -1529,6 +1555,8 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                 {retired.map((entry) => {
                   const confirming = confirmRestoreKey === entry.filename;
                   const restoring = restoringId === entry.id;
+                  const purgeConfirming = confirmPurgeKey === entry.filename;
+                  const purging = purgingFilename === entry.filename;
                   return (
                     <div
                       key={entry.filename}
@@ -1577,26 +1605,48 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                             {entry.archetype || "결이 기록되지 않았어요"}
                           </div>
                         </div>
-                        {!confirming && (
-                          <Pressable
-                            onClick={() => {
-                              setConfirmRestoreKey(entry.filename);
-                              setRestoreError(null);
-                            }}
-                            className={styles.press95}
-                            style={{
-                              padding: "8px 16px",
-                              borderRadius: RADIUS.pill,
-                              background: COLOR.white,
-                              border: `1.5px solid ${AMBER.border}`,
-                              color: AMBER.text,
-                              fontSize: 13,
-                              fontWeight: WEIGHT.heavy,
-                              flexShrink: 0,
-                            }}
-                          >
-                            다시 불러오기
-                          </Pressable>
+                        {!confirming && !purgeConfirming && (
+                          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                            <Pressable
+                              onClick={() => {
+                                setConfirmRestoreKey(entry.filename);
+                                setConfirmPurgeKey(null);
+                                setRestoreError(null);
+                              }}
+                              className={styles.press95}
+                              style={{
+                                padding: "8px 16px",
+                                borderRadius: RADIUS.pill,
+                                background: COLOR.white,
+                                border: `1.5px solid ${AMBER.border}`,
+                                color: AMBER.text,
+                                fontSize: 13,
+                                fontWeight: WEIGHT.heavy,
+                              }}
+                            >
+                              다시 불러오기
+                            </Pressable>
+                            <Pressable
+                              onClick={() => {
+                                setConfirmPurgeKey(entry.filename);
+                                setConfirmRestoreKey(null);
+                                setRestoreError(null);
+                              }}
+                              aria-label={`${entry.name || entry.id} 영구 삭제`}
+                              className={styles.press95}
+                              style={{
+                                padding: "8px 14px",
+                                borderRadius: RADIUS.pill,
+                                background: COLOR.white,
+                                border: `1.5px solid ${FAREWELL.border}`,
+                                color: FAREWELL.soft,
+                                fontSize: 13,
+                                fontWeight: WEIGHT.heavy,
+                              }}
+                            >
+                              영구 삭제
+                            </Pressable>
+                          </div>
                         )}
                       </div>
 
@@ -1644,6 +1694,68 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                               onClick={() => {
                                 if (restoring) return;
                                 setConfirmRestoreKey(null);
+                                setRestoreError(null);
+                              }}
+                              className={styles.press95}
+                              style={{
+                                padding: "8px 16px",
+                                borderRadius: RADIUS.pill,
+                                background: COLOR.surface,
+                                color: COLOR.muted,
+                                fontSize: 13,
+                                fontWeight: WEIGHT.heavy,
+                              }}
+                            >
+                              그대로 두기
+                            </Pressable>
+                          </div>
+                        </div>
+                      )}
+
+                      {purgeConfirming && (
+                        <div
+                          style={{
+                            background: FAREWELL.bg,
+                            border: `1.5px solid ${FAREWELL.border}`,
+                            borderRadius: RADIUS.sm,
+                            padding: "13px 16px",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 10,
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: 13,
+                              fontWeight: WEIGHT.bold,
+                              color: FAREWELL.text,
+                              lineHeight: 1.65,
+                            }}
+                          >
+                            {entry.name || entry.id} — 이 보관본을 영구히 삭제할까요? 다시
+                            불러올 수 없어요. (세계에 이미 남긴 역사는 지워지지 않아요.)
+                          </div>
+                          <div style={{ display: "flex", gap: 10 }}>
+                            <Pressable
+                              onClick={() => handlePurge(entry)}
+                              disabled={purging}
+                              className={styles.press95}
+                              style={{
+                                padding: "8px 16px",
+                                borderRadius: RADIUS.pill,
+                                background: purging ? COLOR.borderMuted : FAREWELL.solid,
+                                color: COLOR.white,
+                                fontSize: 13,
+                                fontWeight: WEIGHT.heavy,
+                                cursor: purging ? "default" : "pointer",
+                              }}
+                            >
+                              {purging ? "지우는 중…" : "영구 삭제"}
+                            </Pressable>
+                            <Pressable
+                              onClick={() => {
+                                if (purging) return;
+                                setConfirmPurgeKey(null);
                                 setRestoreError(null);
                               }}
                               className={styles.press95}

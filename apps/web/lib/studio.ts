@@ -433,6 +433,43 @@ export async function restorePersona(id: string): Promise<RestoreResult> {
   }
 }
 
+/* ── 영구 삭제 (보관본 purge) — 은퇴의 끝: 다시 부를 수 없게 보관본을 지운다 ── */
+
+export type PurgeResult =
+  | { ok: true; name: string }
+  | {
+      ok: false;
+      /** true면 게이트웨이 자체에 닿지 못한 것 — 서버의 거절과 구분해 보여준다 */
+      offline: boolean;
+      message: string;
+    };
+
+/** 보관된 인물을 영구 삭제한다 — 되돌릴 수 없다 (호출 전 확인은 화면의 몫).
+    filename이 키다: 같은 id의 보관본(-2, -3…) 중 정확히 하나만 지운다. */
+export async function purgeRetired(filename: string): Promise<PurgeResult> {
+  try {
+    const response = await fetch(
+      `${GATEWAY_URL}/admin/personas/retired/${encodeURIComponent(filename)}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) {
+      const message =
+        response.status === 404
+          ? "보관함에 이 사람의 기록이 없어요"
+          : `영구 삭제하지 못했어요 (gateway ${response.status})`;
+      return { ok: false, offline: false, message };
+    }
+    const body = (await response.json()) as { filename: string; name: string };
+    return { ok: true, name: body.name };
+  } catch {
+    return {
+      ok: false,
+      offline: true,
+      message: "게이트웨이에 닿지 못했어요 — 연결되면 다시 시도해주세요",
+    };
+  }
+}
+
 /* ── 명단 훅 ── */
 
 export function usePersonaRoster(enabled: boolean): {

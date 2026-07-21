@@ -866,6 +866,75 @@ async def test_admin_token_gates_restore_routes(personas_dir, returned_events):
     assert returned_events == []
 
 
+# ── DELETE /retired/{filename} — 영구 삭제: 보관본만 지운다(역사 이벤트 불변) ──
+
+
+async def test_purge_removes_archive_and_blocks_restore(personas_dir, retired_events):
+    async with make_client(personas_dir) as client:
+        await client.delete("/admin/personas/a_zed", params={"retired_by": "p_reaper"})
+        resp = await client.delete("/admin/personas/retired/zed.yaml")
+        archives = (await client.get("/admin/personas/retired")).json()["retired"]
+        restore = await client.post(
+            "/admin/personas/a_zed/restore", params={"returned_by": "p_keeper"}
+        )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"filename": "zed.yaml", "name": "제드"}
+    # 보관본이 사라졌다 — 목록에서도, 복원 경로에서도 (되돌릴 수 없다)
+    assert not (personas_dir / "retired" / "zed.yaml").exists()
+    assert archives == []
+    assert restore.status_code == 404
+    # 은퇴 이벤트(역사)는 그대로 — 영구 삭제는 파일만 지운다 (새 이벤트 없음)
+    assert len(retired_events) == 1
+
+
+async def test_purge_unknown_filename_is_404(personas_dir):
+    async with make_client(personas_dir) as client:
+        resp = await client.delete("/admin/personas/retired/nobody.yaml")
+    assert resp.status_code == 404
+
+
+async def test_purge_targets_only_the_archive_never_root(personas_dir, retired_events):
+    # /retired/{filename}은 보관함만 겨눈다 — 루트의 살아있는 페르소나는 못 지운다
+    async with make_client(personas_dir) as client:
+        resp = await client.delete("/admin/personas/retired/ari.yaml")
+        listed = (await client.get("/admin/personas")).json()["personas"]
+
+    assert resp.status_code == 404  # 보관함에 없다 (루트 파일이라도)
+    assert (personas_dir / "ari.yaml").exists()  # 살아있는 사람은 안전하다
+    assert [d["id"] for d in listed] == ["a_ari", "a_zed"]
+    assert retired_events == []
+
+
+async def test_purge_removes_only_the_named_archive(personas_dir, retired_events):
+    # 같은 id의 보관본이 여럿(-2)이어도 filename으로 하나만 지운다
+    prior = ZED_YAML.replace("id: a_zed", "id: a_zed_elder").replace("name: 제드", "name: 옛 제드")
+    retired = personas_dir / "retired"
+    retired.mkdir()
+    (retired / "zed.yaml").write_text(prior, encoding="utf-8")
+
+    async with make_client(personas_dir) as client:
+        await client.delete("/admin/personas/a_zed", params={"retired_by": "p_reaper"})  # zed-2
+        resp = await client.delete("/admin/personas/retired/zed-2.yaml")
+        remaining = (await client.get("/admin/personas/retired")).json()["retired"]
+
+    assert resp.status_code == 200
+    assert not (retired / "zed-2.yaml").exists()
+    assert [r["filename"] for r in remaining] == ["zed.yaml"]  # 선임자 보존
+
+
+async def test_admin_token_gates_purge(personas_dir, retired_events):
+    async with make_client(personas_dir, token="secret-token") as client:
+        await client.delete(
+            "/admin/personas/a_zed",
+            params={"retired_by": "p_reaper"},
+            headers={"Authorization": "Bearer secret-token"},
+        )
+        denied = await client.delete("/admin/personas/retired/zed.yaml")
+    assert denied.status_code == 403
+    assert (personas_dir / "retired" / "zed.yaml").exists()  # 거부된 삭제는 지우지 않는다
+
+
 # ── 복원 통합 — 실제 es CAS 적재 (PG 필요, 미설정 skip — conftest 가드) ───────
 
 #: 합의된 payload 계약의 대역 스키마 — packages/schemas 등록 전 선등록용

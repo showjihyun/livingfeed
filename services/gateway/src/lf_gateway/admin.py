@@ -474,6 +474,39 @@ def create_admin_router(cfg: Config) -> APIRouter:
             )
         return {"retired": summaries}
 
+    # /personas/{persona_id}보다 먼저 서야 "retired"가 id로 잡히지 않는다.
+    # 영구 삭제 — 보관본(은퇴본)만 대상이다: 살아있는 사람은 먼저 떠나보내야 한다.
+    @router.delete("/personas/retired/{filename}")
+    async def purge_retired(filename: str) -> dict[str, str]:
+        """보관된(은퇴한) 페르소나를 영구 삭제한다 — 되돌릴 수 없다.
+
+        은퇴가 이미 read 모델을 지웠고 세계는 이 사람을 떠난 것으로 안다. 이 삭제는
+        보관본 yaml만 지워 다시 불러올 수 없게 하고, 보관함이 무한정 자라지 않게 한다
+        (es의 역사 이벤트는 불변 — 손대지 않는다). filename이 키다: 같은 id가 여러 번
+        은퇴한 보관본(-2, -3…)을 정확히 하나만 지목한다.
+
+        경로 안전: 아카이브 목록(persona_files)에 실재하는 파일만 지운다 — '../' 등
+        경로 이탈이나 비페르소나 파일은 목록에 없어 404다.
+        """
+        resting = cfg.personas_dir / RETIRED_DIRNAME
+        target = next(
+            (p for p in persona_files(resting) if p.name == filename)
+            if resting.is_dir() else iter(()),
+            None,
+        )
+        if target is None:
+            raise HTTPException(404, f"보관된 페르소나 파일이 없다: {filename}")
+        try:
+            name = str(read_doc(target).get("name") or target.stem)
+        except Exception:
+            name = target.stem  # 손상된 보관본도 지울 수는 있어야 한다
+        try:
+            target.unlink()
+        except OSError as e:
+            raise HTTPException(500, f"보관본을 지우지 못했다: {e}") from e
+        logger.info("보관 페르소나 영구 삭제: %s (%s)", filename, name)
+        return {"filename": filename, "name": name}
+
     @router.get("/personas/{persona_id}")
     async def get_persona(persona_id: str) -> PersonaDoc:
         path = find_persona_file(cfg.personas_dir, persona_id)
