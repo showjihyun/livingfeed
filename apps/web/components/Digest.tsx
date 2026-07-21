@@ -119,17 +119,22 @@ export function Digest({ nameOf }: { nameOf: (actorId: string) => string }) {
 
   return (
     <div
+      onClick={close}
       style={{
         position: "absolute",
         inset: 0,
         zIndex: 45,
-        background: "rgba(58,66,86,0.38)",
+        // 옅은 스크림 — 뒤의 라이브 피드가 비쳐, '아직 로딩 중'이 아니라 '이미
+        // 들어와 있고 이건 요약'임을 눈으로 알린다 (온보딩 게이트와 구분).
+        background: "rgba(58,66,86,0.18)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
       }}
     >
       <div
+        // 카드 안 클릭이 배경(닫기)로 새지 않게 — 바깥 클릭만 닫힘으로 친다
+        onClick={(e) => e.stopPropagation()}
         style={{
           width: 560,
           maxHeight: "84vh",
@@ -146,9 +151,31 @@ export function Digest({ nameOf }: { nameOf: (actorId: string) => string }) {
         }}
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ fontSize: 26, fontWeight: WEIGHT.black, lineHeight: 1.3 }}>당신이 없는 동안</div>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+            <div style={{ fontSize: 26, fontWeight: WEIGHT.black, lineHeight: 1.3 }}>당신이 없는 동안</div>
+            <Pressable
+              onClick={close}
+              aria-label="다이제스트 닫고 피드 보기"
+              style={{
+                flexShrink: 0,
+                width: 32,
+                height: 32,
+                borderRadius: RADIUS.pill,
+                background: COLOR.surface,
+                color: COLOR.faint,
+                fontSize: 18,
+                fontWeight: WEIGHT.bold,
+                lineHeight: 1,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              ×
+            </Pressable>
+          </div>
           <div style={{ fontSize: 14, color: COLOR.muted, lineHeight: 1.6, fontWeight: WEIGHT.regular }}>
-            세계는 계속 흐르고 있었어요 — 그동안의 마디를 모아왔어요.
+            이미 세계에 들어와 있어요 — 없는 동안의 마디만 모아뒀어요. 닫으면 바로 피드예요.
           </div>
         </div>
 

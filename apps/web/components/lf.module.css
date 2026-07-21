@@ -1,5 +1,23 @@
 /* 프로토타입의 style-hover / style-active 대응 인터랙션 클래스 */
 
+/* Pressable 공용 리셋 — 버튼 기본 크롬 제거. 인라인이 아니라 클래스로 둬야
+ * 사용처의 className 배경(.enterBtn·.navItem)과 :hover가 살아난다. 인라인 리셋은
+ * 항상 클래스를 이겨 className 배경을 지워버렸다(흰 글씨가 흰 배경에 묻힘).
+ * 이 규칙을 파일 맨 위에 둬서, 뒤에 선언된 배경 클래스가 우선순위 동률에서 이긴다.
+ * 사용처의 인라인 style은 여전히 이 클래스를 이긴다(색·정렬 오버라이드 보존). */
+.pressable {
+  appearance: none;
+  -webkit-appearance: none;
+  background: none;
+  border: none;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
 .press97:active {
   transform: scale(0.97);
 }
