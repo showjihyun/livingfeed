@@ -2,12 +2,37 @@ import { memo } from "react";
 
 import { ICON } from "@/lib/data";
 import type { HiddenItem } from "@/lib/hidden";
+import { useMessages, type Locale } from "@/lib/i18n";
 import { relativeTime } from "@/lib/live-feed";
 import type { Range } from "@/lib/range";
 import { COLOR, WEIGHT, RADIUS } from "@/lib/tokens";
 
 import { Icon } from "./Icon";
 import { RangeChips } from "./RangeChips";
+
+const en = {
+  onlyYouBadge: "For your eyes only",
+  reachedYouCount: (n: number) => `Stories that reached only you · ${n}`,
+  intro:
+    "More happens in the world than you can see. These are the stories actors told you in private — what you do with them is your call.",
+  emptyRange: "Nothing reached you in this period — widen the range to see earlier secrets.",
+  emptyAllA: "No story has reached you alone yet.",
+  emptyAllB: "Build trust, and actors will tell you what they cannot tell anyone else.",
+  privateBadge: "Private · you only",
+};
+const M: Record<Locale, typeof en> = {
+  en,
+  ko: {
+    onlyYouBadge: "당신에게만 보여요",
+    reachedYouCount: (n) => `당신에게만 닿은 이야기 · ${n}개`,
+    intro:
+      "세계에는 항상 보이는 것보다 많은 일이 일어나요. 액터가 당신에게만 비공개로 건넨 이야기입니다 — 여기서 알게 된 것을 어떻게 쓸지는 당신의 선택이에요.",
+    emptyRange: "이 기간엔 당신에게만 닿은 이야기가 없어요 — 범위를 넓히면 지난 비밀이 보여요.",
+    emptyAllA: "아직 당신에게만 닿은 이야기가 없어요.",
+    emptyAllB: "신뢰를 쌓으면, 액터가 남들에게 못 하는 말을 당신에게 건넵니다.",
+    privateBadge: "비공개 · 당신만",
+  },
+};
 
 const AVATAR_COLORS = ["#CBBDE8", COLOR.accent, "#F2B8CF", "#BFE3CF", "#E8D5A8"];
 
@@ -29,6 +54,7 @@ interface HiddenTabProps {
 export const HiddenTab = memo(HiddenTabInner);
 
 function HiddenTabInner({ items, nameOf, range, onRangeChange }: HiddenTabProps) {
+  const t = useMessages(M);
   return (
     <>
       <div
@@ -55,11 +81,11 @@ function HiddenTabInner({ items, nameOf, range, onRangeChange }: HiddenTabProps)
               fontWeight: WEIGHT.heavy,
             }}
           >
-            <Icon d={ICON.eye} size={12} /> 당신에게만 보여요
+            <Icon d={ICON.eye} size={12} /> {t.onlyYouBadge}
           </div>
         </div>
         <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
-          당신에게만 닿은 이야기 · {items.length}개
+          {t.reachedYouCount(items.length)}
         </div>
       </div>
 
@@ -78,8 +104,7 @@ function HiddenTabInner({ items, nameOf, range, onRangeChange }: HiddenTabProps)
         <RangeChips value={range} onChange={onRangeChange} />
 
         <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: WEIGHT.semibold, lineHeight: 1.6 }}>
-          세계에는 항상 보이는 것보다 많은 일이 일어나요. 액터가 당신에게만 비공개로 건넨
-          이야기입니다 — 여기서 알게 된 것을 어떻게 쓸지는 당신의 선택이에요.
+          {t.intro}
         </div>
 
         {items.length === 0 ? (
@@ -97,12 +122,12 @@ function HiddenTabInner({ items, nameOf, range, onRangeChange }: HiddenTabProps)
             }}
           >
             {range !== "all" ? (
-              <>이 기간엔 당신에게만 닿은 이야기가 없어요 — 범위를 넓히면 지난 비밀이 보여요.</>
+              t.emptyRange
             ) : (
               <>
-                아직 당신에게만 닿은 이야기가 없어요.
+                {t.emptyAllA}
                 <br />
-                신뢰를 쌓으면, 액터가 남들에게 못 하는 말을 당신에게 건넵니다.
+                {t.emptyAllB}
               </>
             )}
           </div>
@@ -155,7 +180,7 @@ function HiddenTabInner({ items, nameOf, range, onRangeChange }: HiddenTabProps)
                             fontWeight: WEIGHT.heavy,
                           }}
                         >
-                          비공개 · 당신만
+                          {t.privateBadge}
                         </div>
                       </div>
                       <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>

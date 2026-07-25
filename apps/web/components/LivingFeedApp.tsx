@@ -7,7 +7,8 @@ import { TOAST_DURATION_MS } from "@/lib/data";
 import { useActorDirectory } from "@/lib/actors";
 import type { DerivedStories } from "@/lib/comments";
 import { fetchPostComments } from "@/lib/comments";
-import { FOCUS_ACTOR_ID, PLAYER_NAME } from "@/lib/config";
+import { FOCUS_ACTOR_ID, playerName } from "@/lib/config";
+import { useLocale, useMessages, type Locale } from "@/lib/i18n";
 import { useRelationshipGraph, useWorldGraph } from "@/lib/graph";
 import { useCommunities, useCommunityFeed } from "@/lib/community";
 import { useHiddenFeed } from "@/lib/hidden";
@@ -47,10 +48,29 @@ const GraphTab = dynamic(() => import("./GraphTab").then((m) => m.GraphTab), {
 
 const ME_COMMENT = { bg: COLOR.primarySoft, avatarBg: "#D9E2F2" };
 const ACTOR_COMMENT = { bg: "#F8FAFD", avatarBg: COLOR.accent };
-// 내 댓글의 자기표시 — 표시명은 config seam에서 온다 (원시 id 노출 금지)
-const MY_COMMENT_AUTHOR = `${PLAYER_NAME} (나)`;
+
+const en = {
+  /** 식별자는 사람 이름이 아니다 — 이름을 모르는 인물의 중립 지칭 (내레이터와 같은 결) */
+  unknownActor: "Someone",
+  otherObserver: "Another observer",
+  /** 내 댓글의 자기표시 — 표시명은 config seam에서 온다 (원시 id 노출 금지) */
+  myComment: (name: string) => `${name} (me)`,
+  commentSentTitle: "Your comment was delivered",
+  commentSentBody: (name: string) => `It reached ${name} — interventions leave a trace`,
+};
+const M: Record<Locale, typeof en> = {
+  en,
+  ko: {
+    unknownActor: "누군가",
+    otherObserver: "다른 관찰자",
+    myComment: (name) => `${name} (나)`,
+    commentSentTitle: "댓글이 전달되었어요",
+    commentSentBody: (name) => `${name}에게 닿았어요 — 개입은 흔적을 남겨요`,
+  },
+};
 
 export function LivingFeedApp() {
+  const t = useMessages(M);
   const [screen, setScreen] = useState<Screen>("onboarding");
   const [tab, setTab] = useState<Tab>("feed");
   // 조회 범위(세계 시간, lib/range) — 탭마다 독립 선택, 기본은 전체(현행 화면)
@@ -60,7 +80,7 @@ export function LivingFeedApp() {
   // 선택된 커뮤니티 — 내집단 렌즈(ADR-014). null이면 목록의 첫 커뮤니티를 자동 선택
   const [selectedCommunity, setSelectedCommunity] = useState<string | null>(null);
   const [profileRange, setProfileRange] = useState<Range>("all");
-  const [topics, setTopics] = useState<string[]>(["직장 드라마"]);
+  const [topics, setTopics] = useState<string[]>(["workplace_drama"]);
   const [curateStep, setCurateStep] = useState(0);
 
   // 다중 대화 인박스 — 스레드 목록(threads API 실측) + 액터별 대화 상태.
@@ -149,10 +169,13 @@ export function LivingFeedApp() {
   const { byId } = useActorDirectory(screen === "app");
   const authorName = useCallback(
     // 식별자는 사람 이름이 아니다 — 이름을 모르는 인물은 '누군가'로 둔다 (내레이터와 같은 결)
-    (actorId: string) => byId.get(actorId)?.name ?? "누군가",
-    [byId],
+    (actorId: string) => byId.get(actorId)?.name ?? t.unknownActor,
+    [byId, t],
   );
   const identityOf = useCallback((actorId: string) => byId.get(actorId), [byId]);
+  // 내 댓글의 자기표시 — 표시명(config seam) + UI 언어의 '나' 표기
+  const { locale } = useLocale();
+  const myCommentAuthor = useMemo(() => t.myComment(playerName(locale)), [t, locale]);
   // 검색어→작성자 id 역해석 — 인덱스는 이름을 모르므로 로스터가 다리를 놓는다
   const matchActorIds = useCallback(
     (q: string) => {
@@ -205,10 +228,10 @@ export function LivingFeedApp() {
           loaded.comments.map((c) => ({
             // 이름 그라운딩: 액터는 BE 동봉 이름(없으면 디렉터리→'누군가'), 나는 자기표시
             author: c.isMine
-              ? MY_COMMENT_AUTHOR
+              ? myCommentAuthor
               : c.authorKind === "actor"
                 ? (c.authorName ?? authorName(c.authorId))
-                : "다른 관찰자",
+                : t.otherObserver,
             text: c.text,
             eventId: c.eventId,
             inReplyTo: c.inReplyTo,
@@ -217,7 +240,7 @@ export function LivingFeedApp() {
         );
       });
     }
-  }, [screen, livePosts, authorName, mergeLoadedComments]);
+  }, [screen, livePosts, authorName, mergeLoadedComments, myCommentAuthor, t]);
 
   // 인박스 목록 이어받기 (threads API) — 액터별 마지막 메시지 1건, 최신 대화 순.
   // 로컬에서 이미 대화가 시작됐으면 덮지 않는다 (히스토리와 같은 '빈 곳만 채우기' 규약).
@@ -393,7 +416,7 @@ export function LivingFeedApp() {
         [post.id]: [
           ...(prev[post.id] ?? []),
           // localSeq — ack(event id)가 오면 이 댓글이 답장 중첩의 부모가 된다
-          { author: MY_COMMENT_AUTHOR, text: trimmed, ...ME_COMMENT,
+          { author: myCommentAuthor, text: trimmed, ...ME_COMMENT,
             ...(seq !== null ? { localSeq: seq } : {}) },
         ],
       }));
@@ -405,12 +428,12 @@ export function LivingFeedApp() {
           icon: "check",
           iconBg: COLOR.successSoft,
           iconColor: COLOR.success,
-          title: "댓글이 전달되었어요",
-          body: `${authorName(post.authorId)}에게 닿았어요 — 개입은 흔적을 남겨요`,
+          title: t.commentSentTitle,
+          body: t.commentSentBody(authorName(post.authorId)),
         });
       }
     },
-    [session, toast, authorName],
+    [session, toast, authorName, myCommentAuthor, t],
   );
 
   const toggleTopic = useCallback((label: string) => {

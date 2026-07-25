@@ -10,11 +10,21 @@
  *  - FOCUS_ACTOR  → 라이브 데이터/라우트에서 선택 (프로필·DM은 '연 액터'를 따라간다)
  */
 
+import type { Locale } from "./i18n";
+
 /** 관찰자(플레이어) 식별자 — 프로덕션은 인증 세션에서 도출된다 */
 export const PLAYER_ID = process.env.NEXT_PUBLIC_LF_PLAYER_ID ?? "p_observer_0417";
 
+/** env 미지정 시의 표시명 기본값 — UI 언어를 따른다 (id가 아니라 순수 표시값) */
+const PLAYER_NAME_DEFAULTS: Record<Locale, string> = {
+  en: "Observer_0417",
+  ko: "관찰자_0417",
+};
+
 /** 관찰자(플레이어) 표시명 — 원시 id를 화면에 싣지 않기 위한 자기표시 이름 */
-export const PLAYER_NAME = process.env.NEXT_PUBLIC_LF_PLAYER_NAME ?? "관찰자_0417";
+export function playerName(locale: Locale): string {
+  return process.env.NEXT_PUBLIC_LF_PLAYER_NAME ?? PLAYER_NAME_DEFAULTS[locale];
+}
 
 /** 프로필·DM·댓글의 대상 액터 — 프로덕션은 사용자가 연 액터에서 파생된다 */
 export const FOCUS_ACTOR_ID = process.env.NEXT_PUBLIC_LF_FOCUS_ACTOR ?? "a_minji_kim";

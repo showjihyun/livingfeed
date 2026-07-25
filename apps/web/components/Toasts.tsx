@@ -1,9 +1,18 @@
 import { TOAST_ICON_D } from "@/lib/data";
 import type { Toast } from "@/lib/types";
 import { COLOR, WEIGHT, RADIUS } from "@/lib/tokens";
+import { useMessages, type Locale } from "@/lib/i18n";
 
 import { Icon } from "./Icon";
 import { Pressable } from "./Pressable";
+
+const en = {
+  close: "Close notification",
+};
+const M: Record<Locale, typeof en> = {
+  en,
+  ko: { close: "알림 닫기" },
+};
 
 interface ToastsProps {
   toasts: Toast[];
@@ -11,6 +20,7 @@ interface ToastsProps {
 }
 
 export function Toasts({ toasts, onClose }: ToastsProps) {
+  const m = useMessages(M);
   return (
     <div
       style={{
@@ -61,7 +71,7 @@ export function Toasts({ toasts, onClose }: ToastsProps) {
           </div>
           <Pressable
             onClick={() => onClose(t.id)}
-            aria-label="알림 닫기"
+            aria-label={m.close}
             style={{
               color: COLOR.fainter,
               fontSize: 14,

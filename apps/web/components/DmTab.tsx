@@ -4,6 +4,7 @@ import { memo, useEffect, useState } from "react";
 import type { KeyboardEvent } from "react";
 
 import { ICON } from "@/lib/data";
+import { useMessages, type Locale } from "@/lib/i18n";
 import { relativeTime } from "@/lib/live-feed";
 import type { DmThread } from "@/lib/messages";
 import { disablePush, enablePush, getPushState } from "@/lib/push";
@@ -27,6 +28,52 @@ function avatarColor(seed: string): string {
   for (const ch of seed) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
   return AVATAR_COLORS[hash % AVATAR_COLORS.length];
 }
+
+const en = {
+  inbox: "Inbox",
+  threadCount: (n: number) => (n === 1 ? "1 conversation" : `${n} conversations`),
+  emptyRange: "Nothing was said in this window — widen the range to see earlier conversations.",
+  emptyInboxTitle: "No messages yet.",
+  emptyInboxBody: "Say hello first — actors who remember you sometimes reach out on their own.",
+  typing: "Typing…",
+  emptyThreadPreview: "No words exchanged yet — say hello first",
+  mePrefix: "Me: ",
+  backToInbox: "Back to inbox",
+  slowReplies: "Replies may take a while",
+  loadingOlder: "Loading earlier messages…",
+  loadOlder: "Load earlier messages",
+  todayWorldTime: (time: string) => `Today · world time ${time}`,
+  partnerTyping: (name: string) => `${name} is typing…`,
+  replyPlaceholder: (name: string) => `Reply to ${name}…`,
+  send: "Send",
+  pushDenied: "Notifications are turned off in your browser settings",
+  pushOn: "Turn off new-reply notifications",
+  pushOff: "Get notified about replies that arrive while you're away",
+};
+const M: Record<Locale, typeof en> = {
+  en,
+  ko: {
+    inbox: "받은 것",
+    threadCount: (n) => `대화 ${n}개`,
+    emptyRange: "이 기간엔 오간 말이 없어요 — 범위를 넓히면 지난 대화가 보여요.",
+    emptyInboxTitle: "아직 받은 메시지가 없어요.",
+    emptyInboxBody: "먼저 말을 걸어보세요 — 당신을 기억한 액터가 먼저 연락해오기도 합니다.",
+    typing: "입력 중...",
+    emptyThreadPreview: "아직 나눈 말이 없어요 — 먼저 말을 걸어보세요",
+    mePrefix: "나: ",
+    backToInbox: "목록으로 돌아가기",
+    slowReplies: "답장이 느릴 수 있어요",
+    loadingOlder: "이전 대화 불러오는 중...",
+    loadOlder: "이전 대화 더 보기",
+    todayWorldTime: (time) => `오늘 · 세계 시간 ${time}`,
+    partnerTyping: (name) => `${name}가 입력 중...`,
+    replyPlaceholder: (name) => `${name}에게 답장하기...`,
+    send: "보내기",
+    pushDenied: "브라우저 설정에서 알림 권한이 꺼져 있어요",
+    pushOn: "새 답장 알림 끄기",
+    pushOff: "자리를 비운 사이 도착한 답장을 알림으로 받기",
+  },
+};
 
 interface DmTabProps {
   /** 인박스 스레드 목록 (최신 대화 순) — 표시 이름은 nameOf로 푼다 (하드코딩 금지) */
@@ -62,6 +109,7 @@ interface DmTabProps {
  * 미지원·게이트웨이 미가용이면 아예 그리지 않는다 (조용한 강등 — 다크 패턴 금지).
  */
 function PushBell() {
+  const t = useMessages(M);
   const [state, setState] = useState<PushState>("unsupported");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -77,11 +125,7 @@ function PushBell() {
   if (state === "unsupported") return null;
   const on = state === "on";
   const denied = state === "denied";
-  const title = denied
-    ? "브라우저 설정에서 알림 권한이 꺼져 있어요"
-    : on
-      ? "새 답장 알림 끄기"
-      : "자리를 비운 사이 도착한 답장을 알림으로 받기";
+  const title = denied ? t.pushDenied : on ? t.pushOn : t.pushOff;
   const toggle = async () => {
     if (busy || denied) return;
     setBusy(true);
@@ -142,6 +186,7 @@ function InboxList({
   typingActors,
   onOpenThread,
 }: DmTabProps) {
+  const t = useMessages(M);
   return (
     <>
       <div
@@ -153,11 +198,11 @@ function InboxList({
           borderBottom: "1.5px solid #EEF3FB",
         }}
       >
-        <div style={{ fontSize: 20, fontWeight: WEIGHT.heavy }}>받은 것</div>
+        <div style={{ fontSize: 20, fontWeight: WEIGHT.heavy }}>{t.inbox}</div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
             {/* 빈 인박스의 시작점 카드(데모 인트로)는 아직 대화가 아니다 */}
-            대화 {emptyInbox ? 0 : threads.length}개
+            {t.threadCount(emptyInbox ? 0 : threads.length)}
           </div>
           <PushBell />
         </div>
@@ -192,7 +237,7 @@ function InboxList({
               marginBottom: 6,
             }}
           >
-            이 기간엔 오간 말이 없어요 — 범위를 넓히면 지난 대화가 보여요.
+            {t.emptyRange}
           </div>
         )}
 
@@ -212,9 +257,9 @@ function InboxList({
               marginBottom: 6,
             }}
           >
-            아직 받은 메시지가 없어요.
+            {t.emptyInboxTitle}
             <br />
-            먼저 말을 걸어보세요 — 당신을 기억한 액터가 먼저 연락해오기도 합니다.
+            {t.emptyInboxBody}
           </div>
         )}
 
@@ -223,9 +268,7 @@ function InboxList({
           const isUnread = unread.has(thread.actorId);
           // 상대 발신(선제 DM·답장)은 결이 다르다 — 받은 말은 짙게, 내 말은 옅게
           const fromActor = thread.lastFromActor;
-          const preview = typing
-            ? "입력 중..."
-            : thread.lastText || "아직 나눈 말이 없어요 — 먼저 말을 걸어보세요";
+          const preview = typing ? t.typing : thread.lastText || t.emptyThreadPreview;
           return (
             <Pressable
               key={thread.actorId}
@@ -282,7 +325,7 @@ function InboxList({
                     textOverflow: "ellipsis",
                   }}
                 >
-                  {!typing && !fromActor && thread.lastText ? "나: " : ""}
+                  {!typing && !fromActor && thread.lastText ? t.mePrefix : ""}
                   {preview}
                 </div>
               </div>
@@ -319,6 +362,7 @@ function Conversation({
   onLoadOlder,
   onBack,
 }: DmTabProps & { openActorId: string }) {
+  const t = useMessages(M);
   // 세계 시각은 공용 스토어에서 — 루트 prop 대신 (앵커 전엔 데모 폴백)
   const worldTime = useWorldClock(useDemoWorldTime());
   const partnerName = nameOf(openActorId);
@@ -341,7 +385,7 @@ function Conversation({
       >
         <Pressable
           onClick={onBack}
-          aria-label="목록으로 돌아가기"
+          aria-label={t.backToInbox}
           className={styles.press92}
           style={{
             width: 34,
@@ -362,7 +406,7 @@ function Conversation({
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Icon d={ICON.moon} size={12} color={COLOR.faint} />
             <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
-              답장이 느릴 수 있어요
+              {t.slowReplies}
             </div>
           </div>
         </div>
@@ -396,7 +440,7 @@ function Conversation({
               opacity: loadingOlder ? 0.6 : 1,
             }}
           >
-            {loadingOlder ? "이전 대화 불러오는 중..." : "이전 대화 더 보기"}
+            {loadingOlder ? t.loadingOlder : t.loadOlder}
           </Pressable>
         )}
 
@@ -411,7 +455,7 @@ function Conversation({
             fontWeight: WEIGHT.bold,
           }}
         >
-          오늘 · 세계 시간 {worldTime}
+          {t.todayWorldTime(worldTime)}
         </div>
 
         {messages.map((msg, i) => {
@@ -490,7 +534,7 @@ function Conversation({
               />
             </div>
             <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
-              {partnerName}가 입력 중...
+              {t.partnerTyping(partnerName)}
             </div>
           </div>
         )}
@@ -509,7 +553,7 @@ function Conversation({
           value={draft}
           onChange={(e) => onDraftChange(e.target.value)}
           onKeyDown={onKey}
-          placeholder={`${partnerName}에게 답장하기...`}
+          placeholder={t.replyPlaceholder(partnerName)}
           style={{
             flex: 1,
             background: COLOR.surface,
@@ -524,7 +568,7 @@ function Conversation({
         />
         <Pressable
           onClick={onSend}
-          aria-label="보내기"
+          aria-label={t.send}
           className={styles.press92}
           style={{
             width: 44,

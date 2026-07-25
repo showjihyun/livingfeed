@@ -14,27 +14,56 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { PLAYER_ID } from "./config";
+import { pickMessages, type Locale } from "./i18n";
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_LF_GATEWAY_URL ?? "http://localhost:8000";
 
-/* ── 닫힌 어휘 (gateway admin 계약) ── */
+/* ── 닫힌 어휘 (gateway admin 계약) ──
+   enum 값이 데이터이고 표시 어휘는 UI 언어를 따른다 — 라벨은 호출 시점에 고른다. */
 
 export type Lifestyle = "office_worker" | "student" | "teacher" | "night_worker" | "flexible";
 export type Need = "achievement" | "belonging" | "security";
 
-export const LIFESTYLE_LABELS: Record<Lifestyle, string> = {
-  office_worker: "직장인",
-  student: "학생",
-  teacher: "교사",
-  night_worker: "야간 근무",
-  flexible: "자유 생활",
+export const LIFESTYLES: readonly Lifestyle[] = [
+  "office_worker",
+  "student",
+  "teacher",
+  "night_worker",
+  "flexible",
+];
+export const NEEDS: readonly Need[] = ["achievement", "belonging", "security"];
+
+const LIFESTYLE_MESSAGES: Record<Locale, Record<Lifestyle, string>> = {
+  en: {
+    office_worker: "Office worker",
+    student: "Student",
+    teacher: "Teacher",
+    night_worker: "Night shift",
+    flexible: "Free-form life",
+  },
+  ko: {
+    office_worker: "직장인",
+    student: "학생",
+    teacher: "교사",
+    night_worker: "야간 근무",
+    flexible: "자유 생활",
+  },
 };
 
-export const NEED_LABELS: Record<Need, string> = {
-  achievement: "성취",
-  belonging: "소속",
-  security: "안정",
+const NEED_MESSAGES: Record<Locale, Record<Need, string>> = {
+  en: { achievement: "Achievement", belonging: "Belonging", security: "Security" },
+  ko: { achievement: "성취", belonging: "소속", security: "안정" },
 };
+
+/** 생활 리듬 표시 어휘 (현재 UI 언어) */
+export function lifestyleLabels(): Record<Lifestyle, string> {
+  return pickMessages(LIFESTYLE_MESSAGES);
+}
+
+/** 욕구 표시 어휘 (현재 UI 언어) */
+export function needLabels(): Record<Need, string> {
+  return pickMessages(NEED_MESSAGES);
+}
 
 /* ── 문서 형태 (wire 계약 그대로 — PUT 본문이 곧 이 타입) ── */
 
@@ -120,73 +149,130 @@ export function traitBand(value: number): TraitBand {
   return "mid";
 }
 
-export const TRAIT_BAND_LABELS: Record<TraitBand, string> = {
-  low: "낮음",
-  mid: "중간",
-  high: "높음",
+const TRAIT_BAND_MESSAGES: Record<Locale, Record<TraitBand, string>> = {
+  en: { low: "Low", mid: "Mid", high: "High" },
+  ko: { low: "낮음", mid: "중간", high: "높음" },
 };
 
-const TRAIT_PHRASES: Record<keyof BigFive, Record<TraitBand, string>> = {
-  openness: {
-    high: "낯선 것에 끌리고",
-    mid: "익숙함과 새로움 사이를 오가고",
-    low: "익숙한 세계가 편안하고",
-  },
-  conscientiousness: {
-    high: "계획이 서야 마음이 놓이며",
-    mid: "필요할 때만 계획을 세우며",
-    low: "계획보다 즉흥이 편하며",
-  },
-  extraversion: {
-    high: "사람들 속에서 힘을 얻는",
-    mid: "혼자와 함께 사이를 오가는",
-    low: "혼자만의 시간에서 힘을 얻는",
-  },
-  agreeableness: {
-    high: "부딪히기보다 맞춰주는 편이고",
-    mid: "맞출 때는 맞추되 물러서지 않을 때는 버티고",
-    low: "져주기보다 부딪히는 편이고",
-  },
-  neuroticism: {
-    high: "작은 일도 마음에 오래 남는다",
-    mid: "흔들려도 금세 제자리를 찾는다",
-    low: "웬만한 일에는 흔들리지 않는다",
-  },
-};
+/** 슬라이더 배지 어휘 (현재 UI 언어) */
+export function traitBandLabels(): Record<TraitBand, string> {
+  return pickMessages(TRAIT_BAND_MESSAGES);
+}
+
+type TraitPhrases = Record<keyof BigFive, Record<TraitBand, string>>;
+
+const PREVIEW_MESSAGES: Record<Locale, { phrases: TraitPhrases; compose: (p: string[]) => string }> =
+  {
+    en: {
+      phrases: {
+        openness: {
+          high: "drawn to the unfamiliar",
+          mid: "moving between the familiar and the new",
+          low: "at ease in a familiar world",
+        },
+        conscientiousness: {
+          high: "settled only once there is a plan",
+          mid: "planning only when it matters",
+          low: "happier improvising than planning",
+        },
+        extraversion: {
+          high: "gathering strength among people",
+          mid: "drifting between company and solitude",
+          low: "gathering strength in solitude",
+        },
+        agreeableness: {
+          high: "sooner accommodating than clashing",
+          mid: "yielding where it helps, holding firm where it counts",
+          low: "sooner clashing than giving in",
+        },
+        neuroticism: {
+          high: "small things linger long in their mind",
+          mid: "shaken at times, but quick to settle",
+          low: "little shakes them",
+        },
+      },
+      // 두 문장 — 뒷문장은 새 문장이라 첫 글자를 세운다
+      compose: ([o, c, e, a, n]) =>
+        `Someone ${o}, ${c}, ${e}. ${a.charAt(0).toUpperCase()}${a.slice(1)}, ${n}.`,
+    },
+    ko: {
+      phrases: {
+        openness: {
+          high: "낯선 것에 끌리고",
+          mid: "익숙함과 새로움 사이를 오가고",
+          low: "익숙한 세계가 편안하고",
+        },
+        conscientiousness: {
+          high: "계획이 서야 마음이 놓이며",
+          mid: "필요할 때만 계획을 세우며",
+          low: "계획보다 즉흥이 편하며",
+        },
+        extraversion: {
+          high: "사람들 속에서 힘을 얻는",
+          mid: "혼자와 함께 사이를 오가는",
+          low: "혼자만의 시간에서 힘을 얻는",
+        },
+        agreeableness: {
+          high: "부딪히기보다 맞춰주는 편이고",
+          mid: "맞출 때는 맞추되 물러서지 않을 때는 버티고",
+          low: "져주기보다 부딪히는 편이고",
+        },
+        neuroticism: {
+          high: "작은 일도 마음에 오래 남는다",
+          mid: "흔들려도 금세 제자리를 찾는다",
+          low: "웬만한 일에는 흔들리지 않는다",
+        },
+      },
+      compose: ([o, c, e, a, n]) => `${o}, ${c}, ${e} 사람. ${a}, ${n}.`,
+    },
+  };
 
 /** 슬라이더 값 조합 → 사람 문장 두 개 (개방·성실·외향 / 친화·신경) */
 export function personalityPreview(f: BigFive): string {
-  const o = TRAIT_PHRASES.openness[traitBand(f.openness)];
-  const c = TRAIT_PHRASES.conscientiousness[traitBand(f.conscientiousness)];
-  const e = TRAIT_PHRASES.extraversion[traitBand(f.extraversion)];
-  const a = TRAIT_PHRASES.agreeableness[traitBand(f.agreeableness)];
-  const n = TRAIT_PHRASES.neuroticism[traitBand(f.neuroticism)];
-  return `${o}, ${c}, ${e} 사람. ${a}, ${n}.`;
+  const { phrases, compose } = pickMessages(PREVIEW_MESSAGES);
+  return compose(TRAIT_ORDER.map((trait) => phrases[trait][traitBand(f[trait])]));
 }
 
 /* ── 명단 조회 — 성격 그룹(아키타입)별 묶기 + 검색 ──
    그룹 어휘는 고정 목록이 아니라 명단 데이터에서 파생된다 — 창조자가 새
    아키타입을 빚으면 그룹도 함께 태어난다. */
 
+const UNGROUPED_MESSAGES: Record<Locale, string> = { en: "Uncharted", ko: "결 미정" };
+
 /** 아키타입이 비어 있는 인물의 그룹 표기 — 표시 어휘일 뿐 문서를 바꾸지 않는다 */
-export const UNGROUPED_ARCHETYPE = "결 미정";
+export function ungroupedArchetype(): string {
+  return pickMessages(UNGROUPED_MESSAGES);
+}
 
 /** 그룹 판정 키 — 카드·칩·묶기가 같은 규칙을 쓴다 */
 export function archetypeOf(persona: PersonaDoc): string {
-  return persona.archetype.trim() || UNGROUPED_ARCHETYPE;
+  return persona.archetype.trim() || ungroupedArchetype();
 }
 
-/** Big Five 한국어 표기 — 편집기 슬라이더와 성격 그룹명이 같은 어휘를 쓴다 */
-export const BIG_FIVE_LABELS: Record<keyof BigFive, string> = {
-  openness: "개방성",
-  conscientiousness: "성실성",
-  extraversion: "외향성",
-  agreeableness: "친화성",
-  neuroticism: "신경성",
+const BIG_FIVE_MESSAGES: Record<Locale, Record<keyof BigFive, string>> = {
+  en: {
+    openness: "Openness",
+    conscientiousness: "Conscientiousness",
+    extraversion: "Extraversion",
+    agreeableness: "Agreeableness",
+    neuroticism: "Neuroticism",
+  },
+  ko: {
+    openness: "개방성",
+    conscientiousness: "성실성",
+    extraversion: "외향성",
+    agreeableness: "친화성",
+    neuroticism: "신경성",
+  },
 };
 
+/** Big Five 표기 — 편집기 슬라이더와 성격 그룹명이 같은 어휘를 쓴다 */
+export function bigFiveLabels(): Record<keyof BigFive, string> {
+  return pickMessages(BIG_FIVE_MESSAGES);
+}
+
 /** 결정적 순회 순서 — 동률일 때도 같은 인물은 언제나 같은 그룹에 선다 */
-const TRAIT_ORDER: readonly (keyof BigFive)[] = [
+export const TRAIT_ORDER: readonly (keyof BigFive)[] = [
   "openness",
   "conscientiousness",
   "extraversion",
@@ -206,23 +292,44 @@ export function traitGroup(f: BigFive): string {
       dominant = trait;
     }
   }
-  if (dominant === null || traitBand(f[dominant]) === "mid") return "고른 결";
-  return `${BIG_FIVE_LABELS[dominant]} ${f[dominant] > 0.5 ? "높은" : "낮은"} 결`;
+  const t = pickMessages(TRAIT_GROUP_MESSAGES);
+  if (dominant === null || traitBand(f[dominant]) === "mid") return t.even;
+  return t.leaning(bigFiveLabels()[dominant], f[dominant] > 0.5);
 }
+
+const TRAIT_GROUP_MESSAGES: Record<
+  Locale,
+  { even: string; leaning: (trait: string, high: boolean) => string }
+> = {
+  en: {
+    even: "Evenly balanced",
+    leaning: (trait, high) => `${high ? "High" : "Low"} ${trait.toLowerCase()}`,
+  },
+  ko: {
+    even: "고른 결",
+    leaning: (trait, high) => `${trait} ${high ? "높은" : "낮은"} 결`,
+  },
+};
 
 /** 그룹 기준 — 성격의 결(Big Five 파생)·아키타입·생활 리듬 세 축 */
 export type GroupAxis = "trait" | "archetype" | "lifestyle";
 
-export const GROUP_AXIS_LABELS: Record<GroupAxis, string> = {
-  trait: "성격의 결",
-  archetype: "아키타입",
-  lifestyle: "생활 리듬",
+export const GROUP_AXES: readonly GroupAxis[] = ["trait", "archetype", "lifestyle"];
+
+const GROUP_AXIS_MESSAGES: Record<Locale, Record<GroupAxis, string>> = {
+  en: { trait: "Personality", archetype: "Archetype", lifestyle: "Life rhythm" },
+  ko: { trait: "성격의 결", archetype: "아키타입", lifestyle: "생활 리듬" },
 };
+
+/** 그룹 축 표시 어휘 (현재 UI 언어) */
+export function groupAxisLabels(): Record<GroupAxis, string> {
+  return pickMessages(GROUP_AXIS_MESSAGES);
+}
 
 /** 카드·칩·묶기가 공유하는 그룹 판정 — 축이 무엇이든 표시 어휘로 판정한다 */
 export function groupKeyOf(persona: PersonaDoc, axis: GroupAxis): string {
   if (axis === "archetype") return archetypeOf(persona);
-  if (axis === "lifestyle") return LIFESTYLE_LABELS[persona.lifestyle] ?? persona.lifestyle;
+  if (axis === "lifestyle") return lifestyleLabels()[persona.lifestyle] ?? persona.lifestyle;
   return traitGroup(persona.big_five);
 }
 
@@ -256,7 +363,7 @@ export function personaMatches(persona: PersonaDoc, rawQuery: string): boolean {
     persona.name,
     persona.id,
     persona.archetype,
-    LIFESTYLE_LABELS[persona.lifestyle] ?? persona.lifestyle,
+    lifestyleLabels()[persona.lifestyle] ?? persona.lifestyle,
     persona.identity_core,
     ...persona.goals.map((g) => g.description),
     ...persona.secrets.map((s) => s.description),
@@ -296,13 +403,57 @@ function parseValidationDetail(detail: unknown): {
       if (path) fieldErrors[path] = entry.msg;
     }
   }
+  const t = pickMessages(GATEWAY_MESSAGES);
   return {
-    message: Object.keys(fieldErrors).length
-      ? "몇 군데가 아직 세계의 규칙에 맞지 않아요 — 표시된 곳을 봐주세요"
-      : "입력을 다시 확인해주세요",
+    message: Object.keys(fieldErrors).length ? t.someFieldsInvalid : t.checkInput,
     fieldErrors,
   };
 }
+
+/* ── 게이트웨이 응답 문구 — 창조자에게 보이는 결과 알림 (UI 크롬) ── */
+const GATEWAY_MESSAGES: Record<
+  Locale,
+  {
+    someFieldsInvalid: string;
+    checkInput: string;
+    saveRejected: (status: number) => string;
+    unreachable: string;
+    alreadyLeft: string;
+    notInRoster: string;
+    releaseFailed: (status: number) => string;
+    alreadyLiving: string;
+    notInArchive: string;
+    restoreFailed: (status: number) => string;
+    purgeFailed: (status: number) => string;
+  }
+> = {
+  en: {
+    someFieldsInvalid: "A few things do not fit the world's rules yet — check the marked fields",
+    checkInput: "Please check your input again",
+    saveRejected: (status) => `The save was rejected (gateway ${status})`,
+    unreachable: "Could not reach the gateway — try again once it is connected",
+    alreadyLeft: "This person has already left the world",
+    notInRoster: "This person is not on the world's roster",
+    releaseFailed: (status) => `Could not let them go (gateway ${status})`,
+    alreadyLiving: "This person is already living in the world",
+    notInArchive: "The archive has no record of this person",
+    restoreFailed: (status) => `Could not bring them back (gateway ${status})`,
+    purgeFailed: (status) => `Could not erase them for good (gateway ${status})`,
+  },
+  ko: {
+    someFieldsInvalid: "몇 군데가 아직 세계의 규칙에 맞지 않아요 — 표시된 곳을 봐주세요",
+    checkInput: "입력을 다시 확인해주세요",
+    saveRejected: (status) => `저장이 거절되었어요 (gateway ${status})`,
+    unreachable: "게이트웨이에 닿지 못했어요 — 연결되면 다시 시도해주세요",
+    alreadyLeft: "이 사람은 이미 세계를 떠났어요",
+    notInRoster: "이 사람은 세계의 명단에 없어요",
+    releaseFailed: (status) => `떠나보내지 못했어요 (gateway ${status})`,
+    alreadyLiving: "이 사람은 이미 세계에 살고 있어요",
+    notInArchive: "보관함에 이 사람의 기록이 없어요",
+    restoreFailed: (status) => `다시 불러오지 못했어요 (gateway ${status})`,
+    purgeFailed: (status) => `영구 삭제하지 못했어요 (gateway ${status})`,
+  },
+};
 
 export async function savePersona(doc: PersonaDoc): Promise<SaveResult> {
   try {
@@ -319,7 +470,7 @@ export async function savePersona(doc: PersonaDoc): Promise<SaveResult> {
       return {
         ok: false,
         offline: false,
-        message: `저장이 거절되었어요 (gateway ${response.status})`,
+        message: pickMessages(GATEWAY_MESSAGES).saveRejected(response.status),
         fieldErrors: {},
       };
     }
@@ -329,7 +480,7 @@ export async function savePersona(doc: PersonaDoc): Promise<SaveResult> {
     return {
       ok: false,
       offline: true,
-      message: "게이트웨이에 닿지 못했어요 — 연결되면 다시 시도해주세요",
+      message: pickMessages(GATEWAY_MESSAGES).unreachable,
       fieldErrors: {},
     };
   }
@@ -355,12 +506,13 @@ export async function deletePersona(id: string): Promise<DeleteResult> {
       { method: "DELETE" },
     );
     if (!response.ok) {
+      const t = pickMessages(GATEWAY_MESSAGES);
       const message =
         response.status === 410
-          ? "이 사람은 이미 세계를 떠났어요"
+          ? t.alreadyLeft
           : response.status === 404
-            ? "이 사람은 세계의 명단에 없어요"
-            : `떠나보내지 못했어요 (gateway ${response.status})`;
+            ? t.notInRoster
+            : t.releaseFailed(response.status);
       return { ok: false, offline: false, message };
     }
     const body = (await response.json()) as { actor_id: string; name: string };
@@ -369,7 +521,7 @@ export async function deletePersona(id: string): Promise<DeleteResult> {
     return {
       ok: false,
       offline: true,
-      message: "게이트웨이에 닿지 못했어요 — 연결되면 다시 시도해주세요",
+      message: pickMessages(GATEWAY_MESSAGES).unreachable,
     };
   }
 }
@@ -414,12 +566,13 @@ export async function restorePersona(id: string): Promise<RestoreResult> {
       { method: "POST" },
     );
     if (!response.ok) {
+      const t = pickMessages(GATEWAY_MESSAGES);
       const message =
         response.status === 409
-          ? "이 사람은 이미 세계에 살고 있어요"
+          ? t.alreadyLiving
           : response.status === 404
-            ? "보관함에 이 사람의 기록이 없어요"
-            : `다시 불러오지 못했어요 (gateway ${response.status})`;
+            ? t.notInArchive
+            : t.restoreFailed(response.status);
       return { ok: false, offline: false, message };
     }
     const body = (await response.json()) as { actor_id: string; name: string };
@@ -428,7 +581,7 @@ export async function restorePersona(id: string): Promise<RestoreResult> {
     return {
       ok: false,
       offline: true,
-      message: "게이트웨이에 닿지 못했어요 — 연결되면 다시 시도해주세요",
+      message: pickMessages(GATEWAY_MESSAGES).unreachable,
     };
   }
 }
@@ -453,10 +606,9 @@ export async function purgeRetired(filename: string): Promise<PurgeResult> {
       { method: "DELETE" },
     );
     if (!response.ok) {
+      const t = pickMessages(GATEWAY_MESSAGES);
       const message =
-        response.status === 404
-          ? "보관함에 이 사람의 기록이 없어요"
-          : `영구 삭제하지 못했어요 (gateway ${response.status})`;
+        response.status === 404 ? t.notInArchive : t.purgeFailed(response.status);
       return { ok: false, offline: false, message };
     }
     const body = (await response.json()) as { filename: string; name: string };
@@ -465,7 +617,7 @@ export async function purgeRetired(filename: string): Promise<PurgeResult> {
     return {
       ok: false,
       offline: true,
-      message: "게이트웨이에 닿지 못했어요 — 연결되면 다시 시도해주세요",
+      message: pickMessages(GATEWAY_MESSAGES).unreachable,
     };
   }
 }

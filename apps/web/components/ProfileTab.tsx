@@ -1,9 +1,10 @@
 import { memo } from "react";
 
 import { ICON } from "@/lib/data";
+import { useMessages, type Locale } from "@/lib/i18n";
 import { relativeTime } from "@/lib/live-feed";
 import type { ActorProfile } from "@/lib/profile";
-import { ARC_STAGE_LABELS, FADED_BELIEF_MAX, humanize } from "@/lib/profile";
+import { arcStageLabel, FADED_BELIEF_MAX, humanize } from "@/lib/profile";
 import type { Range } from "@/lib/range";
 import { COLOR, WEIGHT, RADIUS } from "@/lib/tokens";
 
@@ -12,6 +13,66 @@ import { Icon } from "./Icon";
 import { Pressable } from "./Pressable";
 import { RangeChips } from "./RangeChips";
 import styles from "./lf.module.css";
+
+const en = {
+  fallbackName: "Someone",
+  fallbackBio: "No introduction connected yet",
+  tagline: (goal: string) => `Lately focused on — ${goal}`,
+  watchingBadge: "The one you're watching",
+  following: "Following",
+  follow: "Follow",
+  sendDm: "Send a DM",
+  innerWorldOf: (name: string) => `Inside ${name}'s mind`,
+  fadedBelief: "(faded belief)",
+  beliefMeta: (pct: number, revisions: number) =>
+    `(confidence ${pct}%${revisions > 1 ? ` · mulled over ${revisions} times` : ""})`,
+  historyWithYou: "Your history together",
+  noFeelingsYet: (name: string) =>
+    `nothing has taken shape yet — as comments and DMs pile up, ${name} will start thinking about you`,
+  lifeChapters: "Life chapters",
+  arcConnected: "Live arc connected",
+  stillEmpty: "Empty for now",
+  directionDrawn: (when: string) => `Direction drawn ${when}`,
+  noChapterYet: "No life chapter has been drawn yet — for now, they're simply living day to day.",
+  memoriesOf: (name: string) => `${name}'s memories`,
+  memoriesConnected: "Live memories connected",
+  memoryWeight: (pct: number) => `stayed with them ${pct}%`,
+  emptyEpisodesRange: "No memories in this period — widen the range to see earlier days.",
+  emptyEpisodesAll: "No memories yet — what you live through together will settle here.",
+  loadingMemories: "Retrieving memories...",
+  loadMoreMemories: "Load more memories",
+};
+const M: Record<Locale, typeof en> = {
+  en,
+  ko: {
+    fallbackName: "이 사람",
+    fallbackBio: "아직 소개가 연결되지 않았어요",
+    tagline: (goal) => `요즘 몰두하는 것 — ${goal}`,
+    watchingBadge: "당신이 지켜보는 사람",
+    following: "팔로잉",
+    follow: "팔로우",
+    sendDm: "DM 보내기",
+    innerWorldOf: (name) => `${name}의 마음속`,
+    fadedBelief: "(흐려진 믿음)",
+    beliefMeta: (pct, revisions) =>
+      `(확신 ${pct}%${revisions > 1 ? ` · ${revisions}번 곱씹음` : ""})`,
+    historyWithYou: "당신과의 역사",
+    noFeelingsYet: (name) =>
+      `아직 형성된 마음이 없어요 — 댓글이나 DM이 쌓이면 ${name}이(가) 당신을 곱씹기 시작합니다`,
+    lifeChapters: "인생의 장",
+    arcConnected: "아크 실측 연결됨",
+    stillEmpty: "아직 비어 있음",
+    directionDrawn: (when) => `${when} 그려진 방향`,
+    noChapterYet: "아직 그려진 인생의 장이 없어요 — 지금은 그저 일상을 살고 있습니다.",
+    memoriesOf: (name) => `${name}의 기억`,
+    memoriesConnected: "기억 실측 연결됨",
+    memoryWeight: (pct) => `마음에 남은 정도 ${pct}%`,
+    emptyEpisodesRange: "이 기간의 기억이 없어요 — 범위를 넓히면 지난 날들이 보여요.",
+    emptyEpisodesAll: "아직 쌓인 기억이 없어요 — 함께 겪은 일이 생기면 여기에 남습니다.",
+    loadingMemories: "기억을 꺼내는 중...",
+    loadMoreMemories: "기억 더 보기",
+  },
+};
 
 interface ProfileTabProps {
   following: boolean;
@@ -41,6 +102,7 @@ function ProfileTabInner({
   loadingEpisodes,
   onLoadMoreEpisodes,
 }: ProfileTabProps) {
+  const t = useMessages(M);
   const aboutMe = profile?.aboutMe ?? [];
   const episodes = profile?.episodes ?? [];
   const identity = profile?.identity ?? null;
@@ -49,10 +111,10 @@ function ProfileTabInner({
   const pastChapters = (profile?.arcHistory ?? []).slice(0, -1);
   // 표시 이름·소개·목표는 라이브 identity에서 — 없으면 중립 문구 (특정 인물 하드코딩 금지)
   // 정체성 실측이 아직 없으면 중립 지칭 — 문장 속에서도 어색하지 않아야 한다
-  const displayName = identity?.name ?? "이 사람";
-  const displayBio = identity?.bio ?? "아직 소개가 연결되지 않았어요";
+  const displayName = identity?.name ?? t.fallbackName;
+  const displayBio = identity?.bio ?? t.fallbackBio;
   const topGoal = identity?.goals.slice().sort((a, b) => b.priority - a.priority)[0];
-  const tagline = topGoal ? `요즘 몰두하는 것 — ${topGoal.description}` : "";
+  const tagline = topGoal ? t.tagline(topGoal.description) : "";
   return (
     <div style={{ flex: 1, overflowY: "auto" }}>
       <div style={{ height: 110, background: COLOR.primarySoft }} />
@@ -87,7 +149,7 @@ function ProfileTabInner({
                   fontWeight: WEIGHT.heavy,
                 }}
               >
-                당신이 지켜보는 사람
+                {t.watchingBadge}
               </div>
             </div>
             <div style={{ fontSize: 14, color: COLOR.muted, fontWeight: WEIGHT.semibold }}>{displayBio}</div>
@@ -113,7 +175,7 @@ function ProfileTabInner({
                 fontWeight: WEIGHT.heavy,
               }}
             >
-              {following ? "팔로잉" : "팔로우"}
+              {following ? t.following : t.follow}
             </Pressable>
             <Pressable
               onClick={goDm}
@@ -127,7 +189,7 @@ function ProfileTabInner({
                 fontWeight: WEIGHT.heavy,
               }}
             >
-              DM 보내기
+              {t.sendDm}
             </Pressable>
           </div>
         </div>
@@ -146,22 +208,24 @@ function ProfileTabInner({
           {aboutMe.length > 0 ? (
             // 실측 — 이 액터가 나에 대해 실제로 형성한 신념 (reflection, ADR-008)
             <div style={{ fontSize: 13, color: COLOR.muted, fontWeight: WEIGHT.semibold }}>
-              <span style={{ fontWeight: WEIGHT.heavy, color: COLOR.ink }}>{displayName}의 마음속</span>
-              {aboutMe.map((b) =>
+              <span style={{ fontWeight: WEIGHT.heavy, color: COLOR.ink }}>
+                {t.innerWorldOf(displayName)}
+              </span>
+              {/* 한 인물이 같은 kind의 신념을 여럿 품는다 — 키는 종류가 아니라 자리다 */}
+              {aboutMe.map((b, i) =>
                 b.confidence <= FADED_BELIEF_MAX ? (
                   // 철회된 신념 — 잔불로 남은 흔적 (ADR-008 신념 폐기)
-                  <span key={b.kind} style={{ color: "#B7C2D8", fontStyle: "italic" }}>
+                  <span key={`${b.kind}-${i}`} style={{ color: "#B7C2D8", fontStyle: "italic" }}>
                     {" · "}
                     {humanize(b.statement)}{" "}
-                    <span style={{ fontWeight: WEIGHT.bold }}>(흐려진 믿음)</span>
+                    <span style={{ fontWeight: WEIGHT.bold }}>{t.fadedBelief}</span>
                   </span>
                 ) : (
-                  <span key={b.kind}>
+                  <span key={`${b.kind}-${i}`}>
                     {" · "}
                     {humanize(b.statement)}{" "}
                     <span style={{ color: "#A87F24", fontWeight: WEIGHT.bold }}>
-                      (확신 {Math.round(b.confidence * 100)}%
-                      {b.revisions > 1 ? ` · ${b.revisions}번 곱씹음` : ""})
+                      {t.beliefMeta(Math.round(b.confidence * 100), b.revisions)}
                     </span>
                   </span>
                 ),
@@ -170,15 +234,15 @@ function ProfileTabInner({
           ) : (
             // 실측이 없으면 없다고 말한다 — 가공의 역사를 그리지 않는다
             <div style={{ fontSize: 13, color: COLOR.muted, fontWeight: WEIGHT.semibold }}>
-              <span style={{ fontWeight: WEIGHT.heavy, color: COLOR.ink }}>당신과의 역사</span> · 아직
-              형성된 마음이 없어요 — 댓글이나 DM이 쌓이면 {displayName}이(가) 당신을
-              곱씹기 시작합니다
+              <span style={{ fontWeight: WEIGHT.heavy, color: COLOR.ink }}>{t.historyWithYou}</span>
+              {" · "}
+              {t.noFeelingsYet(displayName)}
             </div>
           )}
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ fontSize: 14, fontWeight: WEIGHT.heavy }}>인생의 장</div>
+          <div style={{ fontSize: 14, fontWeight: WEIGHT.heavy }}>{t.lifeChapters}</div>
           <div
             style={{
               fontSize: 11,
@@ -186,7 +250,7 @@ function ProfileTabInner({
               color: arc ? COLOR.success : COLOR.faint,
             }}
           >
-            {arc ? "아크 실측 연결됨" : "아직 비어 있음"}
+            {arc ? t.arcConnected : t.stillEmpty}
           </div>
         </div>
 
@@ -213,10 +277,10 @@ function ProfileTabInner({
                   fontWeight: WEIGHT.heavy,
                 }}
               >
-                {ARC_STAGE_LABELS[arc.stage] ?? arc.stage}
+                {arcStageLabel(arc.stage)}
               </div>
               <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: WEIGHT.bold }}>
-                {relativeTime(arc.plannedAt)} 그려진 방향
+                {t.directionDrawn(relativeTime(arc.plannedAt))}
               </div>
             </div>
             <div style={{ fontSize: 14, lineHeight: 1.65, fontWeight: WEIGHT.regular }}>
@@ -239,7 +303,7 @@ function ProfileTabInner({
                     style={{ fontSize: 12, color: COLOR.faint, fontWeight: WEIGHT.semibold }}
                   >
                     <span style={{ color: "#7B62C9", fontWeight: WEIGHT.heavy }}>
-                      {ARC_STAGE_LABELS[chapter.stage] ?? chapter.stage}
+                      {arcStageLabel(chapter.stage)}
                     </span>
                     {" — "}
                     {humanize(chapter.intention)}
@@ -260,12 +324,12 @@ function ProfileTabInner({
               fontWeight: WEIGHT.semibold,
             }}
           >
-            아직 그려진 인생의 장이 없어요 — 지금은 그저 일상을 살고 있습니다.
+            {t.noChapterYet}
           </div>
         )}
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ fontSize: 14, fontWeight: WEIGHT.heavy }}>{displayName}의 기억</div>
+          <div style={{ fontSize: 14, fontWeight: WEIGHT.heavy }}>{t.memoriesOf(displayName)}</div>
           <div
             style={{
               fontSize: 11,
@@ -273,7 +337,7 @@ function ProfileTabInner({
               color: episodes.length > 0 ? COLOR.success : COLOR.faint,
             }}
           >
-            {episodes.length > 0 ? "기억 실측 연결됨" : "아직 비어 있음"}
+            {episodes.length > 0 ? t.memoriesConnected : t.stillEmpty}
           </div>
         </div>
 
@@ -294,7 +358,7 @@ function ProfileTabInner({
                 }}
               >
                 <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: WEIGHT.bold }}>
-                  {relativeTime(ep.occurredAt)} · 마음에 남은 정도 {Math.round(ep.importance * 100)}%
+                  {relativeTime(ep.occurredAt)} · {t.memoryWeight(Math.round(ep.importance * 100))}
                 </div>
                 <div style={{ fontSize: 14, lineHeight: 1.65, fontWeight: WEIGHT.regular }}>
                   {humanize(ep.summary)}
@@ -313,9 +377,7 @@ function ProfileTabInner({
                 fontWeight: WEIGHT.semibold,
               }}
             >
-              {episodeRange !== "all"
-                ? "이 기간의 기억이 없어요 — 범위를 넓히면 지난 날들이 보여요."
-                : "아직 쌓인 기억이 없어요 — 함께 겪은 일이 생기면 여기에 남습니다."}
+              {episodeRange !== "all" ? t.emptyEpisodesRange : t.emptyEpisodesAll}
             </div>
           )}
           {episodes.length > 0 && hasMoreEpisodes && (
@@ -336,7 +398,7 @@ function ProfileTabInner({
                 opacity: loadingEpisodes ? 0.6 : 1,
               }}
             >
-              {loadingEpisodes ? "기억을 꺼내는 중..." : "기억 더 보기"}
+              {loadingEpisodes ? t.loadingMemories : t.loadMoreMemories}
             </Pressable>
           )}
         </div>

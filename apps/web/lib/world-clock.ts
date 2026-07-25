@@ -25,6 +25,9 @@
 
 import { useEffect, useState } from "react";
 
+import { formatWorldDate } from "./data";
+import { useLocale } from "./i18n";
+
 /** tick 0의 세계시각 — 배포 seam (기본값은 ADR-011 genesis) */
 export const GENESIS_UTC_MS = Date.parse(
   process.env.NEXT_PUBLIC_LF_GENESIS ?? "2026-03-01T00:00:00Z",
@@ -78,12 +81,12 @@ export function currentTick(): number | null {
   return anchor?.tick ?? null;
 }
 
-/** 표시 형식은 기존 데모 시계(data.ts)와 동일한 결 — "3월 15일 22:41" */
+/** 표시 형식은 기존 데모 시계(data.ts)와 동일한 결 — UI 언어를 따른다 */
 export function formatWorldClock(utcMs: number): string {
   const d = new Date(utcMs);
   const h = String(d.getUTCHours()).padStart(2, "0");
   const m = String(d.getUTCMinutes()).padStart(2, "0");
-  return `${d.getUTCMonth() + 1}월 ${d.getUTCDate()}일 ${h}:${m}`;
+  return formatWorldDate(d.getUTCMonth() + 1, d.getUTCDate(), `${h}:${m}`);
 }
 
 /**
@@ -92,6 +95,8 @@ export function formatWorldClock(utcMs: number): string {
  */
 export function useWorldClock(fallback: string): string {
   const [live, setLive] = useState<string | null>(null);
+  // 표기 언어가 바뀌면 다음 초를 기다리지 않고 곧바로 다시 포맷한다
+  const { locale } = useLocale();
 
   useEffect(() => {
     const refresh = () => {
@@ -101,7 +106,7 @@ export function useWorldClock(fallback: string): string {
     refresh();
     const id = window.setInterval(refresh, 1000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [locale]);
 
   return live ?? fallback;
 }

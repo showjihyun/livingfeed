@@ -15,13 +15,7 @@ export type Range = "all" | "today" | "week" | "month";
 export const TICKS_PER_WORLD_DAY = 360;
 
 export const RANGES: readonly Range[] = ["all", "today", "week", "month"];
-
-export const RANGE_LABELS: Record<Range, string> = {
-  all: "전체",
-  today: "오늘",
-  week: "이번 주",
-  month: "이번 달",
-};
+// 표시 라벨은 RangeChips의 locale 메시지에서 온다 — 이 모듈은 순수 좌표계만 안다
 
 /** 범위가 덮는 세계일 수 — 창은 항상 일 경계에서 시작한다 ("오늘"과 같은 결) */
 const RANGE_DAYS: Record<Exclude<Range, "all">, number> = {

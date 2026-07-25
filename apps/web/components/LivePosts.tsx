@@ -12,6 +12,7 @@ import { useEffect, useState, type KeyboardEvent } from "react";
 import type { DerivedStories } from "@/lib/comments";
 import { PLAYER_ID } from "@/lib/config";
 import { ICON } from "@/lib/data";
+import { useMessages, type Locale } from "@/lib/i18n";
 import type { LivePost, LiveStatus } from "@/lib/live-feed";
 import { relativeTime } from "@/lib/live-feed";
 import type { StoryTimeline } from "@/lib/story";
@@ -22,10 +23,69 @@ import { COLOR, WEIGHT, RADIUS } from "@/lib/tokens";
 import { Icon } from "./Icon";
 import { Pressable } from "./Pressable";
 
-const STATUS_CHIP: Record<LiveStatus, { label: string; bg: string; color: string; dot: string }> = {
-  live: { label: "LIVE — 세계와 연결됨", bg: COLOR.successSoft, color: COLOR.success, dot: COLOR.successBright },
-  connecting: { label: "연결 중...", bg: "#FFF6DE", color: "#A87F24", dot: "#E0B84F" },
-  offline: { label: "오프라인 — 세계와 끊김", bg: COLOR.surface, color: COLOR.faint, dot: "#B7C2D8" },
+const STATUS_CHIP: Record<LiveStatus, { bg: string; color: string; dot: string }> = {
+  live: { bg: COLOR.successSoft, color: COLOR.success, dot: COLOR.successBright },
+  connecting: { bg: "#FFF6DE", color: "#A87F24", dot: "#E0B84F" },
+  offline: { bg: COLOR.surface, color: COLOR.faint, dot: "#B7C2D8" },
+};
+
+const en = {
+  statusLabel: {
+    live: "LIVE — connected to the world",
+    connecting: "Connecting...",
+    offline: "Offline — cut off from the world",
+  } as Record<LiveStatus, string>,
+  originBadge: "Origin",
+  typingPatient: "Delivered — the reply will come in their own time",
+  typing: "Typing a reply…",
+  arcBadge: "Life chapter",
+  debutBadge: "New face",
+  yourCreationBadge: "Your creation",
+  startedByYouBadge: "A story you started",
+  drama: (score: number) => `Drama ${score}`,
+  likeDelivered: "Delivered",
+  like: "Like",
+  collapseStory: "Collapse the story",
+  followStory: "Follow the story",
+  latestDerived: (title: string) => `Latest: ${title}`,
+  collapseBorn: "Collapse the stories",
+  bornCount: (n: number) => `Stories born from this conversation · ${n}`,
+  born: "Stories born from this conversation",
+  commentPlaceholder: (name: string) =>
+    `Leave ${name} a comment… (an intervention leaves its trace)`,
+  send: "Send",
+  nowInWorld: "In the world right now",
+  emptyOffline: "No stories are flowing yet — they will fill in here when the world wakes.",
+};
+const M: Record<Locale, typeof en> = {
+  en,
+  ko: {
+    statusLabel: {
+      live: "LIVE — 세계와 연결됨",
+      connecting: "연결 중...",
+      offline: "오프라인 — 세계와 끊김",
+    },
+    originBadge: "시작점",
+    typingPatient: "전해졌어요 — 답장은 그 사람의 시간에 맞춰 와요",
+    typing: "답을 쓰고 있어요...",
+    arcBadge: "인생의 장",
+    debutBadge: "새 얼굴",
+    yourCreationBadge: "당신이 빚은 인물",
+    startedByYouBadge: "당신이 시작한 이야기",
+    drama: (score) => `드라마 ${score}`,
+    likeDelivered: "전달됨",
+    like: "좋아요",
+    collapseStory: "이야기 접기",
+    followStory: "이야기 따라가기",
+    latestDerived: (title) => `가장 최근: ${title}`,
+    collapseBorn: "낳은 이야기 접기",
+    bornCount: (n) => `이 대화가 낳은 이야기 · ${n}`,
+    born: "이 대화가 낳은 이야기",
+    commentPlaceholder: (name) => `${name}에게 댓글 남기기... (개입은 흔적을 남겨요)`,
+    send: "전송",
+    nowInWorld: "지금 세계에서",
+    emptyOffline: "아직 흐르는 이야기가 없어요 — 세계가 깨어나면 여기에 채워집니다.",
+  },
 };
 
 const AVATAR_COLORS = [COLOR.accent, "#F2B8CF", "#BFE3CF", "#E8D5A8", "#CBBDE8", "#A8D8E8"];
@@ -123,6 +183,7 @@ const STORY_VIOLET = "#8A63D2";
  * 항목의 이름·문장은 전부 BE 실측(es + read.actors) — 하드코딩 서사 없음.
  */
 export function StoryThread({ story }: { story: StoryTimeline }) {
+  const t = useMessages(M);
   return (
     <div
       style={{
@@ -192,7 +253,7 @@ export function StoryThread({ story }: { story: StoryTimeline }) {
                       fontWeight: WEIGHT.heavy,
                     }}
                   >
-                    시작점
+                    {t.originBadge}
                   </span>
                 )}
                 <span style={{ color: "#B0A6CC", fontWeight: WEIGHT.semibold }}>
@@ -216,6 +277,7 @@ const TYPING_PATIENT_AFTER_MS = 45_000;
 function TypingDots() {
   // 답장은 그 사람의 tick 차례에 온다 (LOD·세계 시간) — 잠시 후엔 타이핑이 아니라
   // 기다림의 문장으로 바꾼다. 답이 오면 이 표시 자체가 댓글로 교체된다.
+  const t = useMessages(M);
   const [patient, setPatient] = useState(false);
   useEffect(() => {
     const timer = setTimeout(() => setPatient(true), TYPING_PATIENT_AFTER_MS);
@@ -247,9 +309,7 @@ function TypingDots() {
         ))}
       </div>
       <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
-        {patient
-          ? "전해졌어요 — 답장은 그 사람의 시간에 맞춰 와요"
-          : "답을 쓰고 있어요..."}
+        {patient ? t.typingPatient : t.typing}
       </div>
     </div>
   );
@@ -275,6 +335,7 @@ function LivePostCard({
   onComment: (post: LivePost, text: string) => void;
   authorLabel: string;
 }) {
+  const t = useMessages(M);
   const [draft, setDraft] = useState("");
   const commentable = isCommentable(post);
   // 인생의 장이 넘어간 순간 (ADR-014/plan-08) — 일반 포스트와 결이 다른 서사 마디
@@ -341,7 +402,7 @@ function LivePostCard({
                   fontWeight: WEIGHT.heavy,
                 }}
               >
-                인생의 장
+                {t.arcBadge}
               </div>
             )}
             {isDebut && (
@@ -355,7 +416,7 @@ function LivePostCard({
                   fontWeight: WEIGHT.heavy,
                 }}
               >
-                새 얼굴
+                {t.debutBadge}
               </div>
             )}
             {isYourCreation && (
@@ -370,7 +431,7 @@ function LivePostCard({
                   fontWeight: WEIGHT.heavy,
                 }}
               >
-                당신이 빚은 인물
+                {t.yourCreationBadge}
               </div>
             )}
             {story?.startedByYou && !isYourCreation && (
@@ -385,12 +446,12 @@ function LivePostCard({
                   fontWeight: WEIGHT.heavy,
                 }}
               >
-                당신이 시작한 이야기
+                {t.startedByYouBadge}
               </div>
             )}
           </div>
           <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
-            {relativeTime(post.occurredAt)} · 드라마 {Math.round(post.dramaScore * 100)}
+            {relativeTime(post.occurredAt)} · {t.drama(Math.round(post.dramaScore * 100))}
             {post.tags.map((tag) => ` · #${tag}`).join("")}
           </div>
         </div>
@@ -413,7 +474,7 @@ function LivePostCard({
             userSelect: "none",
           }}
         >
-          ♥ {liked ? "전달됨" : "좋아요"}
+          ♥ {liked ? t.likeDelivered : t.like}
         </Pressable>
         {commentable && comments.length > 0 && (
           <div
@@ -450,7 +511,7 @@ function LivePostCard({
             }}
           >
             <Icon d={ICON.gitBranch} size={14} />{" "}
-            {storyOpen ? "이야기 접기" : "이야기 따라가기"}
+            {storyOpen ? t.collapseStory : t.followStory}
           </Pressable>
         )}
         {canFollowDialogue && (
@@ -459,9 +520,7 @@ function LivePostCard({
             onClick={() => setDialogueOpen((open) => !open)}
             aria-expanded={dialogueOpen}
             title={
-              derived?.latestTitle
-                ? `가장 최근: ${derived.latestTitle}`
-                : undefined
+              derived?.latestTitle ? t.latestDerived(derived.latestTitle) : undefined
             }
             style={{
               display: "flex",
@@ -478,10 +537,10 @@ function LivePostCard({
           >
             <Icon d={ICON.sparkles} size={14} />{" "}
             {dialogueOpen
-              ? "낳은 이야기 접기"
+              ? t.collapseBorn
               : derived && derived.count > 1
-                ? `이 대화가 낳은 이야기 · ${derived.count}`
-                : "이 대화가 낳은 이야기"}
+                ? t.bornCount(derived.count)
+                : t.born}
           </Pressable>
         )}
       </div>
@@ -519,7 +578,7 @@ function LivePostCard({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKey}
-            placeholder={`${authorLabel}에게 댓글 남기기... (개입은 흔적을 남겨요)`}
+            placeholder={t.commentPlaceholder(authorLabel)}
             style={{
               flex: 1,
               background: COLOR.surface,
@@ -543,7 +602,7 @@ function LivePostCard({
               fontWeight: WEIGHT.heavy,
             }}
           >
-            전송
+            {t.send}
           </Pressable>
         </div>
       )}
@@ -576,11 +635,12 @@ export function LivePosts({
   onComment: (post: LivePost, text: string) => void;
   authorName: (actorId: string) => string;
 }) {
+  const t = useMessages(M);
   const chip = STATUS_CHIP[status];
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ fontSize: 14, fontWeight: WEIGHT.heavy, color: COLOR.ink }}>지금 세계에서</div>
+        <div style={{ fontSize: 14, fontWeight: WEIGHT.heavy, color: COLOR.ink }}>{t.nowInWorld}</div>
         <div
           style={{
             display: "inline-flex",
@@ -603,7 +663,7 @@ export function LivePosts({
               animation: status === "live" ? "lf-blink 1.6s infinite" : undefined,
             }}
           />
-          {chip.label}
+          {t.statusLabel[status]}
         </div>
       </div>
       {posts.length === 0 && (status !== "live" || emptyNotice) && (
@@ -618,9 +678,7 @@ export function LivePosts({
             fontWeight: WEIGHT.semibold,
           }}
         >
-          {status !== "live"
-            ? "아직 흐르는 이야기가 없어요 — 세계가 깨어나면 여기에 채워집니다."
-            : emptyNotice}
+          {status !== "live" ? t.emptyOffline : emptyNotice}
         </div>
       )}
       {posts.map((post) => (

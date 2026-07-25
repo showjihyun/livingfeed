@@ -2,10 +2,33 @@ import { memo, useEffect, useState } from "react";
 
 import type { Community, CommunityPost } from "@/lib/community";
 import { ICON } from "@/lib/data";
+import { useMessages, type Locale } from "@/lib/i18n";
 import { relativeTime } from "@/lib/live-feed";
 import { COLOR, WEIGHT, RADIUS } from "@/lib/tokens";
 
 import { Icon } from "./Icon";
+
+const en = {
+  title: "Communities",
+  insiderBadge: "News from the inner circle",
+  postCount: (n: number) => `${n} post${n === 1 ? "" : "s"}`,
+  noCommunities: "No communities loaded yet — check the gateway and feed connection.",
+  quietCommunity: "This community is quiet for now — news will gather here once its people stir.",
+  feedUnavailable: "Could not load the community feed — it will be back in a moment.",
+  worldAuthor: "The world",
+};
+const M: Record<Locale, typeof en> = {
+  en,
+  ko: {
+    title: "커뮤니티",
+    insiderBadge: "내집단의 소식",
+    postCount: (n) => `${n}개`,
+    noCommunities: "아직 커뮤니티를 불러오지 못했어요 — 게이트웨이·피드 연결을 확인하세요.",
+    quietCommunity: "이 커뮤니티는 아직 조용해요 — 소속 인물들이 움직이면 여기 소식이 쌓입니다.",
+    feedUnavailable: "커뮤니티 피드를 불러오지 못했어요 — 잠시 후 다시 보여요.",
+    worldAuthor: "세계",
+  },
+};
 
 const AVATAR_COLORS = ["#CBBDE8", COLOR.accent, "#F2B8CF", "#BFE3CF", "#E8D5A8"];
 
@@ -35,6 +58,7 @@ function CommunityTabInner({
   available,
   nameOf,
 }: CommunityTabProps) {
+  const t = useMessages(M);
   // 목록이 오면 첫 커뮤니티를 자동 선택 (빈 화면 대신 바로 내용)
   useEffect(() => {
     if (!selectedId && communities.length > 0) onSelect(communities[0].id);
@@ -54,7 +78,7 @@ function CommunityTabInner({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ fontSize: 20, fontWeight: WEIGHT.heavy }}>커뮤니티</div>
+          <div style={{ fontSize: 20, fontWeight: WEIGHT.heavy }}>{t.title}</div>
           <div
             style={{
               display: "inline-flex",
@@ -68,12 +92,12 @@ function CommunityTabInner({
               fontWeight: WEIGHT.heavy,
             }}
           >
-            <Icon d={ICON.users} size={12} /> 내집단의 소식
+            <Icon d={ICON.users} size={12} /> {t.insiderBadge}
           </div>
         </div>
         {selected && (
           <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
-            {selected.name} · {posts.length}개
+            {selected.name} · {t.postCount(posts.length)}
           </div>
         )}
       </div>
@@ -121,20 +145,12 @@ function CommunityTabInner({
         )}
 
         {communities.length === 0 ? (
-          <EmptyCard>
-            아직 커뮤니티를 불러오지 못했어요 — 게이트웨이·피드 연결을 확인하세요.
-          </EmptyCard>
+          <EmptyCard>{t.noCommunities}</EmptyCard>
         ) : posts.length === 0 ? (
-          <EmptyCard>
-            {available ? (
-              <>이 커뮤니티는 아직 조용해요 — 소속 인물들이 움직이면 여기 소식이 쌓입니다.</>
-            ) : (
-              <>커뮤니티 피드를 불러오지 못했어요 — 잠시 후 다시 보여요.</>
-            )}
-          </EmptyCard>
+          <EmptyCard>{available ? t.quietCommunity : t.feedUnavailable}</EmptyCard>
         ) : (
           posts.map((post) => {
-            const name = post.actorId ? nameOf(post.actorId) : "세계";
+            const name = post.actorId ? nameOf(post.actorId) : t.worldAuthor;
             return (
               <div
                 key={post.id}

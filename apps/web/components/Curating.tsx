@@ -1,15 +1,36 @@
 import { useWorldClock } from "@/lib/world-clock";
 import { useDemoWorldTime } from "@/lib/world-clock-display";
 import { COLOR, WEIGHT, RADIUS } from "@/lib/tokens";
+import { useMessages, type Locale } from "@/lib/i18n";
 
 import { Face } from "./Face";
 
-const TITLES = ["취향을 반영하는 중", "가장 갈등 밀도 높은 사건을 찾는 중", "찾았어요 — 갈등의 한가운데"];
-const SUBS = [
-  "빈 피드는 없어요. 진행 중인 사건의 한가운데로 들어갑니다.",
-  "당신이 고른 취향 기준",
-  "지금 누군가 글을 쓰고 있어요. 실시간으로 함께 봐요.",
-];
+const en = {
+  titles: [
+    "Reflecting your tastes",
+    "Finding the most conflict-dense event",
+    "Found it — the heart of the conflict",
+  ],
+  subs: [
+    "No empty feeds here. You're dropping into the middle of an unfolding event.",
+    "Based on the tastes you picked",
+    "Someone is writing right now. Watch it unfold live.",
+  ],
+  worldTime: (time: string) => `World time keeps flowing meanwhile · ${time}`,
+};
+const M: Record<Locale, typeof en> = {
+  en,
+  ko: {
+    titles: ["취향을 반영하는 중", "가장 갈등 밀도 높은 사건을 찾는 중", "찾았어요 — 갈등의 한가운데"],
+    subs: [
+      "빈 피드는 없어요. 진행 중인 사건의 한가운데로 들어갑니다.",
+      "당신이 고른 취향 기준",
+      "지금 누군가 글을 쓰고 있어요. 실시간으로 함께 봐요.",
+    ],
+    worldTime: (time) => `그동안에도 세계 시간은 흐르고 있어요 · ${time}`,
+  },
+};
+
 const PROGRESS = ["18%", "62%", "100%"];
 
 interface CuratingProps {
@@ -17,6 +38,7 @@ interface CuratingProps {
 }
 
 export function Curating({ step }: CuratingProps) {
+  const t = useMessages(M);
   const worldTime = useWorldClock(useDemoWorldTime());
   return (
     <div
@@ -46,8 +68,8 @@ export function Curating({ step }: CuratingProps) {
           <Face preset="curateC" style={{ animation: "lf-pop 0.6s ease-out" }} />
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ fontSize: 22, fontWeight: WEIGHT.black }}>{TITLES[step]}</div>
-          <div style={{ fontSize: 14, color: COLOR.muted, fontWeight: WEIGHT.semibold }}>{SUBS[step]}</div>
+          <div style={{ fontSize: 22, fontWeight: WEIGHT.black }}>{t.titles[step]}</div>
+          <div style={{ fontSize: 14, color: COLOR.muted, fontWeight: WEIGHT.semibold }}>{t.subs[step]}</div>
         </div>
         <div
           style={{
@@ -89,7 +111,7 @@ export function Curating({ step }: CuratingProps) {
             }}
           />
           <div style={{ fontSize: 12, color: COLOR.muted, fontWeight: WEIGHT.bold }}>
-            그동안에도 세계 시간은 흐르고 있어요 · {worldTime}
+            {t.worldTime(worldTime)}
           </div>
         </div>
       </div>

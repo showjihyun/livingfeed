@@ -1,6 +1,7 @@
 import { memo, useState } from "react";
 
 import type { DerivedStories } from "@/lib/comments";
+import { useMessages, type Locale } from "@/lib/i18n";
 import type { LivePost, LiveStatus } from "@/lib/live-feed";
 import type { Range } from "@/lib/range";
 import { useWorldSearch } from "@/lib/search";
@@ -37,6 +38,43 @@ interface FeedTabProps {
   onDismissCoach: () => void;
 }
 
+const en = {
+  worldAuthor: "World",
+  followStory: "Follow the story",
+  liveBadge: "Live",
+  tagline: "Your interventions leave traces on the world",
+  searchPlaceholder: "Search the world's stories — name, title, text",
+  searchOffline: "Search can't reach the world — try again once it reconnects.",
+  searchEmpty: "No stories match this search yet.",
+  searchCount: (n: number) =>
+    `${n} ${n === 1 ? "story" : "stories"} found in the world's history`,
+  searchLoading: "Searching the world's history…",
+  coachTitle: "The world is flowing right now",
+  coachBody:
+    "Start quietly with a like or a comment on a story that moves you — that alone is enough for the world to notice you.",
+  coachDismiss: "Dismiss coach",
+  rangeEmpty: "The world was quiet in this period — widen the range to see earlier stories.",
+};
+const M: Record<Locale, typeof en> = {
+  en,
+  ko: {
+    worldAuthor: "세계",
+    followStory: "이야기 따라가기",
+    liveBadge: "실시간",
+    tagline: "당신의 개입이 세계에 흔적을 남깁니다",
+    searchPlaceholder: "세계의 이야기 검색 — 이름·제목·본문",
+    searchOffline: "검색이 세계에 닿지 않아요 — 연결되면 다시 시도해주세요.",
+    searchEmpty: "이 검색어에 닿는 이야기가 아직 없어요.",
+    searchCount: (n) => `세계의 역사에서 ${n}건이 닿았어요`,
+    searchLoading: "세계의 역사를 뒤지는 중…",
+    coachTitle: "지금 세계가 흐르고 있어요",
+    coachBody:
+      "마음이 가는 이야기에 좋아요나 댓글로 조용히 시작해보세요 — 그것만으로도 세계는 당신을 알아차립니다.",
+    coachDismiss: "코치 닫기",
+    rangeEmpty: "이 기간엔 세계가 조용했어요 — 범위를 넓히면 지난 이야기가 보여요.",
+  },
+};
+
 /** 검색 결과 카드 하나 — "이야기 따라가기"로 기존 사슬 화면과 합류한다 */
 function SearchResultCard({
   result,
@@ -45,9 +83,10 @@ function SearchResultCard({
   result: WorldSearchResult;
   authorName: (actorId: string) => string;
 }) {
+  const t = useMessages(M);
   const [open, setOpen] = useState(false);
   const story = useStory(open ? (result.correlationId ?? undefined) : undefined);
-  const author = result.authorId ? authorName(result.authorId) : "세계";
+  const author = result.authorId ? authorName(result.authorId) : t.worldAuthor;
   return (
     <div
       style={{
@@ -103,7 +142,7 @@ function SearchResultCard({
               color: "#8B7BD8",
             }}
           >
-            <Icon d={ICON.gitBranch} size={13} /> 이야기 따라가기
+            <Icon d={ICON.gitBranch} size={13} /> {t.followStory}
           </Pressable>
         )}
       </div>
@@ -132,6 +171,7 @@ function FeedTabInner({
   showCoach,
   onDismissCoach,
 }: FeedTabProps) {
+  const t = useMessages(M);
   // 검색 — 라이브는 흐르는 창일 뿐, 검색은 세계의 전 역사를 뒤진다 (OS 인덱스)
   const [query, setQuery] = useState("");
   const search = useWorldSearch(query, matchActorIds);
@@ -172,11 +212,11 @@ function FeedTabInner({
                 animation: "lf-blink 1.6s infinite",
               }}
             />
-            실시간
+            {t.liveBadge}
           </div>
         </div>
         <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
-          당신의 개입이 세계에 흔적을 남깁니다
+          {t.tagline}
         </div>
       </div>
 
@@ -194,7 +234,7 @@ function FeedTabInner({
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="세계의 이야기 검색 — 이름·제목·본문"
+          placeholder={t.searchPlaceholder}
           style={{
             border: "1.5px solid #E2EAF6",
             borderRadius: RADIUS.xs,
@@ -213,7 +253,7 @@ function FeedTabInner({
           <>
             {search.status === "offline" ? (
               <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
-                검색이 세계에 닿지 않아요 — 연결되면 다시 시도해주세요.
+                {t.searchOffline}
               </div>
             ) : search.status === "ready" && search.results.length === 0 ? (
               <div
@@ -229,12 +269,12 @@ function FeedTabInner({
                   background: COLOR.white,
                 }}
               >
-                이 검색어에 닿는 이야기가 아직 없어요.
+                {t.searchEmpty}
               </div>
             ) : search.status === "ready" ? (
               <>
                 <div style={{ fontSize: 12, fontWeight: WEIGHT.bold, color: COLOR.faint }}>
-                  세계의 역사에서 {search.results.length}건이 닿았어요
+                  {t.searchCount(search.results.length)}
                 </div>
                 {search.results.map((result) => (
                   <SearchResultCard
@@ -246,7 +286,7 @@ function FeedTabInner({
               </>
             ) : (
               <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
-                세계의 역사를 뒤지는 중…
+                {t.searchLoading}
               </div>
             )}
           </>
@@ -285,16 +325,15 @@ function FeedTabInner({
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
               <div style={{ fontSize: 14, fontWeight: WEIGHT.heavy, color: COLOR.ink }}>
-                지금 세계가 흐르고 있어요
+                {t.coachTitle}
               </div>
               <div style={{ fontSize: 13, color: COLOR.primaryDeep, fontWeight: WEIGHT.semibold }}>
-                마음이 가는 이야기에 좋아요나 댓글로 조용히 시작해보세요 — 그것만으로도 세계는
-                당신을 알아차립니다.
+                {t.coachBody}
               </div>
             </div>
             <Pressable
               onClick={onDismissCoach}
-              aria-label="코치 닫기"
+              aria-label={t.coachDismiss}
               style={{
                 color: COLOR.faint,
                 fontSize: 16,
@@ -314,11 +353,7 @@ function FeedTabInner({
           <LivePosts
             posts={livePosts}
             status={liveStatus}
-            emptyNotice={
-              range !== "all"
-                ? "이 기간엔 세계가 조용했어요 — 범위를 넓히면 지난 이야기가 보여요."
-                : undefined
-            }
+            emptyNotice={range !== "all" ? t.rangeEmpty : undefined}
             liked={likedLive}
             onLike={onLikeLive}
             commentsByPost={commentsByPost}

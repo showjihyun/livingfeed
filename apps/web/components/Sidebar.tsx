@@ -1,6 +1,14 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 
 import { ICON, NAV_DEFS } from "@/lib/data";
+import { playerName } from "@/lib/config";
+import {
+  LOCALES,
+  LOCALE_NAMES,
+  useLocale,
+  useMessages,
+  type Locale,
+} from "@/lib/i18n";
 import type { Tab } from "@/lib/types";
 import { useWorldClock } from "@/lib/world-clock";
 import { useDemoWorldTime } from "@/lib/world-clock-display";
@@ -11,6 +19,46 @@ import { Icon } from "./Icon";
 import { Pressable } from "./Pressable";
 import styles from "./lf.module.css";
 
+const en = {
+  nav: {
+    feed: "World Feed",
+    community: "Communities",
+    profile: "Profile",
+    dm: "Inbox",
+    graph: "Relationship Graph",
+    hidden: "Hidden Feed",
+    studio: "Studio",
+  } as Record<Tab, string>,
+  hiddenLocked: "Unlocks with trust",
+  creatorTools: "Creator tools",
+  worldTime: "World time",
+  speedNote: "Flowing at 4× real time",
+  meddler: (n: number) => `Meddler · ${n} intervention${n === 1 ? "" : "s"}`,
+  settings: "Settings",
+  language: "Language",
+};
+const M: Record<Locale, typeof en> = {
+  en,
+  ko: {
+    nav: {
+      feed: "World Feed",
+      community: "커뮤니티",
+      profile: "프로필",
+      dm: "받은 것",
+      graph: "관계 그래프",
+      hidden: "Hidden Feed",
+      studio: "스튜디오",
+    } as Record<Tab, string>,
+    hiddenLocked: "신뢰로 언락",
+    creatorTools: "창조자 도구",
+    worldTime: "세계 시간",
+    speedNote: "현실의 4배속으로 흐르는 중",
+    meddler: (n) => `참견러 · 개입 ${n}회`,
+    settings: "설정",
+    language: "언어",
+  },
+};
+
 interface SidebarProps {
   tab: Tab;
   onSelectTab: (tab: Tab) => void;
@@ -20,6 +68,7 @@ interface SidebarProps {
 }
 
 // 항상 마운트되어 루트 리렌더마다 다시 그려졌다 — props가 안정적이라 memo가 잘 먹는다
+// (locale 변경은 컨텍스트 경유라 memo를 지나 리렌더된다)
 export const Sidebar = memo(SidebarInner);
 
 function SidebarInner({
@@ -31,6 +80,9 @@ function SidebarInner({
 }: SidebarProps) {
   // 세계 시간의 진실은 엔진 tick이다 — 앵커 관측 전(연결 전)에는 데모 폴백 시계
   const clock = useWorldClock(useDemoWorldTime());
+  const t = useMessages(M);
+  const { locale, setLocale } = useLocale();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <div
       style={{
@@ -77,7 +129,7 @@ function SidebarInner({
             }}
           >
             <Icon d={nav.iconD} size={18} />
-            <div style={{ fontSize: 15, fontWeight: WEIGHT.bold, flex: 1 }}>{nav.label}</div>
+            <div style={{ fontSize: 15, fontWeight: WEIGHT.bold, flex: 1 }}>{t.nav[nav.key]}</div>
             {badge && (
               <div
                 style={{
@@ -114,7 +166,7 @@ function SidebarInner({
         >
           <Icon d={ICON.lock} size={18} />
           <div style={{ fontSize: 15, fontWeight: WEIGHT.semibold, flex: 1 }}>Hidden Feed</div>
-          <div style={{ fontSize: 11, fontWeight: WEIGHT.bold }}>신뢰로 언락</div>
+          <div style={{ fontSize: 11, fontWeight: WEIGHT.bold }}>{t.hiddenLocked}</div>
         </div>
       ) : (
         <Pressable
@@ -162,7 +214,7 @@ function SidebarInner({
           letterSpacing: 0.5,
         }}
       >
-        창조자 도구
+        {t.creatorTools}
       </div>
       <Pressable
         onClick={() => onSelectTab("studio")}
@@ -181,7 +233,7 @@ function SidebarInner({
         }}
       >
         <Icon d={ICON.wrench} size={18} />
-        <div style={{ fontSize: 15, fontWeight: WEIGHT.bold, flex: 1 }}>스튜디오</div>
+        <div style={{ fontSize: 15, fontWeight: WEIGHT.bold, flex: 1 }}>{t.nav.studio}</div>
       </Pressable>
 
       <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
@@ -198,19 +250,94 @@ function SidebarInner({
         >
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Icon d={ICON.clock} size={14} color={COLOR.faint} />
-            <div style={{ fontSize: 12, fontWeight: WEIGHT.heavy, color: COLOR.faint }}>세계 시간</div>
+            <div style={{ fontSize: 12, fontWeight: WEIGHT.heavy, color: COLOR.faint }}>
+              {t.worldTime}
+            </div>
           </div>
           <div style={{ fontSize: 19, fontWeight: WEIGHT.heavy }}>{clock}</div>
           <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
-            현실의 4배속으로 흐르는 중
+            {t.speedNote}
           </div>
         </div>
+
+        {/* 설정 — 언어 선택 (기본 English, 선택은 localStorage에 남는다) */}
+        {settingsOpen && (
+          <div
+            style={{
+              background: COLOR.white,
+              borderRadius: RADIUS.md,
+              padding: "12px 12px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              boxShadow: "0 4px 12px rgba(109,141,214,0.10)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: WEIGHT.heavy,
+                color: COLOR.fainter,
+                letterSpacing: 0.5,
+                padding: "0 6px 4px",
+              }}
+            >
+              {t.language}
+            </div>
+            {LOCALES.map((loc) => {
+              const active = locale === loc;
+              return (
+                <Pressable
+                  key={loc}
+                  onClick={() => setLocale(loc)}
+                  aria-pressed={active}
+                  className={styles.navItem}
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "8px 10px",
+                    borderRadius: RADIUS.sm,
+                    background: active ? COLOR.primarySoft : undefined,
+                    color: active ? COLOR.primaryDeep : COLOR.muted,
+                  }}
+                >
+                  <div style={{ fontSize: 13, fontWeight: WEIGHT.bold, flex: 1 }}>
+                    {LOCALE_NAMES[loc]}
+                  </div>
+                  {active && <Icon d={ICON.check} size={14} />}
+                </Pressable>
+              );
+            })}
+          </div>
+        )}
+        <Pressable
+          onClick={() => setSettingsOpen((open) => !open)}
+          aria-expanded={settingsOpen}
+          className={styles.navItem}
+          style={{
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "9px 14px",
+            borderRadius: RADIUS.sm,
+            background: settingsOpen ? COLOR.white : undefined,
+            color: settingsOpen ? COLOR.primaryDeep : COLOR.muted,
+            boxShadow: settingsOpen ? "0 4px 12px rgba(109,141,214,0.12)" : "none",
+          }}
+        >
+          <Icon d={ICON.gear} size={16} />
+          <div style={{ fontSize: 13, fontWeight: WEIGHT.bold, flex: 1 }}>{t.settings}</div>
+        </Pressable>
+
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 10px" }}>
           <Face preset="user30" />
           <div style={{ display: "flex", flexDirection: "column" }}>
-            <div style={{ fontSize: 14, fontWeight: WEIGHT.heavy }}>관찰자_0417</div>
+            <div style={{ fontSize: 14, fontWeight: WEIGHT.heavy }}>{playerName(locale)}</div>
             <div style={{ fontSize: 11, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
-              참견러 · 개입 {interventions}회
+              {t.meddler(interventions)}
             </div>
           </div>
         </div>

@@ -17,6 +17,7 @@ import { createTransport } from "@livingfeed/api-client";
 import type { EventEnvelope, FeedPostPublished } from "@livingfeed/schemas";
 
 import { PLAYER_ID } from "./config";
+import { pickMessages, type Locale } from "./i18n";
 import { rangeTickBounds, type Range } from "./range";
 import { currentTick, observeTick } from "./world-clock";
 
@@ -99,12 +100,33 @@ function mergePosts(prev: LivePost[], incoming: LivePost[]): LivePost[] {
   return [...byId.values()].sort((a, b) => b.id.localeCompare(a.id)).slice(0, MAX_POSTS);
 }
 
+const RELATIVE_TIME: Record<Locale, {
+  justNow: string;
+  minutes: (n: number) => string;
+  hours: (n: number) => string;
+  days: (n: number) => string;
+}> = {
+  en: {
+    justNow: "just now",
+    minutes: (n) => `${n}m ago`,
+    hours: (n) => `${n}h ago`,
+    days: (n) => `${n}d ago`,
+  },
+  ko: {
+    justNow: "방금",
+    minutes: (n) => `${n}분 전`,
+    hours: (n) => `${n}시간 전`,
+    days: (n) => `${n}일 전`,
+  },
+};
+
 export function relativeTime(iso: string, now = Date.now()): string {
   const diffS = Math.max(0, Math.floor((now - Date.parse(iso)) / 1000));
-  if (diffS < 60) return "방금";
-  if (diffS < 3600) return `${Math.floor(diffS / 60)}분 전`;
-  if (diffS < 86400) return `${Math.floor(diffS / 3600)}시간 전`;
-  return `${Math.floor(diffS / 86400)}일 전`;
+  const t = pickMessages(RELATIVE_TIME);
+  if (diffS < 60) return t.justNow;
+  if (diffS < 3600) return t.minutes(Math.floor(diffS / 60));
+  if (diffS < 86400) return t.hours(Math.floor(diffS / 3600));
+  return t.days(Math.floor(diffS / 86400));
 }
 
 export function useLiveFeed(
