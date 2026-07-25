@@ -32,6 +32,9 @@ Thumbs.db
 data/
 *.local
 
+# 호스트 기동 스크립트의 서비스 로그 (run-backend.*, run-shard-workers.*)
+logs/
+
 # Playwright MCP 스모크 산출물 (로컬 전용)
 .playwright-mcp/
 
