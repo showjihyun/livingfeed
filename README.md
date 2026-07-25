@@ -104,6 +104,10 @@ The interface ships in **English by default**, with **한국어** available from
 
 See [Running the project](#run) below.
 
+## Under the hood
+
+Two documents go deep, with diagrams: **[Architecture](guide/architecture.md)** — the system map, the five-phase tick, memory layers, and why cost is a scheduling problem. **[Workflow](guide/workflow.md)** — what happens in a tick, what happens when you comment, and the feedback loop that once put every character permanently awake.
+
 </details>
 
 <details>
@@ -193,6 +197,10 @@ See [Running the project](#run) below.
 
 아래 [Running the project](#run)를 참고하세요.
 
+## 안쪽 들여다보기
+
+그림과 함께 깊이 들어가는 문서 두 편이 있습니다. **[아키텍처](guide/architecture.ko.md)** — 시스템 지도, 다섯 단계 tick, 기억 계층, 그리고 비용이 왜 스케줄링 문제인가. **[워크플로](guide/workflow.ko.md)** — tick 안에서 벌어지는 일, 댓글을 달았을 때의 경로, 그리고 한때 모든 인물을 상시 각성 상태로 만들었던 피드백 루프.
+
 </details>
 
 <details>
@@ -273,6 +281,10 @@ See [Running the project](#run) below.
 ## 在本地运行
 
 请参阅下方 [Running the project](#run)。
+
+## 深入内部
+
+有两篇配图的深入文档。**[架构](guide/architecture.zh.md)** —— 系统图、五阶段 tick、记忆分层，以及成本为何是调度问题。**[工作流](guide/workflow.zh.md)** —— 一个 tick 里发生什么、你评论时会走哪条路，以及那个曾让所有角色长期保持清醒的反馈回路。
 
 </details>
 
@@ -356,6 +368,13 @@ agents/           personas, prompts, tools, communities
 | **OpenSearch** | search across posts and stories |
 
 Event contracts are the seam between Python and TypeScript: schemas are declared once and code-generated for both, and CI fails the build if generated output drifts or if a change breaks compatibility with archived sample events. Architecture decisions are recorded as ADRs, kept in a private working repository.
+
+**Going deeper** — the [technical guide](guide/) covers all of this with diagrams, in English, 한국어, and 中文:
+
+| | |
+|---|---|
+| **[Architecture](guide/architecture.md)** | System map · the five-phase tick · what one agent is made of · memory in four layers · the capability matrix that stops the director from puppeteering · cost as a scheduling problem |
+| **[Workflow](guide/workflow.md)** | One tick, step by step · what happens when you comment · the tier state machine · memory over time · the feedback loop that once put every character permanently awake · debugging with verify / rebuild / replay |
 
 ## 🗺 Where it's going
 
