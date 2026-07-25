@@ -4,8 +4,18 @@
  * 순간에만 보이므로 담백한 중앙 placeholder 하나면 충분하다.
  */
 import { COLOR, WEIGHT } from "@/lib/tokens";
+import { useMessages, type Locale } from "@/lib/i18n";
+
+const en = {
+  loading: "Loading…",
+};
+const M: Record<Locale, typeof en> = {
+  en,
+  ko: { loading: "불러오는 중…" },
+};
 
 export function TabFallback() {
+  const t = useMessages(M);
   return (
     <div
       style={{
@@ -18,7 +28,7 @@ export function TabFallback() {
         fontWeight: WEIGHT.semibold,
       }}
     >
-      불러오는 중…
+      {t.loading}
     </div>
   );
 }

@@ -14,40 +14,283 @@ import type { CSSProperties } from "react";
 
 import { PLAYER_ID } from "@/lib/config";
 import { ICON } from "@/lib/data";
+import { useLocale, useMessages, type Locale } from "@/lib/i18n";
 import { COLOR, WEIGHT, RADIUS } from "@/lib/tokens";
 import {
-  BIG_FIVE_LABELS,
-  GROUP_AXIS_LABELS,
-  LIFESTYLE_LABELS,
-  NEED_LABELS,
-  TRAIT_BAND_LABELS,
+  GROUP_AXES,
+  LIFESTYLES,
+  NEEDS,
+  TRAIT_ORDER,
+  bigFiveLabels,
   blankPersona,
   deletePersona,
   fetchRetired,
   freshId,
+  groupAxisLabels,
   groupKeyOf,
   groupPersonas,
+  lifestyleLabels,
+  needLabels,
   personaMatches,
   personalityPreview,
   purgeRetired,
   restorePersona,
   savePersona,
   traitBand,
+  traitBandLabels,
   usePersonaRoster,
 } from "@/lib/studio";
-import type {
-  BigFive,
-  GroupAxis,
-  Lifestyle,
-  Need,
-  NeedsBias,
-  PersonaDoc,
-  RetiredPersona,
-} from "@/lib/studio";
+import type { GroupAxis, PersonaDoc, RetiredPersona } from "@/lib/studio";
 
 import { Icon } from "./Icon";
 import { Pressable } from "./Pressable";
 import styles from "./lf.module.css";
+
+const en = {
+  dismiss: "Dismiss",
+  activeInWorld: "Active in the world",
+
+  backToRoster: "← Roster",
+  shapeNew: "Shape a new person",
+  refining: (name: string) => `Refining ${name}`,
+  refiningFallback: "this person",
+  etching: "Etching into the world…",
+  release: "Release into the world",
+  etchChanges: "Etch the changes",
+
+  guardName: "A name is what the world will call this person by",
+  guardId: "An id of lowercase letters, numbers and underscores is needed",
+  guardForm: "A few things are still empty — check the marked fields",
+
+  identityTitle: "Identity",
+  identityHint: "What the world will call this person, and the rhythm they live by",
+  nameLabel: "Name",
+  namePlaceholder: "e.g. Alex Rivera",
+  idLabel: "id",
+  idPlaceholder: "alex_rivera",
+  idHint:
+    "Lowercase letters, numbers, underscores — the world's inner name for this person, so it cannot change later",
+  archetypeLabel: "Archetype",
+  archetypePlaceholder: "e.g. Striver, Dreamer, Quiet mediator",
+  lifestyleLabel: "Life rhythm",
+
+  personalityTitle: "Personality — five threads",
+  personalityHint: "Move a slider and the person shows up in the sentence below",
+
+  needsTitle: "Needs bias",
+  needsHint:
+    "The blend of forces that moves this person — what keeps them awake at night",
+
+  goalsTitle: "Goals",
+  goalsHint: "Where this person is heading inside the world",
+  goalPlaceholder: "e.g. Open a first exhibition before the year is out",
+  removeGoal: "Remove goal",
+  goalWeight: "Weight",
+  addGoal: "＋ Add a goal",
+
+  secretsTitle: "Secrets",
+  secretsHint: "Not shown to the world outright — they slip out as the story ripens",
+  secretPlaceholder: "e.g. Really wants to walk away from the job",
+  removeSecret: "Remove secret",
+  addSecret: "＋ Add a secret",
+
+  innerTitle: "Inner world",
+  innerHint:
+    "What lies inside — the source the world reads when it shapes this person's voice",
+  innerPlaceholder:
+    "This person's inner world — age, work, conflicts, the thoughts that come at night",
+
+  farewellTitle: "Farewell",
+  farewellHint:
+    "Where you send off someone who lived in the world — the heaviest button on this workbench",
+  farewellConfirm: (name: string) =>
+    `${name} — you are about to send this name away from the world`,
+  farewellWarning:
+    "This person's posts and ties disappear from every screen in the world. It cannot be undone.",
+  lettingGo: "The world is letting go…",
+  letGo: "Let them go",
+  keepThem: "Keep them",
+  letGoFromWorld: "Let them go from the world",
+
+  debutTitle: "The world takes this person in at the next moment",
+  debutBodyA: (name: string) => `${name}'s time starts flowing inside the world now.`,
+  debutBodyB:
+    "A first word, a first meeting — a debut always reaches World Feed first.",
+  debutFallback: "this person",
+  watchDebut: "Watch the debut on World Feed",
+  toRoster: "To the roster",
+
+  studio: "Studio",
+  creatorToolsLive: "Creator tools · live",
+  gatewayNeededChip: "Studio needs a gateway connection",
+  activeOfTotal: (active: number, total: number) => `Active ${active} / ${total} total`,
+  newPerson: "＋ Shape a new person",
+  rosterIntro:
+    "This is a workbench outside the world. Shape a person and release them, and from the next moment the world lets their time flow.",
+
+  savedBanner: (name: string) =>
+    `The world takes this person in at the next moment — ${name}'s changes are seeping in`,
+  farewellBanner: (name: string) =>
+    `The world lets this person go from memory — ${name}'s traces are quietly withdrawing from the screens`,
+  returnedBanner: (name: string) =>
+    `The world remembers this person again — ${name}'s traces are coming back`,
+
+  gatewayEmptyA: "Studio needs a gateway connection.",
+  gatewayEmptyB: "Once the world's door opens, its people appear on this workbench.",
+  rosterEmptyA: "No one lives in this world yet.",
+  rosterEmptyB: "Shape the first person and wake the world's time.",
+
+  searchPlaceholder: "Search by name, archetype, inner world or goals",
+  groupBy: "Group by",
+  allGroups: "All",
+  noMatchA: "No one answers to this thread yet.",
+  noMatchB: "Try another search or another group.",
+  chipCount: (key: string, n: number) => `${key} · ${n}`,
+  groupCount: (key: string, n: number) => `${key} · ${n}`,
+  matchCount: (n: number) => (n === 1 ? "1 person matches" : `${n} people match`),
+
+  emptyInner: "Their inner world is still empty",
+  shapedByYou: "Shaped by you",
+  livingInWorld: "Living in the world",
+  asleep: "Asleep",
+
+  thoseWhoLeft: (n: number) => `Those who left · ${n}`,
+  collapse: "Collapse",
+  expand: "Expand",
+  archiveHint:
+    "They left the world, but the record remains — bring them back and their posts and ties return with them. If you will never call them again, erase the archived copy for good (it cannot be undone).",
+  noArchetypeRecorded: "No thread was recorded",
+  bringBack: "Bring back",
+  eraseForGood: "Erase for good",
+  eraseAria: (name: string) => `Erase ${name} for good`,
+  restoreConfirm: (name: string) =>
+    `${name} — bring this person back into the world? Their posts and ties return with them.`,
+  comingBack: "Coming back…",
+  purgeConfirm: (name: string) =>
+    `${name} — erase this archived copy for good? They can never be brought back. (The history already left in the world stays.)`,
+  erasing: "Erasing…",
+  leaveAsIs: "Leave as is",
+};
+const M: Record<Locale, typeof en> = {
+  en,
+  ko: {
+    dismiss: "닫기",
+    activeInWorld: "세계에 활성",
+
+    backToRoster: "← 명단",
+    shapeNew: "새 인물 빚기",
+    refining: (name) => `${name} 다듬기`,
+    refiningFallback: "인물",
+    etching: "세계에 새기는 중…",
+    release: "세계에 풀어놓기",
+    etchChanges: "변화를 새기기",
+
+    guardName: "이름이 있어야 세계가 이 사람을 부를 수 있어요",
+    guardId: "로마자 소문자·숫자·밑줄로 된 id가 필요해요",
+    guardForm: "몇 군데가 아직 비어 있어요 — 표시된 곳을 봐주세요",
+
+    identityTitle: "정체성",
+    identityHint: "세계가 이 사람을 무엇으로 부르고, 어떤 리듬으로 살게 할지",
+    nameLabel: "이름",
+    namePlaceholder: "예: 박하늘",
+    idLabel: "id",
+    idPlaceholder: "haneul_park",
+    idHint: "로마자 소문자·숫자·밑줄 — 세계가 쓰는 내부 이름이라 나중에 못 바꿔요",
+    archetypeLabel: "아키타입",
+    archetypePlaceholder: "예: 야심가, 몽상가, 조용한 중재자",
+    lifestyleLabel: "생활 리듬",
+
+    personalityTitle: "성격 — 다섯 개의 결",
+    personalityHint: "슬라이더를 움직이면 아래 문장에서 사람이 먼저 보여요",
+
+    needsTitle: "욕구 편향",
+    needsHint: "이 사람을 움직이는 힘의 배합 — 무엇이 이 사람을 밤에도 깨어 있게 하는지",
+
+    goalsTitle: "목표",
+    goalsHint: "세계 속에서 이 사람이 향해 가는 곳들",
+    goalPlaceholder: "예: 올해 안에 첫 전시를 연다",
+    removeGoal: "목표 삭제",
+    goalWeight: "비중",
+    addGoal: "＋ 목표 추가",
+
+    secretsTitle: "비밀",
+    secretsHint: "세계에 바로 드러나지 않아요 — 서사가 무르익을 때 새어 나옵니다",
+    secretPlaceholder: "예: 사실은 회사를 그만두고 싶어 한다",
+    removeSecret: "비밀 삭제",
+    addSecret: "＋ 비밀 추가",
+
+    innerTitle: "내면",
+    innerHint: "이 사람의 안쪽 — 세계가 이 사람의 목소리를 빚을 때 읽는 원문",
+    innerPlaceholder: "이 사람의 내면 — 나이·직업·갈등·밤의 생각",
+
+    farewellTitle: "작별",
+    farewellHint: "세계에 살던 사람을 떠나보내는 자리 — 이 작업대에서 가장 무거운 버튼이에요",
+    farewellConfirm: (name) => `${name} — 이 이름을 세계에서 떠나보내려 해요`,
+    farewellWarning: "이 사람의 글·관계가 세계의 모든 화면에서 사라집니다. 되돌릴 수 없어요.",
+    lettingGo: "세계가 놓아주는 중…",
+    letGo: "떠나보내기",
+    keepThem: "남겨두기",
+    letGoFromWorld: "세계에서 떠나보내기",
+
+    debutTitle: "세계가 다음 순간 이 사람을 받아들입니다",
+    debutBodyA: (name) => `이제 ${name}의 시간이 세계 속에서 흐르기 시작해요.`,
+    debutBodyB: "첫 마디, 첫 만남 — 데뷔는 언제나 World Feed에 먼저 닿습니다.",
+    debutFallback: "이 사람",
+    watchDebut: "World Feed에서 데뷔를 지켜보세요",
+    toRoster: "명단으로",
+
+    studio: "스튜디오",
+    creatorToolsLive: "창조자 도구 · 실측 연결됨",
+    gatewayNeededChip: "스튜디오는 게이트웨이 연결이 필요해요",
+    activeOfTotal: (active, total) => `활성 ${active} / 전체 ${total}`,
+    newPerson: "＋ 새 인물 빚기",
+    rosterIntro:
+      "이곳은 세계 바깥의 작업대예요. 인물을 빚어 풀어놓으면, 세계는 다음 순간부터 그 사람의 시간을 흘려보냅니다.",
+
+    savedBanner: (name) =>
+      `세계가 다음 순간 이 사람을 받아들입니다 — ${name}의 변화가 스며들고 있어요`,
+    farewellBanner: (name) =>
+      `세계가 이 사람을 기억에서 놓아줍니다 — ${name}의 흔적이 화면에서 조용히 물러나요`,
+    returnedBanner: (name) =>
+      `세계가 이 사람을 다시 기억해냅니다 — ${name}의 흔적이 돌아오고 있어요`,
+
+    gatewayEmptyA: "스튜디오는 게이트웨이 연결이 필요해요.",
+    gatewayEmptyB: "세계의 문이 열리면, 인물들이 이 작업대 위에 나타납니다.",
+    rosterEmptyA: "아직 이 세계에 인물이 없어요.",
+    rosterEmptyB: "첫 사람을 빚어 세계의 시간을 깨워보세요.",
+
+    searchPlaceholder: "이름·아키타입·내면·목표로 검색",
+    groupBy: "그룹 기준",
+    allGroups: "전체",
+    noMatchA: "이 결에 닿는 사람이 아직 없어요.",
+    noMatchB: "검색어나 그룹을 바꿔보세요.",
+    chipCount: (key, n) => `${key} · ${n}`,
+    groupCount: (key, n) => `${key} · ${n}명`,
+    matchCount: (n) => `${n}명이 조건에 닿았어요`,
+
+    emptyInner: "아직 내면이 비어 있어요",
+    shapedByYou: "당신이 빚은 인물",
+    livingInWorld: "세계에 살고 있음",
+    asleep: "잠들어 있음",
+
+    thoseWhoLeft: (n) => `떠난 사람들 · ${n}`,
+    collapse: "접기",
+    expand: "펼치기",
+    archiveHint:
+      "세계를 떠났지만 기록은 남아 있어요 — 다시 불러오면 글과 관계도 함께 돌아옵니다. 다시 부를 일이 없다면 영구 삭제로 보관본을 지울 수 있어요 (되돌릴 수 없어요).",
+    noArchetypeRecorded: "결이 기록되지 않았어요",
+    bringBack: "다시 불러오기",
+    eraseForGood: "영구 삭제",
+    eraseAria: (name) => `${name} 영구 삭제`,
+    restoreConfirm: (name) =>
+      `${name} — 이 사람을 세계로 다시 불러올까요? 글과 관계도 함께 돌아옵니다.`,
+    comingBack: "돌아오는 중…",
+    purgeConfirm: (name) =>
+      `${name} — 이 보관본을 영구히 삭제할까요? 다시 불러올 수 없어요. (세계에 이미 남긴 역사는 지워지지 않아요.)`,
+    erasing: "지우는 중…",
+    leaveAsIs: "그대로 두기",
+  },
+};
 
 /* ── 공방의 색 — 관전 탭(파랑·보라)과 구분되는 창조자 톤 ── */
 const AMBER = {
@@ -86,12 +329,6 @@ const INPUT_STYLE: CSSProperties = {
   background: "#FDFDFE",
   width: "100%",
   fontFamily: "inherit",
-};
-
-const NEEDS_LABELS: Record<keyof NeedsBias, string> = {
-  achievement: "성취",
-  belonging: "소속",
-  security: "안정",
 };
 
 /* ── 작은 조각들 ── */
@@ -143,9 +380,20 @@ function SliderRow({
   accent: string;
   onChange: (v: number) => void;
 }) {
+  // 축 이름은 언어마다 길이가 다르다 (개방성 vs Conscientiousness) — 라벨 칸을
+  // 언어에 맞춰 잡아야 잘리지도, 헐겁지도 않다
+  const labelWidth = useLocale().locale === "ko" ? 52 : 122;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-      <div style={{ width: 52, fontSize: 13, fontWeight: WEIGHT.heavy, color: COLOR.muted, flexShrink: 0 }}>
+      <div
+        style={{
+          width: labelWidth,
+          fontSize: 13,
+          fontWeight: WEIGHT.heavy,
+          color: COLOR.muted,
+          flexShrink: 0,
+        }}
+      >
         {label}
       </div>
       <input
@@ -206,11 +454,12 @@ function ChipSelect<T extends string>({
 }
 
 function ActiveToggle({ on, busy, onToggle }: { on: boolean; busy: boolean; onToggle: () => void }) {
+  const t = useMessages(M);
   return (
     <Pressable
       role="switch"
       aria-checked={on}
-      aria-label="세계에 활성"
+      aria-label={t.activeInWorld}
       disabled={busy}
       onClick={(e) => {
         e.stopPropagation();
@@ -247,9 +496,6 @@ function ActiveToggle({ on, busy, onToggle }: { on: boolean; busy: boolean; onTo
 
 /* ── 편집/창조 화면 ── */
 
-const LIFESTYLES = Object.keys(LIFESTYLE_LABELS) as Lifestyle[];
-const NEEDS = Object.keys(NEED_LABELS) as Need[];
-
 function PersonaEditor({
   initial,
   isNew,
@@ -264,6 +510,7 @@ function PersonaEditor({
   /** 떠나보내기 확정·성공 후 — 명단 제거와 작별 문장은 부모의 몫 */
   onRetired: (name: string) => void;
 }) {
+  const t = useMessages(M);
   const [draft, setDraft] = useState<PersonaDoc>(initial);
   const [saving, setSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -288,12 +535,11 @@ function PersonaEditor({
     if (saving) return;
     // 서버까지 갈 필요 없는 최소 관문 — id는 URL이 되고, 이름은 세계가 부를 말이다
     const guards: Record<string, string> = {};
-    if (!draft.name.trim()) guards.name = "이름이 있어야 세계가 이 사람을 부를 수 있어요";
-    if (isNew && !/^a_[a-z0-9_]+$/.test(draft.id))
-      guards.id = "로마자 소문자·숫자·밑줄로 된 id가 필요해요";
+    if (!draft.name.trim()) guards.name = t.guardName;
+    if (isNew && !/^a_[a-z0-9_]+$/.test(draft.id)) guards.id = t.guardId;
     if (Object.keys(guards).length > 0) {
       setFieldErrors(guards);
-      setFormMessage("몇 군데가 아직 비어 있어요 — 표시된 곳을 봐주세요");
+      setFormMessage(t.guardForm);
       return;
     }
     setSaving(true);
@@ -307,7 +553,7 @@ function PersonaEditor({
       setFieldErrors(result.fieldErrors);
       setFormMessage(result.message);
     }
-  }, [draft, isNew, saving, onSaved]);
+  }, [draft, isNew, saving, onSaved, t]);
 
   const handleRetire = useCallback(async () => {
     if (retiring) return;
@@ -361,10 +607,10 @@ function PersonaEditor({
             flexShrink: 0,
           }}
         >
-          ← 명단
+          {t.backToRoster}
         </Pressable>
         <div style={{ fontSize: 18, fontWeight: WEIGHT.black, flex: 1 }}>
-          {isNew ? "새 인물 빚기" : `${draft.name || "인물"} 다듬기`}
+          {isNew ? t.shapeNew : t.refining(draft.name || t.refiningFallback)}
         </div>
         <Pressable
           onClick={() => void handleSave()}
@@ -381,7 +627,7 @@ function PersonaEditor({
             flexShrink: 0,
           }}
         >
-          {saving ? "세계에 새기는 중…" : isNew ? "세계에 풀어놓기" : "변화를 새기기"}
+          {saving ? t.etching : isNew ? t.release : t.etchChanges}
         </Pressable>
       </div>
 
@@ -417,20 +663,20 @@ function PersonaEditor({
             </div>
           )}
 
-          <SectionCard title="정체성" hint="세계가 이 사람을 무엇으로 부르고, 어떤 리듬으로 살게 할지">
+          <SectionCard title={t.identityTitle} hint={t.identityHint}>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <FieldLabel text="이름" />
+              <FieldLabel text={t.nameLabel} />
               <input
                 style={INPUT_STYLE}
                 value={draft.name}
-                placeholder="예: 박하늘"
+                placeholder={t.namePlaceholder}
                 onChange={(e) => patch({ name: e.target.value })}
               />
               <FieldError error={fieldErrors.name} />
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <FieldLabel text="id" />
+              <FieldLabel text={t.idLabel} />
               {isNew ? (
                 <>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -451,12 +697,12 @@ function PersonaEditor({
                     <input
                       style={INPUT_STYLE}
                       value={idSuffix}
-                      placeholder="haneul_park"
+                      placeholder={t.idPlaceholder}
                       onChange={(e) => onIdInput(e.target.value)}
                     />
                   </div>
                   <div style={{ fontSize: 12, fontWeight: WEIGHT.semibold, color: COLOR.fainter }}>
-                    로마자 소문자·숫자·밑줄 — 세계가 쓰는 내부 이름이라 나중에 못 바꿔요
+                    {t.idHint}
                   </div>
                 </>
               ) : (
@@ -466,21 +712,21 @@ function PersonaEditor({
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <FieldLabel text="아키타입" />
+              <FieldLabel text={t.archetypeLabel} />
               <input
                 style={INPUT_STYLE}
                 value={draft.archetype}
-                placeholder="예: 야심가, 몽상가, 조용한 중재자"
+                placeholder={t.archetypePlaceholder}
                 onChange={(e) => patch({ archetype: e.target.value })}
               />
               <FieldError error={fieldErrors.archetype} />
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <FieldLabel text="생활 리듬" />
+              <FieldLabel text={t.lifestyleLabel} />
               <ChipSelect
                 options={LIFESTYLES}
-                labels={LIFESTYLE_LABELS}
+                labels={lifestyleLabels()}
                 value={draft.lifestyle}
                 onChange={(lifestyle) => patch({ lifestyle })}
               />
@@ -488,13 +734,13 @@ function PersonaEditor({
             </div>
           </SectionCard>
 
-          <SectionCard title="성격 — 다섯 개의 결" hint="슬라이더를 움직이면 아래 문장에서 사람이 먼저 보여요">
-            {(Object.keys(BIG_FIVE_LABELS) as (keyof BigFive)[]).map((trait) => (
+          <SectionCard title={t.personalityTitle} hint={t.personalityHint}>
+            {TRAIT_ORDER.map((trait) => (
               <div key={trait} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <SliderRow
-                  label={BIG_FIVE_LABELS[trait]}
+                  label={bigFiveLabels()[trait]}
                   value={draft.big_five[trait]}
-                  badge={TRAIT_BAND_LABELS[traitBand(draft.big_five[trait])]}
+                  badge={traitBandLabels()[traitBand(draft.big_five[trait])]}
                   accent={AMBER.solid}
                   onChange={(v) => patch({ big_five: { ...draft.big_five, [trait]: v } })}
                 />
@@ -519,11 +765,11 @@ function PersonaEditor({
             </div>
           </SectionCard>
 
-          <SectionCard title="욕구 편향" hint="이 사람을 움직이는 힘의 배합 — 무엇이 이 사람을 밤에도 깨어 있게 하는지">
-            {(Object.keys(NEEDS_LABELS) as (keyof NeedsBias)[]).map((need) => (
+          <SectionCard title={t.needsTitle} hint={t.needsHint}>
+            {NEEDS.map((need) => (
               <div key={need} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <SliderRow
-                  label={NEEDS_LABELS[need]}
+                  label={needLabels()[need]}
                   value={draft.needs_bias[need]}
                   badge={`${Math.round(draft.needs_bias[need] * 100)}%`}
                   accent={COLOR.primary}
@@ -534,7 +780,7 @@ function PersonaEditor({
             ))}
           </SectionCard>
 
-          <SectionCard title="목표" hint="세계 속에서 이 사람이 향해 가는 곳들">
+          <SectionCard title={t.goalsTitle} hint={t.goalsHint}>
             {draft.goals.map((goal, i) => (
               <div
                 key={goal.id}
@@ -552,7 +798,7 @@ function PersonaEditor({
                   <input
                     style={INPUT_STYLE}
                     value={goal.description}
-                    placeholder="예: 올해 안에 첫 전시를 연다"
+                    placeholder={t.goalPlaceholder}
                     onChange={(e) =>
                       patch({
                         goals: draft.goals.map((g) =>
@@ -563,7 +809,7 @@ function PersonaEditor({
                   />
                   <Pressable
                     onClick={() => patch({ goals: draft.goals.filter((g) => g.id !== goal.id) })}
-                    aria-label="목표 삭제"
+                    aria-label={t.removeGoal}
                     className={styles.press92}
                     style={{
                       width: 30,
@@ -586,7 +832,7 @@ function PersonaEditor({
                 <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
                   <div style={{ flex: 1, minWidth: 220 }}>
                     <SliderRow
-                      label="비중"
+                      label={t.goalWeight}
                       value={goal.priority}
                       badge={`${Math.round(goal.priority * 100)}%`}
                       accent={COLOR.primary}
@@ -599,7 +845,7 @@ function PersonaEditor({
                   </div>
                   <ChipSelect
                     options={NEEDS}
-                    labels={NEED_LABELS}
+                    labels={needLabels()}
                     value={goal.need}
                     small
                     onChange={(need) =>
@@ -634,14 +880,11 @@ function PersonaEditor({
                 color: COLOR.faint,
               }}
             >
-              ＋ 목표 추가
+              {t.addGoal}
             </Pressable>
           </SectionCard>
 
-          <SectionCard
-            title="비밀"
-            hint="세계에 바로 드러나지 않아요 — 서사가 무르익을 때 새어 나옵니다"
-          >
+          <SectionCard title={t.secretsTitle} hint={t.secretsHint}>
             {draft.secrets.map((secret, i) => (
               <div key={secret.id} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -649,7 +892,7 @@ function PersonaEditor({
                   <input
                     style={INPUT_STYLE}
                     value={secret.description}
-                    placeholder="예: 사실은 회사를 그만두고 싶어 한다"
+                    placeholder={t.secretPlaceholder}
                     onChange={(e) =>
                       patch({
                         secrets: draft.secrets.map((s) =>
@@ -660,7 +903,7 @@ function PersonaEditor({
                   />
                   <Pressable
                     onClick={() => patch({ secrets: draft.secrets.filter((s) => s.id !== secret.id) })}
-                    aria-label="비밀 삭제"
+                    aria-label={t.removeSecret}
                     className={styles.press92}
                     style={{
                       width: 30,
@@ -698,25 +941,22 @@ function PersonaEditor({
                 color: COLOR.faint,
               }}
             >
-              ＋ 비밀 추가
+              {t.addSecret}
             </Pressable>
           </SectionCard>
 
-          <SectionCard title="내면" hint="이 사람의 안쪽 — 세계가 이 사람의 목소리를 빚을 때 읽는 원문">
+          <SectionCard title={t.innerTitle} hint={t.innerHint}>
             <textarea
               style={{ ...INPUT_STYLE, minHeight: 130, resize: "vertical", lineHeight: 1.7 }}
               value={draft.identity_core}
-              placeholder="이 사람의 내면 — 나이·직업·갈등·밤의 생각"
+              placeholder={t.innerPlaceholder}
               onChange={(e) => patch({ identity_core: e.target.value })}
             />
             <FieldError error={fieldErrors.identity_core} />
           </SectionCard>
 
           {!isNew && (
-            <SectionCard
-              title="작별"
-              hint="세계에 살던 사람을 떠나보내는 자리 — 이 작업대에서 가장 무거운 버튼이에요"
-            >
+            <SectionCard title={t.farewellTitle} hint={t.farewellHint}>
               {retireError && (
                 <div
                   style={{
@@ -746,7 +986,7 @@ function PersonaEditor({
                   }}
                 >
                   <div style={{ fontSize: 14, fontWeight: WEIGHT.heavy, color: FAREWELL.text }}>
-                    {draft.name || draft.id} — 이 이름을 세계에서 떠나보내려 해요
+                    {t.farewellConfirm(draft.name || draft.id)}
                   </div>
                   <div
                     style={{
@@ -756,7 +996,7 @@ function PersonaEditor({
                       lineHeight: 1.65,
                     }}
                   >
-                    이 사람의 글·관계가 세계의 모든 화면에서 사라집니다. 되돌릴 수 없어요.
+                    {t.farewellWarning}
                   </div>
                   <div style={{ display: "flex", gap: 10, marginTop: 2 }}>
                     <Pressable
@@ -773,7 +1013,7 @@ function PersonaEditor({
                         cursor: retiring ? "default" : "pointer",
                       }}
                     >
-                      {retiring ? "세계가 놓아주는 중…" : "떠나보내기"}
+                      {retiring ? t.lettingGo : t.letGo}
                     </Pressable>
                     <Pressable
                       onClick={() => {
@@ -791,7 +1031,7 @@ function PersonaEditor({
                         fontWeight: WEIGHT.heavy,
                       }}
                     >
-                      남겨두기
+                      {t.keepThem}
                     </Pressable>
                   </div>
                 </div>
@@ -810,7 +1050,7 @@ function PersonaEditor({
                     fontWeight: WEIGHT.heavy,
                   }}
                 >
-                  세계에서 떠나보내기
+                  {t.letGoFromWorld}
                 </Pressable>
               )}
             </SectionCard>
@@ -839,6 +1079,7 @@ interface StudioTabProps {
 export const StudioTab = memo(StudioTabInner);
 
 function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
+  const t = useMessages(M);
   const { personas, available, reload, applyLocal, removeLocal } = usePersonaRoster(enabled);
   const [view, setView] = useState<View>({ kind: "roster" });
   // 수정 저장 직후 명단 위에 뜨는 확인 — "세계가 받아들입니다" 결
@@ -865,15 +1106,21 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
   const [axis, setAxis] = useState<GroupAxis>("trait");
   const [group, setGroup] = useState<string | null>(null);
 
+  // 선택 그룹은 표시 어휘라 언어를 탄다 — 언어가 바뀌면 이전 언어의 그룹명은
+  // 아무에게도 닿지 않는다 (기준 변경과 같은 결로 전체로 되돌린다)
+  const { locale } = useLocale();
+  useEffect(() => setGroup(null), [locale]);
+
   const activeCount = personas.filter((p) => p.active).length;
 
-  const groups = useMemo(() => groupPersonas(personas, axis), [personas, axis]);
+  // 그룹 키는 표시 어휘라 UI 언어를 탄다 — t가 바뀌면 다시 묶는다
+  const groups = useMemo(() => groupPersonas(personas, axis), [personas, axis, t]);
   const visible = useMemo(
     () =>
       personas.filter(
         (p) => personaMatches(p, query) && (group === null || groupKeyOf(p, axis) === group),
       ),
-    [personas, query, group, axis],
+    [personas, query, group, axis, t],
   );
   // 전체 + 검색 없음일 때만 그룹 섹션으로 펼친다 — 필터 중엔 평평한 결과가 읽기 쉽다
   const sectioned = group === null && !query.trim();
@@ -1022,11 +1269,12 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
             <Icon d={ICON.sparkles} size={30} color={AMBER.text} />
           </div>
           <div style={{ fontSize: 22, fontWeight: WEIGHT.black, lineHeight: 1.4 }}>
-            세계가 다음 순간 이 사람을 받아들입니다
+            {t.debutTitle}
           </div>
           <div style={{ fontSize: 14, fontWeight: WEIGHT.semibold, color: COLOR.muted, lineHeight: 1.7 }}>
-            이제 {view.name || "이 사람"}의 시간이 세계 속에서 흐르기 시작해요.
-            <br />첫 마디, 첫 만남 — 데뷔는 언제나 World Feed에 먼저 닿습니다.
+            {t.debutBodyA(view.name || t.debutFallback)}
+            <br />
+            {t.debutBodyB}
           </div>
           <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
             <Pressable
@@ -1041,7 +1289,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                 fontWeight: WEIGHT.heavy,
               }}
             >
-              World Feed에서 데뷔를 지켜보세요
+              {t.watchDebut}
             </Pressable>
             <Pressable
               onClick={() => setView({ kind: "roster" })}
@@ -1055,7 +1303,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                 fontWeight: WEIGHT.heavy,
               }}
             >
-              명단으로
+              {t.toRoster}
             </Pressable>
           </div>
         </div>
@@ -1075,7 +1323,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ fontSize: 20, fontWeight: WEIGHT.heavy }}>스튜디오</div>
+          <div style={{ fontSize: 20, fontWeight: WEIGHT.heavy }}>{t.studio}</div>
           {available ? (
             <div
               style={{
@@ -1090,7 +1338,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                 fontWeight: WEIGHT.heavy,
               }}
             >
-              <Icon d={ICON.wrench} size={12} /> 창조자 도구 · 실측 연결됨
+              <Icon d={ICON.wrench} size={12} /> {t.creatorToolsLive}
             </div>
           ) : (
             <div
@@ -1106,13 +1354,13 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                 fontWeight: WEIGHT.heavy,
               }}
             >
-              스튜디오는 게이트웨이 연결이 필요해요
+              {t.gatewayNeededChip}
             </div>
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
-            활성 {activeCount} / 전체 {personas.length}
+            {t.activeOfTotal(activeCount, personas.length)}
           </div>
           <Pressable
             onClick={() => setView({ kind: "edit", initial: blankPersona(), isNew: true })}
@@ -1126,7 +1374,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
               fontWeight: WEIGHT.heavy,
             }}
           >
-            ＋ 새 인물 빚기
+            {t.newPerson}
           </Pressable>
         </div>
       </div>
@@ -1143,8 +1391,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
         }}
       >
         <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: WEIGHT.semibold, lineHeight: 1.6 }}>
-          이곳은 세계 바깥의 작업대예요. 인물을 빚어 풀어놓으면, 세계는 다음 순간부터 그 사람의
-          시간을 흘려보냅니다.
+          {t.rosterIntro}
         </div>
 
         {savedName && (
@@ -1162,11 +1409,11 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
           >
             <Icon d="M20 6 9 17l-5-5" size={16} color={COLOR.success} />
             <div style={{ flex: 1, fontSize: 13, fontWeight: WEIGHT.bold, color: COLOR.success, lineHeight: 1.6 }}>
-              세계가 다음 순간 이 사람을 받아들입니다 — {savedName}의 변화가 스며들고 있어요
+              {t.savedBanner(savedName)}
             </div>
             <Pressable
               onClick={() => setSavedName(null)}
-              aria-label="닫기"
+              aria-label={t.dismiss}
               style={{ color: COLOR.success, fontSize: 15, fontWeight: WEIGHT.heavy, padding: 4 }}
             >
               ×
@@ -1191,12 +1438,11 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
             <div
               style={{ flex: 1, fontSize: 13, fontWeight: WEIGHT.bold, color: "#5A6478", lineHeight: 1.6 }}
             >
-              세계가 이 사람을 기억에서 놓아줍니다 — {farewellName}의 흔적이 화면에서 조용히
-              물러나요
+              {t.farewellBanner(farewellName)}
             </div>
             <Pressable
               onClick={() => setFarewellName(null)}
-              aria-label="닫기"
+              aria-label={t.dismiss}
               style={{ color: COLOR.muted, fontSize: 15, fontWeight: WEIGHT.heavy, padding: 4 }}
             >
               ×
@@ -1221,11 +1467,11 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
             <div
               style={{ flex: 1, fontSize: 13, fontWeight: WEIGHT.bold, color: AMBER.deep, lineHeight: 1.6 }}
             >
-              세계가 이 사람을 다시 기억해냅니다 — {returnedName}의 흔적이 돌아오고 있어요
+              {t.returnedBanner(returnedName)}
             </div>
             <Pressable
               onClick={() => setReturnedName(null)}
-              aria-label="닫기"
+              aria-label={t.dismiss}
               style={{ color: AMBER.text, fontSize: 15, fontWeight: WEIGHT.heavy, padding: 4 }}
             >
               ×
@@ -1264,9 +1510,9 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
               background: COLOR.white,
             }}
           >
-            스튜디오는 게이트웨이 연결이 필요해요.
+            {t.gatewayEmptyA}
             <br />
-            세계의 문이 열리면, 인물들이 이 작업대 위에 나타납니다.
+            {t.gatewayEmptyB}
           </div>
         ) : personas.length === 0 ? (
           <div
@@ -1282,8 +1528,9 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
               background: COLOR.white,
             }}
           >
-            아직 이 세계에 인물이 없어요.
-            <br />첫 사람을 빚어 세계의 시간을 깨워보세요.
+            {t.rosterEmptyA}
+            <br />
+            {t.rosterEmptyB}
           </div>
         ) : (
           <>
@@ -1292,16 +1539,16 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
               <input
                 style={{ ...INPUT_STYLE, maxWidth: 420 }}
                 value={query}
-                placeholder="이름·아키타입·내면·목표로 검색"
+                placeholder={t.searchPlaceholder}
                 onChange={(e) => setQuery(e.target.value)}
               />
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <div style={{ fontSize: 12, fontWeight: WEIGHT.heavy, color: COLOR.muted, flexShrink: 0 }}>
-                  그룹 기준
+                  {t.groupBy}
                 </div>
                 <ChipSelect
-                  options={["trait", "archetype", "lifestyle"] as const}
-                  labels={GROUP_AXIS_LABELS}
+                  options={GROUP_AXES}
+                  labels={groupAxisLabels()}
                   value={axis}
                   small
                   onChange={(next) => {
@@ -1333,7 +1580,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                         border: `1.5px solid ${selected ? AMBER.border : "transparent"}`,
                       }}
                     >
-                      {key ?? "전체"} · {count}
+                      {t.chipCount(key ?? t.allGroups, count)}
                     </Pressable>
                   );
                 })}
@@ -1354,9 +1601,9 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                   background: COLOR.white,
                 }}
               >
-                이 결에 닿는 사람이 아직 없어요.
+                {t.noMatchA}
                 <br />
-                검색어나 그룹을 바꿔보세요.
+                {t.noMatchB}
               </div>
             ) : (
               (sectioned ? groups : [{ key: null, personas: visible }]).map(
@@ -1367,18 +1614,18 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                   >
                     {section.key !== null ? (
                       <div style={{ fontSize: 13, fontWeight: WEIGHT.heavy, color: AMBER.text, marginTop: 4 }}>
-                        {section.key} · {section.personas.length}명
+                        {t.groupCount(section.key, section.personas.length)}
                       </div>
                     ) : (
                       <div style={{ fontSize: 12, fontWeight: WEIGHT.bold, color: COLOR.faint }}>
-                        {visible.length}명이 조건에 닿았어요
+                        {t.matchCount(visible.length)}
                       </div>
                     )}
                     {section.personas.map((persona) => {
             const oneLiner =
               persona.identity_core.split("\n")[0]?.trim() ||
               persona.archetype ||
-              "아직 내면이 비어 있어요";
+              t.emptyInner;
             const mine = persona.created_by === PLAYER_ID;
             return (
               <div
@@ -1439,7 +1686,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                           fontWeight: WEIGHT.heavy,
                         }}
                       >
-                        당신이 빚은 인물
+                        {t.shapedByYou}
                       </div>
                     )}
                     <div
@@ -1452,7 +1699,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                         fontWeight: WEIGHT.heavy,
                       }}
                     >
-                      {LIFESTYLE_LABELS[persona.lifestyle] ?? persona.lifestyle}
+                      {lifestyleLabels()[persona.lifestyle] ?? persona.lifestyle}
                     </div>
                   </div>
                   <div
@@ -1470,7 +1717,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
                   <div style={{ fontSize: 12, fontWeight: WEIGHT.bold, color: persona.active ? COLOR.success : COLOR.fainter }}>
-                    {persona.active ? "세계에 살고 있음" : "잠들어 있음"}
+                    {persona.active ? t.livingInWorld : t.asleep}
                   </div>
                   <ActiveToggle
                     on={persona.active}
@@ -1514,10 +1761,10 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
             >
               <Icon d={ICON.moon} size={14} color={COLOR.faint} />
               <div style={{ flex: 1, fontSize: 13, fontWeight: WEIGHT.heavy, color: COLOR.muted }}>
-                떠난 사람들 · {retired.length}
+                {t.thoseWhoLeft(retired.length)}
               </div>
               <div style={{ fontSize: 12, fontWeight: WEIGHT.heavy, color: COLOR.fainter }}>
-                {retiredOpen ? "접기" : "펼치기"}
+                {retiredOpen ? t.collapse : t.expand}
               </div>
             </Pressable>
 
@@ -1531,8 +1778,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                 }}
               >
                 <div style={{ fontSize: 12, fontWeight: WEIGHT.semibold, color: COLOR.faint, lineHeight: 1.6 }}>
-                  세계를 떠났지만 기록은 남아 있어요 — 다시 불러오면 글과 관계도 함께 돌아옵니다.
-                  다시 부를 일이 없다면 영구 삭제로 보관본을 지울 수 있어요 (되돌릴 수 없어요).
+                  {t.archiveHint}
                 </div>
 
                 {restoreError && (
@@ -1602,7 +1848,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                               textOverflow: "ellipsis",
                             }}
                           >
-                            {entry.archetype || "결이 기록되지 않았어요"}
+                            {entry.archetype || t.noArchetypeRecorded}
                           </div>
                         </div>
                         {!confirming && !purgeConfirming && (
@@ -1624,7 +1870,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                                 fontWeight: WEIGHT.heavy,
                               }}
                             >
-                              다시 불러오기
+                              {t.bringBack}
                             </Pressable>
                             <Pressable
                               onClick={() => {
@@ -1632,7 +1878,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                                 setConfirmRestoreKey(null);
                                 setRestoreError(null);
                               }}
-                              aria-label={`${entry.name || entry.id} 영구 삭제`}
+                              aria-label={t.eraseAria(entry.name || entry.id)}
                               className={styles.press95}
                               style={{
                                 padding: "8px 14px",
@@ -1644,7 +1890,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                                 fontWeight: WEIGHT.heavy,
                               }}
                             >
-                              영구 삭제
+                              {t.eraseForGood}
                             </Pressable>
                           </div>
                         )}
@@ -1670,8 +1916,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                               lineHeight: 1.65,
                             }}
                           >
-                            {entry.name || entry.id} — 이 사람을 세계로 다시 불러올까요? 글과
-                            관계도 함께 돌아옵니다.
+                            {t.restoreConfirm(entry.name || entry.id)}
                           </div>
                           <div style={{ display: "flex", gap: 10 }}>
                             <Pressable
@@ -1688,7 +1933,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                                 cursor: restoring ? "default" : "pointer",
                               }}
                             >
-                              {restoring ? "돌아오는 중…" : "다시 불러오기"}
+                              {restoring ? t.comingBack : t.bringBack}
                             </Pressable>
                             <Pressable
                               onClick={() => {
@@ -1706,7 +1951,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                                 fontWeight: WEIGHT.heavy,
                               }}
                             >
-                              그대로 두기
+                              {t.leaveAsIs}
                             </Pressable>
                           </div>
                         </div>
@@ -1732,8 +1977,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                               lineHeight: 1.65,
                             }}
                           >
-                            {entry.name || entry.id} — 이 보관본을 영구히 삭제할까요? 다시
-                            불러올 수 없어요. (세계에 이미 남긴 역사는 지워지지 않아요.)
+                            {t.purgeConfirm(entry.name || entry.id)}
                           </div>
                           <div style={{ display: "flex", gap: 10 }}>
                             <Pressable
@@ -1750,7 +1994,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                                 cursor: purging ? "default" : "pointer",
                               }}
                             >
-                              {purging ? "지우는 중…" : "영구 삭제"}
+                              {purging ? t.erasing : t.eraseForGood}
                             </Pressable>
                             <Pressable
                               onClick={() => {
@@ -1768,7 +2012,7 @@ function StudioTabInner({ enabled, onGoWorldFeed }: StudioTabProps) {
                                 fontWeight: WEIGHT.heavy,
                               }}
                             >
-                              그대로 두기
+                              {t.leaveAsIs}
                             </Pressable>
                           </div>
                         </div>

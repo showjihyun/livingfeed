@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Noto_Sans_KR, Nunito } from "next/font/google";
 import type { ReactNode } from "react";
 
+import { LocaleProvider } from "@/lib/i18n";
+
 import "./globals.css";
 
 const nunito = Nunito({
@@ -18,19 +20,20 @@ const notoSansKr = Noto_Sans_KR({
 
 export const metadata: Metadata = {
   title: "Living Feed",
-  description: "AI가 살아가는 세상을 탐험하는 Interactive Social Drama Platform",
+  description: "An interactive social drama platform for exploring a world where AI lives",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
+  // lang 기본은 en — 저장된 언어 선택은 LocaleProvider가 복원하며 lang도 갱신한다
   return (
-    <html lang="ko" className={`${nunito.variable} ${notoSansKr.variable}`}>
+    <html lang="en" className={`${nunito.variable} ${notoSansKr.variable}`}>
       <body
         style={{
           fontFamily:
             "var(--font-nunito), var(--font-noto-sans-kr), 'Nunito', 'Noto Sans KR', sans-serif",
         }}
       >
-        {children}
+        <LocaleProvider>{children}</LocaleProvider>
       </body>
     </html>
   );

@@ -13,6 +13,7 @@ import useSWRInfinite from "swr/infinite";
 
 import type { ActorIdentity } from "./actors";
 import { PLAYER_ID } from "./config";
+import { pickMessages, type Locale } from "./i18n";
 import { rangeTickBounds, type Range } from "./range";
 import { jsonFetcher } from "./swr";
 import { currentTick } from "./world-clock";
@@ -52,14 +53,29 @@ export interface ActorArc {
   plannedAt: string;
 }
 
-/** 인생 단계 코드 → 표시 라벨 (plan/08의 닫힌 어휘 — 미지 코드는 코드 그대로) */
-export const ARC_STAGE_LABELS: Record<string, string> = {
-  student: "학생기",
-  newcomer: "사회 초년기",
-  settling: "정착·방황기",
-  prime: "전성기·침체기",
-  elder: "원로기",
+// 인생 단계 코드 → 표시 라벨 — locale별 (plan/08의 닫힌 어휘)
+const ARC_STAGE_LABELS_EN: Record<string, string> = {
+  student: "Student years",
+  newcomer: "Early career",
+  settling: "Settling · Drifting",
+  prime: "Prime · Slump",
+  elder: "Elder years",
 };
+const ARC_STAGE_LABELS: Record<Locale, Record<string, string>> = {
+  en: ARC_STAGE_LABELS_EN,
+  ko: {
+    student: "학생기",
+    newcomer: "사회 초년기",
+    settling: "정착·방황기",
+    prime: "전성기·침체기",
+    elder: "원로기",
+  },
+};
+
+/** 인생 단계 코드 → 표시 라벨 (plan/08의 닫힌 어휘 — 미지 코드는 코드 그대로) */
+export function arcStageLabel(stage: string): string {
+  return pickMessages(ARC_STAGE_LABELS)[stage] ?? stage;
+}
 
 export interface ActorProfile {
   /** 이름·소개·목표 — read.actors (없으면 null, 화면은 식별자 폴백) */

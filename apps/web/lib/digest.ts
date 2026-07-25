@@ -17,6 +17,7 @@
  */
 
 import { authHeaders, PLAYER_ID } from "./config";
+import { pickMessages, type Locale } from "./i18n";
 
 const FEED_API_URL = process.env.NEXT_PUBLIC_LF_FEED_API_URL ?? "http://localhost:8001";
 const WORLD_ID = process.env.NEXT_PUBLIC_LF_WORLD_ID ?? "w_main";
@@ -242,21 +243,38 @@ export function composeDigest(
  *  - world:    BE 내레이션 제목 그대로 ("김민지, 인생의 장이 넘어가다")
  */
 export function digestSentence(line: DigestLine, name: (actorId: string) => string): string {
+  const t = pickMessages(SENTENCES);
   switch (line.kind) {
     case "receipt":
-      return `${name(line.actorId)}의 마음이 움직였어요 — ${line.clause}`;
+      return t.receipt(name(line.actorId), line.clause);
     case "dm":
-      return `${name(line.actorId)}에게서 메시지가 와 있어요 — “${line.excerpt}”`;
+      return t.dm(name(line.actorId), line.excerpt);
     case "comment":
-      return `${name(line.actorId)}에게서 답글이 와 있어요 — “${line.excerpt}”`;
+      return t.comment(name(line.actorId), line.excerpt);
     case "creation":
-      return line.debut
-        ? `당신이 빚은 ${name(line.actorId)} — 세계에 첫발을 딛었어요`
-        : `당신이 빚은 인물의 소식 — ${line.title}`;
+      return line.debut ? t.debut(name(line.actorId)) : t.creationNews(line.title);
     case "world":
       return line.title;
   }
 }
+
+const sentencesEn = {
+  receipt: (name: string, clause: string) => `${name}'s feelings shifted — ${clause}`,
+  dm: (name: string, excerpt: string) => `A message from ${name} is waiting — “${excerpt}”`,
+  comment: (name: string, excerpt: string) => `A reply from ${name} is waiting — “${excerpt}”`,
+  debut: (name: string) => `${name}, whom you shaped, took their first steps into the world`,
+  creationNews: (title: string) => `News of a character you shaped — ${title}`,
+};
+const SENTENCES: Record<Locale, typeof sentencesEn> = {
+  en: sentencesEn,
+  ko: {
+    receipt: (name, clause) => `${name}의 마음이 움직였어요 — ${clause}`,
+    dm: (name, excerpt) => `${name}에게서 메시지가 와 있어요 — “${excerpt}”`,
+    comment: (name, excerpt) => `${name}에게서 답글이 와 있어요 — “${excerpt}”`,
+    debut: (name) => `당신이 빚은 ${name} — 세계에 첫발을 딛었어요`,
+    creationNews: (title) => `당신이 빚은 인물의 소식 — ${title}`,
+  },
+};
 
 // ---------------------------------------------------------------------------
 // 조회 — 부재 구간 재료를 feed-api에서 (미가용이면 null, 조용한 강등)

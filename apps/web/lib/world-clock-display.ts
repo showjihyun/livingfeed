@@ -13,6 +13,7 @@
 import { useSyncExternalStore } from "react";
 
 import { formatWorldTime, WORLD_MIN_START } from "./data";
+import { useLocale } from "./i18n";
 import { hasAnchor } from "./world-clock";
 
 const TICK_MS = 3000;
@@ -56,5 +57,8 @@ const getServerSnapshot = (): number => WORLD_MIN_START; // SSR 결정적 값
 /** 데모 폴백 세계시각 문자열. useWorldClock(fallback)의 fallback 인자로 쓴다. */
 export function useDemoWorldTime(): string {
   const min = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  // 표기는 UI 언어를 따른다 — 구독해 둬야 언어를 바꾼 그 순간 다시 그려진다
+  // (formatWorldTime이 읽는 모듈 캐시만으로는 다음 틱까지 이전 언어가 남는다)
+  useLocale();
   return formatWorldTime(min);
 }

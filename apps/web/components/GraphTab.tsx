@@ -5,6 +5,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ActorIdentity } from "@/lib/actors";
 import { PLAYER_ID } from "@/lib/config";
 import type { LiveRelEdge, RelDimensions, WorldGraphState, WorldRelEdge } from "@/lib/graph";
+import { pickMessages, useLocale, useMessages, type Locale } from "@/lib/i18n";
 import { COLOR, WEIGHT, RADIUS } from "@/lib/tokens";
 
 import styles from "./lf.module.css";
@@ -33,17 +34,163 @@ const TILT = 0.62;
 /** 에고 뷰의 플레이어 노드 키 — 액터·플레이어 id(a_…, p_…)와 충돌하지 않는 예약 키 */
 const YOU_KEY = "__you__";
 
-const STAGE_KO: Record<string, string> = {
-  stranger: "낯선 사이",
-  acquaintance: "아는 사이",
-  friend: "친구",
-  close_friend: "가까운 사이",
-  romantic: "연인",
-  family: "가족 같은",
-  mentor: "멘토",
-  rival: "라이벌",
-  enemy: "적대",
+/* ── UI 메시지 — en 기본, ko는 기존 문안 그대로 (lib/i18n seam) ── */
+const en = {
+  you: "You",
+  /** API stage enum → 표시 라벨 — 미지의 stage는 원문 fallback */
+  stages: {
+    stranger: "Strangers",
+    acquaintance: "Acquaintances",
+    friend: "Friends",
+    close_friend: "Close friends",
+    romantic: "Lovers",
+    family: "Like family",
+    mentor: "Mentor",
+    rival: "Rivals",
+    enemy: "Hostile",
+  } as Record<string, string>,
+  tone: {
+    tension: "Simmering tension",
+    deepBond: "Deep bond",
+    close: "Growing close",
+    building: "Slowly building",
+    passing: "Fleeting encounter",
+  },
+  texture: {
+    resentment: "Old resentment still lingers in this tie.",
+    trust: "Trust is quietly building here.",
+    intimacy: "They are letting each other in close.",
+    respect: "They hold each other in genuine respect.",
+    attraction: "A quiet pull runs through this tie.",
+    wavering: "Trust here is starting to waver.",
+  },
+  legend: { conflict: "Conflict", trust: "Trust", close: "Closeness" },
+  dims: {
+    trust: "Trust",
+    intimacy: "Closeness",
+    respect: "Respect",
+    attraction: "Attraction",
+    resentment: "Resentment",
+  },
+  strength: (pct: number) => `Tie strength ${pct}%`,
+  textureHeading: "Texture of this tie (live)",
+  interveneTitle: "You can intervene",
+  interveneBody: (name: string) =>
+    ` — a DM or a comment truly moves your relationship with ${name}. Interventions leave a trace.`,
+  pairTouchesYou: "This tie reaches you — a DM or a comment truly moves this relationship.",
+  pairWorldOwn: "The world wove this tie on its own — the story flows on even without you.",
+  centerOn: (name: string) => `Center on ${name}`,
+  focusTitle: (name: string) => `The web from ${name}'s side`,
+  focusTitleYou: "The web from your side",
+  focusYou:
+    "You are seeing the world centered on you. For the full texture of each tie, 'My Ties' goes deeper.",
+  focusOther:
+    "The closer the tie, the nearer its orbit. Click a line to see the texture of that bond.",
+  viewWholeWorld: "View the whole world",
+  backToMine: "Back to my ties",
+  title: "Relationship Graph",
+  scopeMine: "My Ties",
+  scopeWorld: "World Ties",
+  hintWorld: "A web the world has woven on its own — click someone to see it from their center",
+  hintMine: "Click a node to see the texture of that tie",
+  emptyWorldA: "The world is still weaving itself together.",
+  emptyWorldB: "As actors collide and grow close, their web of ties will surface here.",
+  emptyMineA: "No ties yet.",
+  emptyMineB: "Step in through the feed or DMs, and the world will write you into its web.",
+  controls: "Drag to rotate · Scroll to zoom · Double-click to reset",
+  liveOn: "Live relationship data connected",
+  liveOff: "Waiting for relationship data",
+  worldIntro:
+    "Ties keep growing even where you are not. Click someone to re-center the web on them, and click a line to see the texture of that bond.",
+  truncatedNote: "For now, only the clearest ties are shown.",
+  worldEmptyPanel:
+    "The web of ties is still empty. Once the world stirs to life, its bonds will be drawn here.",
+  mineIntro:
+    "Click someone in the graph to see the live texture of that tie — trust, closeness, resentment — and its current stage.",
+  mineEmptyPanel: "No ties yet. Intervene in the world and the web will start to grow.",
 };
+
+const M: Record<Locale, typeof en> = {
+  en,
+  ko: {
+    you: "당신",
+    stages: {
+      stranger: "낯선 사이",
+      acquaintance: "아는 사이",
+      friend: "친구",
+      close_friend: "가까운 사이",
+      romantic: "연인",
+      family: "가족 같은",
+      mentor: "멘토",
+      rival: "라이벌",
+      enemy: "적대",
+    },
+    tone: {
+      tension: "팽팽한 긴장",
+      deepBond: "깊은 유대",
+      close: "가까워진 사이",
+      building: "쌓여가는 사이",
+      passing: "스치는 인연",
+    },
+    texture: {
+      resentment: "앙금이 남아 있는 결이에요",
+      trust: "신뢰가 쌓여가는 결이에요",
+      intimacy: "곁을 내주는 결이에요",
+      respect: "서로를 인정하는 결이에요",
+      attraction: "끌림이 감도는 결이에요",
+      wavering: "믿음이 흔들리는 결이에요",
+    },
+    legend: { conflict: "갈등", trust: "신뢰", close: "친밀" },
+    dims: {
+      trust: "신뢰",
+      intimacy: "친밀",
+      respect: "존중",
+      attraction: "끌림",
+      resentment: "원한",
+    },
+    strength: (pct) => `관계도 ${pct}%`,
+    textureHeading: "관계의 결 (실측)",
+    interveneTitle: "개입할 수 있어요",
+    interveneBody: (name) =>
+      ` — DM이나 댓글로 ${name}과의 관계가 실제로 움직입니다. 개입은 흔적을 남겨요.`,
+    pairTouchesYou: "당신이 닿아 있는 인연이에요 — DM이나 댓글로 이 관계는 실제로 움직입니다.",
+    pairWorldOwn: "세계가 스스로 엮은 인연이에요 — 당신 없이도 이야기는 흐릅니다.",
+    centerOn: (name) => `${name} 중심으로 보기`,
+    focusTitle: (name) => `${name}의 자리에서 본 관계망`,
+    focusTitleYou: "당신의 자리에서 본 관계망",
+    focusYou:
+      "당신을 중심으로 세계를 보고 있어요. 관계의 결을 자세히 보려면 '나의 관계'가 더 깊습니다.",
+    focusOther: "가까운 인연일수록 안쪽 궤도에 있어요. 선을 클릭하면 그 인연의 결이 나타납니다.",
+    viewWholeWorld: "세계 전체 보기",
+    backToMine: "나의 관계로 돌아가기",
+    title: "관계 그래프",
+    scopeMine: "나의 관계",
+    scopeWorld: "세계의 관계",
+    hintWorld: "세계가 스스로 엮어온 관계망 — 인물을 클릭해 그 중심으로 보세요",
+    hintMine: "노드를 클릭해 그 관계의 결을 보세요",
+    emptyWorldA: "세계가 아직 서로를 엮는 중이에요.",
+    emptyWorldB: "액터들이 부딪히고 가까워지면 관계망이 여기 떠오릅니다.",
+    emptyMineA: "아직 이어진 관계가 없어요.",
+    emptyMineB: "피드나 DM으로 개입하면 세계가 당신을 관계망에 새깁니다.",
+    controls: "드래그 회전 · 휠 확대 · 더블클릭 초기화",
+    liveOn: "관계도 실측 연결됨",
+    liveOff: "관계 데이터 대기 중",
+    worldIntro:
+      "당신이 없는 곳에서도 관계는 자라요. 인물을 클릭하면 그 중심으로 다시 보고, 선을 클릭하면 그 인연의 결이 나타납니다.",
+    truncatedNote: "지금은 가장 또렷한 인연만 추려 보여주고 있어요.",
+    worldEmptyPanel: "아직 관계망이 비어 있어요. 세계가 살아 움직이면 인연이 여기 그려집니다.",
+    mineIntro:
+      "왼쪽 그래프에서 인물을 클릭하면, 그 관계의 실측 결(신뢰·친밀·원한)과 현재 단계가 여기 나타납니다.",
+    mineEmptyPanel: "아직 관계가 없어요. 세계에 개입하면 관계망이 자라납니다.",
+  },
+};
+
+type Messages = typeof en;
+
+/** API stage enum → 표시 라벨 (호출 시점의 UI 언어). 미지의 stage는 원문 그대로. */
+function stageLabel(stage: string): string {
+  return pickMessages(M).stages[stage] ?? stage;
+}
 
 const NODE_PALETTE: [string, string][] = [
   [COLOR.accent, "#7FA3E8"],
@@ -105,7 +252,7 @@ function buildNodes(edges: LiveRelEdge[], nameOf: (id: string) => string): NodeD
   const player: NodeDef = {
     key: YOU_KEY,
     actorId: null,
-    name: "당신",
+    name: pickMessages(M).you,
     strength: 1,
     color: PLAYER_COLORS[0],
     edge: PLAYER_COLORS[1],
@@ -142,7 +289,7 @@ function buildEdges(edges: LiveRelEdge[]): EdgeDef[] {
       to: e.actorId,
       kind,
       width: 2.5 + 3.5 * Math.min(1, e.strength),
-      label: STAGE_KO[e.stage] ?? e.stage,
+      label: stageLabel(e.stage),
     };
   });
 }
@@ -182,21 +329,23 @@ function mergeWorldPairs(edges: WorldRelEdge[]): WorldPair[] {
 
 /** 간선의 정성 어휘 — 수치·기계 어휘 무노출 (리시트 정화의 결) */
 function worldToneLabel(pair: WorldPair): string {
-  if (pair.dims.resentment >= 0.3) return "팽팽한 긴장";
-  if (pair.weight >= 0.45) return "깊은 유대";
-  if (pair.weight >= 0.18) return "가까워진 사이";
-  if (pair.weight >= 0.06) return "쌓여가는 사이";
-  return "스치는 인연";
+  const tone = pickMessages(M).tone;
+  if (pair.dims.resentment >= 0.3) return tone.tension;
+  if (pair.weight >= 0.45) return tone.deepBond;
+  if (pair.weight >= 0.18) return tone.close;
+  if (pair.weight >= 0.06) return tone.building;
+  return tone.passing;
 }
 
 /** 관계의 결을 한 문장으로 — 가장 짙은 차원 하나만 조용히 말한다 */
 function textureSentence(d: RelDimensions): string | null {
+  const texture = pickMessages(M).texture;
   const phrases: [number, string][] = [
-    [d.resentment, "앙금이 남아 있는 결이에요"],
-    [d.trust, "신뢰가 쌓여가는 결이에요"],
-    [d.intimacy, "곁을 내주는 결이에요"],
-    [d.respect, "서로를 인정하는 결이에요"],
-    [d.attraction, "끌림이 감도는 결이에요"],
+    [d.resentment, texture.resentment],
+    [d.trust, texture.trust],
+    [d.intimacy, texture.intimacy],
+    [d.respect, texture.respect],
+    [d.attraction, texture.attraction],
   ];
   let best: string | null = null;
   let bestValue = 0.05; // 이보다 옅으면 결을 단정하지 않는다
@@ -206,7 +355,7 @@ function textureSentence(d: RelDimensions): string | null {
       best = phrase;
     }
   }
-  if (best === null && d.trust <= -0.15) return "믿음이 흔들리는 결이에요";
+  if (best === null && d.trust <= -0.15) return texture.wavering;
   return best;
 }
 
@@ -516,11 +665,8 @@ function NodeGroup({
   );
 }
 
-const LEGEND: { label: string; kind: EdgeKind }[] = [
-  { label: "갈등", kind: "conflict" },
-  { label: "신뢰", kind: "trust" },
-  { label: "친밀", kind: "close" },
-];
+// 범례 — 라벨은 표시 시점에 t.legend에서 온다 (kind가 데이터, 라벨은 UI 크롬)
+const LEGEND_KINDS = ["conflict", "trust", "close"] as const;
 
 function GraphCanvas({
   nodes,
@@ -679,12 +825,13 @@ function GraphCanvas({
   );
 }
 
-const DIM_META: { key: keyof RelDimensions; label: string; color: string }[] = [
-  { key: "trust", label: "신뢰", color: COLOR.successBright },
-  { key: "intimacy", label: "친밀", color: COLOR.primary },
-  { key: "respect", label: "존중", color: "#7FA3E8" },
-  { key: "attraction", label: "끌림", color: COLOR.pink },
-  { key: "resentment", label: "원한", color: "#E36F9A" },
+// 차원 라벨은 t.dims에서 온다 — key·color만 데이터다
+const DIM_META: { key: keyof RelDimensions; color: string }[] = [
+  { key: "trust", color: COLOR.successBright },
+  { key: "intimacy", color: COLOR.primary },
+  { key: "respect", color: "#7FA3E8" },
+  { key: "attraction", color: COLOR.pink },
+  { key: "resentment", color: "#E36F9A" },
 ];
 
 function RelationshipPanel({
@@ -696,6 +843,9 @@ function RelationshipPanel({
   identity: ActorIdentity | undefined;
   name: string;
 }) {
+  const t = useMessages(M);
+  // 차원 이름 길이가 언어마다 다르다 (신뢰 vs Resentment) — 라벨 칸을 언어에 맞춘다
+  const dimLabelWidth = useLocale().locale === "ko" ? 34 : 74;
   return (
     <>
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -711,11 +861,11 @@ function RelationshipPanel({
               fontWeight: WEIGHT.heavy,
             }}
           >
-            {STAGE_KO[edge.stage] ?? edge.stage}
+            {stageLabel(edge.stage)}
           </div>
         </div>
         <div style={{ fontSize: 13, fontWeight: WEIGHT.heavy, color: COLOR.muted }}>
-          관계도 {Math.round(edge.strength * 100)}%
+          {t.strength(Math.round(edge.strength * 100))}
         </div>
       </div>
 
@@ -726,14 +876,24 @@ function RelationshipPanel({
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ fontSize: 12, fontWeight: WEIGHT.heavy, color: COLOR.faint }}>관계의 결 (실측)</div>
+        <div style={{ fontSize: 12, fontWeight: WEIGHT.heavy, color: COLOR.faint }}>
+          {t.textureHeading}
+        </div>
         {DIM_META.map((dim) => {
           const value = edge.dimensions[dim.key];
           const magnitude = Math.min(1, Math.abs(value));
           return (
             <div key={dim.key} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ width: 34, fontSize: 12, fontWeight: WEIGHT.bold, color: COLOR.muted }}>
-                {dim.label}
+              <div
+                style={{
+                  width: dimLabelWidth,
+                  fontSize: 12,
+                  fontWeight: WEIGHT.bold,
+                  color: COLOR.muted,
+                  flexShrink: 0,
+                }}
+              >
+                {t.dims[dim.key]}
               </div>
               <div
                 style={{
@@ -773,8 +933,8 @@ function RelationshipPanel({
           fontWeight: WEIGHT.semibold,
         }}
       >
-        <span style={{ fontWeight: WEIGHT.heavy, color: COLOR.ink }}>개입할 수 있어요</span> — DM이나 댓글로
-        {` ${name}`}과의 관계가 실제로 움직입니다. 개입은 흔적을 남겨요.
+        <span style={{ fontWeight: WEIGHT.heavy, color: COLOR.ink }}>{t.interveneTitle}</span>
+        {t.interveneBody(name)}
       </div>
     </>
   );
@@ -803,6 +963,7 @@ function WorldPairPanel({
   displayName: (id: string) => string;
   onFocus: (id: string) => void;
 }) {
+  const t = useMessages(M);
   const tone = worldToneLabel(pair);
   const toneColor = KIND_STYLE[pair.kind].to;
   const texture = textureSentence(pair.dims);
@@ -837,7 +998,7 @@ function WorldPairPanel({
               fontWeight: WEIGHT.heavy,
             }}
           >
-            {STAGE_KO[pair.stage] ?? pair.stage}
+            {stageLabel(pair.stage)}
           </div>
         </div>
       </div>
@@ -859,15 +1020,13 @@ function WorldPairPanel({
           fontWeight: WEIGHT.semibold,
         }}
       >
-        {touchesYou
-          ? "당신이 닿아 있는 인연이에요 — DM이나 댓글로 이 관계는 실제로 움직입니다."
-          : "세계가 스스로 엮은 인연이에요 — 당신 없이도 이야기는 흐릅니다."}
+        {touchesYou ? t.pairTouchesYou : t.pairWorldOwn}
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {[pair.a, pair.b].map((id) => (
           <button key={id} style={panelButtonStyle} onClick={() => onFocus(id)}>
-            {displayName(id)} 중심으로 보기
+            {t.centerOn(displayName(id))}
           </button>
         ))}
       </div>
@@ -886,23 +1045,22 @@ function WorldFocusPanel({
   onClearFocus: () => void;
   onGoMine: () => void;
 }) {
+  const t = useMessages(M);
   const isYou = focus === PLAYER_ID;
   return (
     <>
       <div style={{ fontSize: 17, fontWeight: WEIGHT.black }}>
-        {displayName(focus)}의 자리에서 본 관계망
+        {isYou ? t.focusTitleYou : t.focusTitle(displayName(focus))}
       </div>
       <div style={{ fontSize: 13, lineHeight: 1.7, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
-        {isYou
-          ? "당신을 중심으로 세계를 보고 있어요. 관계의 결을 자세히 보려면 '나의 관계'가 더 깊습니다."
-          : "가까운 인연일수록 안쪽 궤도에 있어요. 선을 클릭하면 그 인연의 결이 나타납니다."}
+        {isYou ? t.focusYou : t.focusOther}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <button style={panelButtonStyle} onClick={onClearFocus}>
-          세계 전체 보기
+          {t.viewWholeWorld}
         </button>
         <button style={panelButtonStyle} onClick={onGoMine}>
-          나의 관계로 돌아가기
+          {t.backToMine}
         </button>
       </div>
     </>
@@ -954,11 +1112,12 @@ function GraphTabInner({
   // 세계 뷰의 재중심 인물과 선택된 간선 — 뷰 로컬 상태 (에고 selected와 분리)
   const [focus, setFocus] = useState<string | null>(null);
   const [worldSel, setWorldSel] = useState<string | null>(null);
+  const t = useMessages(M);
 
   // 이름 그라운딩: 원시 id 무노출 — 나는 '당신', 모르는 인물은 nameOf가 '누군가'로 준다
   const displayName = useCallback(
-    (id: string) => (id === PLAYER_ID ? "당신" : nameOf(id)),
-    [nameOf],
+    (id: string) => (id === PLAYER_ID ? t.you : nameOf(id)),
+    [nameOf, t],
   );
 
   const switchScope = useCallback((next: Scope) => {
@@ -1007,19 +1166,17 @@ function GraphTabInner({
           borderBottom: "1.5px solid #EEF3FB",
         }}
       >
-        <div style={{ fontSize: 18, fontWeight: WEIGHT.black }}>관계 그래프</div>
+        <div style={{ fontSize: 18, fontWeight: WEIGHT.black }}>{t.title}</div>
         <div style={{ display: "flex", gap: 8 }}>
           <ScopeChip active={!isWorld} onClick={() => switchScope("mine")}>
-            나의 관계
+            {t.scopeMine}
           </ScopeChip>
           <ScopeChip active={isWorld} onClick={() => switchScope("world")}>
-            세계의 관계
+            {t.scopeWorld}
           </ScopeChip>
         </div>
         <div style={{ fontSize: 13, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
-          {isWorld
-            ? "세계가 스스로 엮어온 관계망 — 인물을 클릭해 그 중심으로 보세요"
-            : "노드를 클릭해 그 관계의 결을 보세요"}
+          {isWorld ? t.hintWorld : t.hintMine}
         </div>
       </div>
 
@@ -1065,15 +1222,15 @@ function GraphTabInner({
             >
               {isWorld ? (
                 <>
-                  세계가 아직 서로를 엮는 중이에요.
+                  {t.emptyWorldA}
                   <br />
-                  액터들이 부딪히고 가까워지면 관계망이 여기 떠오릅니다.
+                  {t.emptyWorldB}
                 </>
               ) : (
                 <>
-                  아직 이어진 관계가 없어요.
+                  {t.emptyMineA}
                   <br />
-                  피드나 DM으로 개입하면 세계가 당신을 관계망에 새깁니다.
+                  {t.emptyMineB}
                 </>
               )}
             </div>
@@ -1095,26 +1252,28 @@ function GraphTabInner({
               pointerEvents: "none",
             }}
           >
-            {LEGEND.map((item) => (
-              <div key={item.label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            {LEGEND_KINDS.map((kind) => (
+              <div key={kind} style={{ display: "flex", alignItems: "center", gap: 5 }}>
                 <div
                   style={{
                     width: 16,
                     height: 4,
                     borderRadius: RADIUS.pill,
-                    background: `linear-gradient(90deg, ${KIND_STYLE[item.kind].from}, ${KIND_STYLE[item.kind].to})`,
+                    background: `linear-gradient(90deg, ${KIND_STYLE[kind].from}, ${KIND_STYLE[kind].to})`,
                   }}
                 />
-                <div style={{ fontSize: 11.5, fontWeight: WEIGHT.heavy, color: COLOR.muted }}>{item.label}</div>
+                <div style={{ fontSize: 11.5, fontWeight: WEIGHT.heavy, color: COLOR.muted }}>
+                  {t.legend[kind]}
+                </div>
               </div>
             ))}
             <div style={{ width: 1, height: 14, background: COLOR.border }} />
             <div style={{ fontSize: 11.5, fontWeight: WEIGHT.bold, color: COLOR.faint }}>
-              드래그 회전 · 휠 확대 · 더블클릭 초기화
+              {t.controls}
             </div>
             <div style={{ width: 1, height: 14, background: COLOR.border }} />
             <div style={{ fontSize: 11.5, fontWeight: WEIGHT.heavy, color: liveOk ? COLOR.success : COLOR.faint }}>
-              {liveOk ? "관계도 실측 연결됨" : "관계 데이터 대기 중"}
+              {liveOk ? t.liveOn : t.liveOff}
             </div>
           </div>
         </div>
@@ -1145,18 +1304,17 @@ function GraphTabInner({
               <div style={{ fontSize: 13, lineHeight: 1.7, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
                 {pairs.length > 0 ? (
                   <>
-                    당신이 없는 곳에서도 관계는 자라요. 인물을 클릭하면 그 중심으로 다시 보고,
-                    선을 클릭하면 그 인연의 결이 나타납니다.
+                    {t.worldIntro}
                     {world.truncated && (
                       <>
                         <br />
                         <br />
-                        지금은 가장 또렷한 인연만 추려 보여주고 있어요.
+                        {t.truncatedNote}
                       </>
                     )}
                   </>
                 ) : (
-                  "아직 관계망이 비어 있어요. 세계가 살아 움직이면 인연이 여기 그려집니다."
+                  t.worldEmptyPanel
                 )}
               </div>
             )
@@ -1168,9 +1326,7 @@ function GraphTabInner({
             />
           ) : (
             <div style={{ fontSize: 13, lineHeight: 1.7, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
-              {edges.length > 0
-                ? "왼쪽 그래프에서 인물을 클릭하면, 그 관계의 실측 결(신뢰·친밀·원한)과 현재 단계가 여기 나타납니다."
-                : "아직 관계가 없어요. 세계에 개입하면 관계망이 자라납니다."}
+              {edges.length > 0 ? t.mineIntro : t.mineEmptyPanel}
             </div>
           )}
         </div>

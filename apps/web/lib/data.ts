@@ -1,16 +1,19 @@
+import { getLocale } from "./i18n";
 import type { Tab, ToastIcon } from "./types";
 
 /** UI 파라미터 (특정 인물·서사 데이터 아님) */
 export const TOAST_DURATION_MS = 8000;
 
-export const TOPIC_LIST = [
-  "야망과 배신",
-  "로맨스",
-  "직장 드라마",
-  "성장 서사",
-  "커뮤니티 정치",
-  "미스터리",
-];
+// 관심사 선택지 — id만 데이터다. 표시 라벨은 Onboarding의 locale 메시지에서 온다.
+export const TOPIC_IDS = [
+  "ambition_betrayal",
+  "romance",
+  "workplace_drama",
+  "growth",
+  "community_politics",
+  "mystery",
+] as const;
+export type TopicId = (typeof TOPIC_IDS)[number];
 
 /** 아이콘 path (24x24 stroke) */
 export const ICON = {
@@ -46,6 +49,9 @@ export const ICON = {
     "M6 3v12M18 9a9 9 0 0 1-9 9M15 6a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M3 18a3 3 0 1 0 6 0a3 3 0 1 0 -6 0",
   wrench:
     "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z",
+  gear:
+    "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2zM9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0",
+  check: "M20 6 9 17l-5-5",
 } as const;
 
 export const TOAST_ICON_D: Record<ToastIcon, string> = {
@@ -58,18 +64,18 @@ export const TOAST_ICON_D: Record<ToastIcon, string> = {
   "user-round": "M7 8a5 5 0 1 0 10 0a5 5 0 1 0 -10 0M20 21a8 8 0 0 0-16 0",
 };
 
+// 탭 라벨은 데이터가 아니라 UI 크롬 — Sidebar의 locale 메시지에서 온다
 export interface NavDef {
   key: Tab;
-  label: string;
   iconD: string;
 }
 
 export const NAV_DEFS: NavDef[] = [
-  { key: "feed", label: "World Feed", iconD: ICON.globe },
-  { key: "community", label: "커뮤니티", iconD: ICON.users },
-  { key: "profile", label: "프로필", iconD: ICON.user },
-  { key: "dm", label: "받은 것", iconD: ICON.inbox },
-  { key: "graph", label: "관계 그래프", iconD: ICON.graph },
+  { key: "feed", iconD: ICON.globe },
+  { key: "community", iconD: ICON.users },
+  { key: "profile", iconD: ICON.user },
+  { key: "dm", iconD: ICON.inbox },
+  { key: "graph", iconD: ICON.graph },
 ];
 
 /**
@@ -83,5 +89,12 @@ export function formatWorldTime(worldMin: number): string {
   const mm = worldMin % 1440;
   const h = String(Math.floor(mm / 60)).padStart(2, "0");
   const m = String(mm % 60).padStart(2, "0");
-  return `3월 ${day}일 ${h}:${m}`;
+  return formatWorldDate(3, day, `${h}:${m}`);
+}
+
+/** 세계 날짜+시각 표기 — 렌더 시점의 UI 언어를 따른다 (world-clock.ts와 공용) */
+export function formatWorldDate(month: number, day: number, hhmm: string): string {
+  if (getLocale() === "ko") return `${month}월 ${day}일 ${hhmm}`;
+  const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${names[(month - 1) % 12]} ${day}, ${hhmm}`;
 }

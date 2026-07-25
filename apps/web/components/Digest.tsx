@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 
 import type { DigestLine, PersonalDigest } from "@/lib/digest";
+import { useMessages, type Locale } from "@/lib/i18n";
 import { COLOR, WEIGHT, RADIUS } from "@/lib/tokens";
 import {
   ABSENCE_THRESHOLD_MS,
@@ -26,10 +27,38 @@ import { Pressable } from "./Pressable";
 
 /** 갈래별 결 — 저자성(보라)·나를 향한 것(분홍)·세계의 마디(파랑), 기존 팔레트 그대로 */
 const SECTION_STYLE = {
-  yours: { label: "당신이 빚은 인물", color: "#8A63D2", bg: COLOR.surfaceAlt, border: "#E9E1F8" },
-  toYou: { label: "당신에게 닿은 것", color: COLOR.pink, bg: "#FDF7FA", border: "#F4DEE8" },
-  world: { label: "세계의 마디", color: COLOR.primary, bg: "#F7FAFE", border: COLOR.border },
+  yours: { color: "#8A63D2", bg: COLOR.surfaceAlt, border: "#E9E1F8" },
+  toYou: { color: COLOR.pink, bg: "#FDF7FA", border: "#F4DEE8" },
+  world: { color: COLOR.primary, bg: "#F7FAFE", border: COLOR.border },
 } as const;
+
+const en = {
+  sectionLabel: {
+    yours: "Characters you shaped",
+    toYou: "What reached you",
+    world: "World milestones",
+  },
+  moreCount: (n: number) => `and ${n} more`,
+  title: "While you were away",
+  intro: "You're already in the world — this is just what happened while you were away. Close it and you're back in the feed.",
+  closeAria: "Close digest and view feed",
+  backToWorld: "Back to the world",
+};
+const M: Record<Locale, typeof en> = {
+  en,
+  ko: {
+    sectionLabel: {
+      yours: "당신이 빚은 인물",
+      toYou: "당신에게 닿은 것",
+      world: "세계의 마디",
+    },
+    moreCount: (n) => `외 ${n}건이 더 있어요`,
+    title: "당신이 없는 동안",
+    intro: "이미 세계에 들어와 있어요 — 없는 동안의 마디만 모아뒀어요. 닫으면 바로 피드예요.",
+    closeAria: "다이제스트 닫고 피드 보기",
+    backToWorld: "세계로 돌아가기",
+  },
+};
 
 function Section({
   kind,
@@ -42,6 +71,7 @@ function Section({
   more?: number;
   nameOf: (actorId: string) => string;
 }) {
+  const t = useMessages(M);
   if (lines.length === 0) return null;
   const s = SECTION_STYLE[kind];
   return (
@@ -57,7 +87,7 @@ function Section({
       }}
     >
       <div style={{ fontSize: 11, fontWeight: WEIGHT.heavy, color: s.color, letterSpacing: 0.4 }}>
-        {s.label}
+        {t.sectionLabel[kind]}
       </div>
       {lines.map((line, i) => (
         <div key={i} style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
@@ -78,7 +108,7 @@ function Section({
       ))}
       {(more ?? 0) > 0 && (
         <div style={{ fontSize: 12.5, fontWeight: WEIGHT.semibold, color: COLOR.faint, paddingLeft: 15 }}>
-          외 {more}건이 더 있어요
+          {t.moreCount(more ?? 0)}
         </div>
       )}
     </div>
@@ -86,6 +116,7 @@ function Section({
 }
 
 export function Digest({ nameOf }: { nameOf: (actorId: string) => string }) {
+  const t = useMessages(M);
   const [digest, setDigest] = useState<PersonalDigest | null>(null);
 
   useEffect(() => {
@@ -152,10 +183,10 @@ export function Digest({ nameOf }: { nameOf: (actorId: string) => string }) {
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-            <div style={{ fontSize: 26, fontWeight: WEIGHT.black, lineHeight: 1.3 }}>당신이 없는 동안</div>
+            <div style={{ fontSize: 26, fontWeight: WEIGHT.black, lineHeight: 1.3 }}>{t.title}</div>
             <Pressable
               onClick={close}
-              aria-label="다이제스트 닫고 피드 보기"
+              aria-label={t.closeAria}
               style={{
                 flexShrink: 0,
                 width: 32,
@@ -175,7 +206,7 @@ export function Digest({ nameOf }: { nameOf: (actorId: string) => string }) {
             </Pressable>
           </div>
           <div style={{ fontSize: 14, color: COLOR.muted, lineHeight: 1.6, fontWeight: WEIGHT.regular }}>
-            이미 세계에 들어와 있어요 — 없는 동안의 마디만 모아뒀어요. 닫으면 바로 피드예요.
+            {t.intro}
           </div>
         </div>
 
@@ -198,7 +229,7 @@ export function Digest({ nameOf }: { nameOf: (actorId: string) => string }) {
             userSelect: "none",
           }}
         >
-          세계로 돌아가기
+          {t.backToWorld}
         </Pressable>
       </div>
     </div>

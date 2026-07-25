@@ -8,11 +8,23 @@
  * 공용 조회 조건이므로 탭별 색을 입히지 않는다).
  */
 
-import { RANGE_LABELS, RANGES, type Range } from "@/lib/range";
+import { useMessages, type Locale } from "@/lib/i18n";
+import { RANGES, type Range } from "@/lib/range";
 import { COLOR, RADIUS, WEIGHT } from "@/lib/tokens";
 
 import { Pressable } from "./Pressable";
 import styles from "./lf.module.css";
+
+const en: Record<Range, string> = {
+  all: "All",
+  today: "Today",
+  week: "This week",
+  month: "This month",
+};
+const M: Record<Locale, typeof en> = {
+  en,
+  ko: { all: "전체", today: "오늘", week: "이번 주", month: "이번 달" },
+};
 
 export function RangeChips({
   value,
@@ -21,6 +33,7 @@ export function RangeChips({
   value: Range;
   onChange: (range: Range) => void;
 }) {
+  const t = useMessages(M);
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
       {RANGES.map((range) => {
@@ -41,7 +54,7 @@ export function RangeChips({
               border: `1.5px solid ${selected ? "#CFE0F8" : "transparent"}`,
             }}
           >
-            {RANGE_LABELS[range]}
+            {t[range]}
           </Pressable>
         );
       })}
