@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 백엔드 앱 서비스 전체 기동 — 호스트 프로세스로 (dispatcher/ai-runtime/projector×4/
 feed-composer/director/actor/gateway/feed-api). 저장소(compose core)는 이미 떠 있다고 가정.
@@ -91,7 +91,7 @@ $services = @(
 
 function Escape-SingleQuote([string]$s) { return $s.Replace("'", "''") }
 
-Write-Host "백엔드 기동 — 액터 $MaxActors명 · Hot $HotStart · 샤드 $NumShards · 모드 $Mode · LLM $AiProvider($LocalModel)"
+Write-Host "백엔드 기동 — 액터 ${MaxActors}명 · Hot $HotStart · 샤드 $NumShards · 모드 $Mode · LLM $AiProvider($LocalModel)"
 Write-Host "repo=$repoRoot"
 Write-Host ''
 
@@ -131,6 +131,6 @@ if ($DryRun) {
     Write-Host ''
     Write-Host "기동 완료 — $($launched.Count)개 서비스 (PID: $($launched -join ', '))."
     Write-Host "확인: curl http://localhost:8000/healthz  (gateway) / http://localhost:8001/healthz (feed-api)"
-    Write-Host "액터 창 로그에 '초기 Hot $HotStart/$MaxActors명' 이 보이면 규모 설정이 걸린 것이다."
+    Write-Host "액터 창 로그에 '초기 Hot $HotStart/${MaxActors}명' 이 보이면 규모 설정이 걸린 것이다."
     Write-Host "정지: 각 창을 닫거나, 이 세션에서 백엔드 정지 요청."
 }
