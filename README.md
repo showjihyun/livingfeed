@@ -313,4 +313,4 @@ Runtime knobs live in [infra/compose/README.md](infra/compose/README.md).
 
 ## License
 
-[MIT](LICENSE) © 2026 Living Feed
+[MIT](LICENSE) © 2026 Poor Coin Pepe
