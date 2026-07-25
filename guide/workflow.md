@@ -28,6 +28,7 @@ sequenceDiagram
     participant A as agents
     participant AI as ai-runtime
     participant ES as event log
+    participant FC as feed composer
     participant PR as projectors
 
     T->>ES: system.tick.started<br/>scheduled = {hot, warm, cold}
@@ -55,7 +56,7 @@ sequenceDiagram
 
     rect rgb(248, 244, 252)
     Note over A: 4 · RESOLVE (sequential, deterministic)
-    A->>ES: actor.action.performed<br/>feed.post.published<br/>actor.message.sent
+    A->>ES: actor.action.performed<br/>actor.message.sent
     end
 
     rect rgb(250, 250, 240)
@@ -65,10 +66,16 @@ sequenceDiagram
     end
 
     T->>ES: system.tick.completed
+
+    ES->>FC: actions stream out
+    FC->>FC: score drama × worthiness
+    FC->>ES: feed.post.published<br/><sub>only above threshold</sub>
     ES->>PR: outbox → NATS → projections
 ```
 
 **Where the money goes:** step 3 is the only phase that calls a model. Everything else is arithmetic. That is why the scheduler in phase 2 — not a rate limiter — is the cost control.
+
+**Note the last two steps.** Agents never publish to the feed; they only record that they acted. The feed composer is a separate consumer that decides what is worth surfacing. So "an agent decided something" and "you saw a post" are different events, separated by an editorial threshold.
 
 ---
 

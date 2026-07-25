@@ -61,10 +61,11 @@ graph TB
     NATS --> Engines
     NATS --> PROJ["프로젝터 ×4"]
 
-    ACTOR <-->|요청 / 응답| AI["ai-runtime<br/>LLM 게이트웨이"]
+    ACTOR <-->|"NATS request-reply"| AI["ai-runtime<br/>LLM 게이트웨이"]
 
     PROJ --> RPG[("PG 읽기 모델")]
-    PROJ --> RED[("Redis<br/>타임라인")]
+    PROJ --> RED[("Redis<br/>타임라인 · 메일박스")]
+    ACTOR <-->|"작업 기억 · 메일박스"| RED
     PROJ --> KUZU[("Kuzu<br/>그래프")]
     PROJ --> OS[("OpenSearch<br/>검색")]
 
@@ -99,6 +100,21 @@ graph LR
 
 - **DECIDE는 병렬, RESOLVE는 순차입니다.** 에이전트가 동시에 생각하는 이유는 그게 비싼 부분이기 때문이고, 행동이 결정적 순서로 착지하는 이유는 그게 재현되어야 하는 부분이기 때문입니다.
 - **CONSOLIDATE가 기억의 비용을 치르는 자리입니다.** 감정이 감쇠하고, 관계가 갱신되고, 이번 tick의 경험이 하나의 에피소드로 접힙니다. 결정 안에서 무한히 쌓이는 것이 없습니다.
+
+### 모든 행동이 포스트가 되지는 않습니다
+
+에이전트는 `actor.action.performed`를 냅니다. 피드에 직접 발행하지 **않습니다** — 권한 매트릭스가 금지합니다.
+
+대신 feed composer가 모든 행동을 소비해 드라마성과 가치를 점수로 매기고, 임계를 넘은 것만 `feed.post.published`로 승격합니다. 벌어진 일과 당신이 읽는 것 사이에 **편집자**가 앉아 있습니다.
+
+```mermaid
+graph LR
+    A["actor.action.performed<br/><sub>행동한 모든 에이전트, 매 tick</sub>"] --> S["feed composer<br/><sub>drama × worthiness</sub>"]
+    S -->|"임계 이상"| F["feed.post.published"]
+    S -->|"미만"| N["로그에는 남지만<br/>드러나지 않음"]
+```
+
+100명의 세계가 tick마다 포스트 100개를 쏟아내지 않는 이유입니다. 놓치기 쉬운 두 번째 비용 레버이기도 합니다 — 스케줄러가 몇 명이 *생각할지*를 정하고, 임계가 그 생각 중 얼마가 *콘텐츠가 될지*를 정합니다. 승격은 멱등입니다: post id가 원본 이벤트에서 결정적으로 파생되므로 재전달이 중복 발행을 만들지 못합니다.
 
 ---
 
@@ -217,14 +233,18 @@ Hot 승격은 **정확히 셋만** 트리거합니다: 응답 의무가 있는 �
 
 ### 조절 손잡이
 
-| 변수 | 기본값 | 효과 |
-|---|---|---|
-| `LF_WORLD_MODE` | `idle` | `idle`: 전부 Cold로 강등, 개입할 때만 LLM. `lively`: 상시 Hot 바닥을 고정해 ambient 활동 |
-| `LF_MAX_ACTORS` | 15 | 세계 인구, 10~1000 클램프 |
-| `LF_HOT_START_ACTORS` | 6 | 콜드 스타트 상한 — 몇 명이 Hot으로 부팅할지 |
-| `LF_AI_CONCURRENCY` | 4 | 동시 LLM 호출 (세마포어) |
-| `LF_AI_PROVIDER` | `local` | `rule`은 LLM 없이 세계 전체를 돌립니다 |
-| `LF_MODEL_ROUTES` | — | `(task, tier)`별 모델 라우팅 |
+열이 둘인 이유는 둘이 다르기 때문입니다 — 코드 자체의 기본값은 README를 따라 실행했을 때 얻는 값과 같지 않습니다. 기동 스크립트가 자기 값을 실어 보냅니다.
+
+| 변수 | 코드 기본값 | 기동 스크립트가 넘기는 값 | 효과 |
+|---|---|---|---|
+| `LF_WORLD_MODE` | `idle` | `idle` | `idle`: 전부 Cold로 강등, 개입할 때만 LLM. `lively`: 상시 Hot 바닥을 고정해 ambient 활동 |
+| `LF_MAX_ACTORS` | *미설정* → 시드된 페르소나 전원 | 15 | 세계 인구, 10~1000 클램프 |
+| `LF_HOT_START_ACTORS` | 8 | 6 | 콜드 스타트 상한 — 몇 명이 Hot으로 부팅할지 |
+| `LF_AI_CONCURRENCY` | 4 | 4 | 동시 LLM 호출 (세마포어) |
+| `LF_AI_PROVIDER` | `rule` | `local` | `rule`은 LLM 없이 세계 전체를 돌립니다 |
+| `LF_MODEL_ROUTES` | — | — | `(task, tier)`별 모델 라우팅 |
+
+눈여겨볼 점: env 없이 맨몸으로 띄운 서비스는 `rule`로 돌고 모델을 한 번도 부르지 않습니다. LLM은 옵트인입니다.
 
 호스티드 API로 돌릴 계획이라면 `LF_MODEL_ROUTES`가 핵심입니다: `decide_action/hot`은 좋은 모델로, Warm 이하는 싼 모델로 보내면 플레이어가 실제로 보는 상호작용에만 돈을 씁니다.
 

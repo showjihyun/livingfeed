@@ -28,6 +28,7 @@ sequenceDiagram
     participant A as 에이전트
     participant AI as ai-runtime
     participant ES as 이벤트 로그
+    participant FC as feed composer
     participant PR as 프로젝터
 
     T->>ES: system.tick.started<br/>scheduled = {hot, warm, cold}
@@ -55,7 +56,7 @@ sequenceDiagram
 
     rect rgb(248, 244, 252)
     Note over A: 4 · RESOLVE (순차, 결정적)
-    A->>ES: actor.action.performed<br/>feed.post.published<br/>actor.message.sent
+    A->>ES: actor.action.performed<br/>actor.message.sent
     end
 
     rect rgb(250, 250, 240)
@@ -65,10 +66,16 @@ sequenceDiagram
     end
 
     T->>ES: system.tick.completed
+
+    ES->>FC: 행동이 스트림으로 흘러나감
+    FC->>FC: drama × worthiness 채점
+    FC->>ES: feed.post.published<br/><sub>임계를 넘은 것만</sub>
     ES->>PR: 아웃박스 → NATS → 프로젝션
 ```
 
 **돈이 나가는 자리:** 모델을 부르는 단계는 3번뿐입니다. 나머지는 전부 산술입니다. 2단계의 스케줄러가 — rate limiter가 아니라 — 비용 통제인 이유가 여기 있습니다.
+
+**마지막 두 단계를 눈여겨보세요.** 에이전트는 피드에 발행하지 않습니다. 자기가 행동했다는 사실만 기록할 뿐입니다. 무엇을 드러낼지는 feed composer가 따로 판단합니다. 그래서 "에이전트가 무언가를 결정했다"와 "당신이 포스트를 봤다"는 편집 임계를 사이에 둔 서로 다른 사건입니다.
 
 ---
 

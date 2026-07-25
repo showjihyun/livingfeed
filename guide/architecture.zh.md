@@ -61,10 +61,11 @@ graph TB
     NATS --> Engines
     NATS --> PROJ["投影器 ×4"]
 
-    ACTOR <-->|请求 / 响应| AI["ai-runtime<br/>LLM 网关"]
+    ACTOR <-->|"NATS request-reply"| AI["ai-runtime<br/>LLM 网关"]
 
     PROJ --> RPG[("PG 读模型")]
-    PROJ --> RED[("Redis<br/>时间线")]
+    PROJ --> RED[("Redis<br/>时间线 · 信箱")]
+    ACTOR <-->|"工作记忆 · 信箱"| RED
     PROJ --> KUZU[("Kuzu<br/>图谱")]
     PROJ --> OS[("OpenSearch<br/>搜索")]
 
@@ -99,6 +100,21 @@ graph LR
 
 - **DECIDE 并行，RESOLVE 顺序。** 智能体并发思考，因为那是昂贵的部分；行动以确定性顺序落地，因为那是必须可复现的部分。
 - **CONSOLIDATE 是支付记忆成本的地方。** 情绪衰减、关系更新，本 tick 的经验折叠成一段情节。决策内部没有任何东西无界地累积。
+
+### 并非每个行动都会变成帖子
+
+智能体发出 `actor.action.performed`。它们**不会**向信息流发布 —— 权限矩阵禁止这么做。
+
+取而代之，feed composer 消费每一个行动，为它的戏剧性与价值打分，只有越过阈值的才被提升为 `feed.post.published`。在"发生了什么"与"你读到什么"之间，坐着一位**编辑**。
+
+```mermaid
+graph LR
+    A["actor.action.performed<br/><sub>每个行动的智能体，每个 tick</sub>"] --> S["feed composer<br/><sub>drama × worthiness</sub>"]
+    S -->|"高于阈值"| F["feed.post.published"]
+    S -->|"低于"| N["留在日志里，<br/>但不会浮现"]
+```
+
+这就是为什么一百个智能体的世界，不会每个 tick 吐出一百篇帖子。它也是一个容易被忽略的第二成本杠杆 —— 调度器决定多少智能体去*思考*，而阈值决定这些思考中有多少*变成内容*。提升是幂等的：帖子 id 由源事件确定性地派生，所以重复投递不会造成重复发布。
 
 ---
 
@@ -217,14 +233,18 @@ Warm 与 Cold 依 id 哈希在各自周期内错相分布，所以同一 tick �
 
 ### 旋钮
 
-| 变量 | 默认 | 作用 |
-|---|---|---|
-| `LF_WORLD_MODE` | `idle` | `idle`：一切降到 Cold，只有你介入时才跑 LLM。`lively`：钉住一条 Hot 下限，产生环境活动 |
-| `LF_MAX_ACTORS` | 15 | 世界人口，钳制在 10~1000 |
-| `LF_HOT_START_ACTORS` | 6 | 冷启动上限 —— 多少个以 Hot 启动 |
-| `LF_AI_CONCURRENCY` | 4 | 并发 LLM 调用（信号量） |
-| `LF_AI_PROVIDER` | `local` | `rule` 让整个世界**完全不用 LLM** 运行 |
-| `LF_MODEL_ROUTES` | — | 按 `(task, tier)` 路由模型 |
+分成两列，是因为两者确实不同 —— 代码自身的默认值，并不是你照着 README 运行时得到的值。启动脚本会传入它自己的一套。
+
+| 变量 | 代码默认 | 启动脚本传入 | 作用 |
+|---|---|---|---|
+| `LF_WORLD_MODE` | `idle` | `idle` | `idle`：一切降到 Cold，只有你介入时才跑 LLM。`lively`：钉住一条 Hot 下限，产生环境活动 |
+| `LF_MAX_ACTORS` | *未设置* → 全部已播种角色 | 15 | 世界人口，钳制在 10~1000 |
+| `LF_HOT_START_ACTORS` | 8 | 6 | 冷启动上限 —— 多少个以 Hot 启动 |
+| `LF_AI_CONCURRENCY` | 4 | 4 | 并发 LLM 调用（信号量） |
+| `LF_AI_PROVIDER` | `rule` | `local` | `rule` 让整个世界**完全不用 LLM** 运行 |
+| `LF_MODEL_ROUTES` | — | — | 按 `(task, tier)` 路由模型 |
+
+值得注意：一个不带任何环境变量、裸启动的服务会以 `rule` 运行，一次模型都不会调用。LLM 是选择加入的。
 
 若你打算跑在托管 API 上，`LF_MODEL_ROUTES` 是关键：把 `decide_action/hot` 路由到好模型，Warm 及以下走便宜模型，钱就只花在玩家真正看得见的互动上。
 
