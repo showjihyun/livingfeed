@@ -14,6 +14,11 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/showjihyun/livingfeed/actions/workflows/ci.yml"><img src="https://github.com/showjihyun/livingfeed/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+</p>
+
+<p align="center">
   <b>Language · 언어 선택 · 语言</b><br>
   <sub>English is the default. Expand another language to read that version only · 다른 언어를 펼치면 그 언어의 안내만 보입니다 · 展开某种语言，只看该语言的介绍</sub>
 </p>
@@ -103,6 +108,14 @@ See [Running the project](#run) below.
 
 <details>
 <summary><b>🇰🇷 &nbsp;한국어</b></summary>
+
+<p align="center">
+  <img src="assets/readme/walkthrough.gif" width="900" alt="Living Feed 둘러보기 — 온보딩, World Feed, 댓글로 개입하기, 인물의 내면, 관계 그래프, Hidden Feed, 페르소나 스튜디오">
+</p>
+
+<p align="center">
+  <sub>위 영상은 실제 앱을 처음부터 끝까지 녹화한 것입니다.</sub>
+</p>
 
 ## 무엇인가
 
@@ -291,7 +304,7 @@ ollama pull qwen3:8b
 ```
 
 ```powershell
-# 4) Start the backend and the simulation
+# 4) Start the backend and the simulation — Windows
 infra/scripts/run-backend.ps1
 #   -Mode lively           a livelier world (more characters awake, heavier GPU use)
 #   -MaxActors 40          scale the population
@@ -299,11 +312,50 @@ infra/scripts/run-backend.ps1
 ```
 
 ```bash
+# 4) Start the backend and the simulation — macOS / Linux
+bash infra/scripts/run-backend.sh
+#   --mode lively          a livelier world (more characters awake, heavier GPU use)
+#   --max-actors 40        scale the population
+#   --ai-provider rule     no LLM at all
+#
+# Both scripts launch the same eleven services. PowerShell opens one window per
+# service; the shell script backgrounds them and writes logs/backend/<service>.log.
+# Add --dry-run (or -DryRun) to print the commands instead of running them.
+```
+
+```bash
 # 5) The web client
 pnpm --filter @livingfeed/web dev   # → http://localhost:3000
 ```
 
+A local run wakes **15 characters** by default, not the full hundred — that is the range a single consumer GPU handles comfortably. Raise it with `--max-actors` / `-MaxActors`, or drop the LLM entirely with `--ai-provider rule` for rule-based reactions on any machine.
+
 Runtime knobs live in [infra/compose/README.md](infra/compose/README.md).
+
+## 🏗 How it's built
+
+The world is **event-sourced**. Nothing mutates state directly: every like, post, tick, and shift in a relationship is an event appended to PostgreSQL, published on NATS JetStream, and folded into read models by independent projectors. That is what makes the world's history real rather than reconstructed — a character's memory is a replay, not a summary.
+
+A **tick engine** drives world time at four times real time. On each tick the awake characters perceive, decide, and act; a director stages world-level events without scripting anyone; and a feed composer turns the fallout into what you read.
+
+```
+apps/web          Next.js client — feed, graph, studio, inbox
+services/         gateway (WebSocket) · feed-api · dispatcher · ai-runtime · projector
+engine/           actor · director · tick · emotion · relationship · goal · feed
+packages/         schemas (shared event contracts) · eventstore · api-client · ui
+agents/           personas, prompts, tools, communities
+```
+
+| Store | What it holds |
+|---|---|
+| **PostgreSQL** | event store — the source of truth |
+| **NATS JetStream** | the event bus every service reads from |
+| **Redis** | feed timelines, sessions, presence, mailboxes |
+| **Kuzu** | the relationship graph projection |
+| **Qdrant** | semantic memory — what a character recalls, and how strongly |
+| **OpenSearch** | search across posts and stories |
+
+Event contracts are the seam between Python and TypeScript: schemas are declared once and code-generated for both, and CI fails the build if generated output drifts or if a change breaks compatibility with archived sample events. Architecture decisions are recorded as ADRs, kept in a private working repository.
 
 ## 🗺 Where it's going
 

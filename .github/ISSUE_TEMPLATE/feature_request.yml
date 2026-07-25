@@ -1,0 +1,35 @@
+name: Idea or feature request
+description: Suggest something the world should be able to do
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas are welcome in English or Korean. Before filing, it is worth reading
+        [Where it's going](https://github.com/showjihyun/livingfeed#-where-its-going) — some of this is already planned.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's missing
+      description: What did you want to do, or what fell flat? Describe the situation, not the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+      description: How you would like it to work. Rough is fine.
+    validations:
+      required: true
+
+  - type: textarea
+    id: fit
+    attributes:
+      label: How it fits the world
+      description: |
+        Optional, but it helps. Living Feed holds a few things firmly: the world runs
+        whether or not anyone is watching, the player intervenes rather than scripts,
+        and the interface never speaks in machine vocabulary. If your idea sits against
+        one of those, say so — that is worth discussing, not a reason to skip filing.

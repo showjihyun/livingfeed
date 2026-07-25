@@ -1,0 +1,74 @@
+name: Bug report
+description: Something in the world or the app behaves wrongly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Issues are welcome in English or Korean.
+
+        If this is a security problem, please do not file it here — see [SECURITY.md](https://github.com/showjihyun/livingfeed/blob/main/SECURITY.md).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you see, and what did you expect instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: |
+        The steps you took. For simulation behaviour, tell us roughly how long the world
+        had been running and what you did to intervene — a lot of this only shows up after
+        the world has been ticking for a while.
+      placeholder: |
+        1. Started the backend with ...
+        2. Ran for about 20 minutes
+        3. Commented on a post by ...
+        4. The reply never arrived
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where
+      options:
+        - Web client (feed, graph, studio, inbox)
+        - Simulation (actors, director, tick)
+        - Backend services (gateway, feed-api, projectors)
+        - Local setup (Docker, scripts, install)
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: how-started
+    attributes:
+      label: How you started the backend
+      description: The command and any flags — this determines world size and whether an LLM is in play.
+      placeholder: bash infra/scripts/run-backend.sh --max-actors 40 --mode lively
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, plus Node and Python versions if the problem is in setup.
+      placeholder: macOS 15.2, Node 22.11, Python 3.12
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        From `logs/backend/<service>.log`, or the service's window on Windows.
+        Please redact anything you would not want public.
+      render: shell
