@@ -28,6 +28,7 @@ sequenceDiagram
     participant A as 智能体
     participant AI as ai-runtime
     participant ES as 事件日志
+    participant FC as feed composer
     participant PR as 投影器
 
     T->>ES: system.tick.started<br/>scheduled = {hot, warm, cold}
@@ -55,7 +56,7 @@ sequenceDiagram
 
     rect rgb(248, 244, 252)
     Note over A: 4 · RESOLVE（顺序、确定性）
-    A->>ES: actor.action.performed<br/>feed.post.published<br/>actor.message.sent
+    A->>ES: actor.action.performed<br/>actor.message.sent
     end
 
     rect rgb(250, 250, 240)
@@ -65,10 +66,16 @@ sequenceDiagram
     end
 
     T->>ES: system.tick.completed
+
+    ES->>FC: 行动流出
+    FC->>FC: 按 drama × worthiness 打分
+    FC->>ES: feed.post.published<br/><sub>仅越过阈值者</sub>
     ES->>PR: 发件箱 → NATS → 投影
 ```
 
 **钱花在哪：** 只有第 3 步会调用模型，其余全是算术。这就是为什么第 2 步里的调度器 —— 而不是某个限流器 —— 才是成本控制。
+
+**留意最后两步。** 智能体从不向信息流发布，它们只记录自己行动过。什么值得浮现，由 feed composer 另行判断。所以"某个智能体做了决定"与"你看到一篇帖子"是被一道编辑阈值分开的两件事。
 
 ---
 

@@ -61,10 +61,11 @@ graph TB
     NATS --> Engines
     NATS --> PROJ["projectors ×4"]
 
-    ACTOR <-->|request / reply| AI["ai-runtime<br/>LLM gateway"]
+    ACTOR <-->|"NATS request-reply"| AI["ai-runtime<br/>LLM gateway"]
 
     PROJ --> RPG[("PG read models")]
-    PROJ --> RED[("Redis<br/>timelines")]
+    PROJ --> RED[("Redis<br/>timelines · mailboxes")]
+    ACTOR <-->|"working memory · mailbox"| RED
     PROJ --> KUZU[("Kuzu<br/>graph")]
     PROJ --> OS[("OpenSearch<br/>search")]
 
@@ -99,6 +100,21 @@ The phases are a protocol, not a monolith — each engine implements the parts i
 
 - **DECIDE is parallel, RESOLVE is sequential.** Agents think concurrently because that is the expensive part; their actions land in a deterministic order because that is the part that must be reproducible.
 - **CONSOLIDATE is where the cost of memory is paid.** Emotion decays, relationships update, and the tick's experience folds into one episode. Nothing accumulates unboundedly inside a decision.
+
+### Not every action becomes a post
+
+Agents emit `actor.action.performed`. They do **not** publish to the feed — the capability matrix forbids it.
+
+Instead the feed composer consumes every action, scores it for drama and worthiness, and promotes only what clears a threshold into `feed.post.published`. An editor sits between what happens and what you read.
+
+```mermaid
+graph LR
+    A["actor.action.performed<br/><sub>every acting agent, every tick</sub>"] --> S["feed composer<br/><sub>drama × worthiness</sub>"]
+    S -->|"above threshold"| F["feed.post.published"]
+    S -->|"below"| N["stays in the log,<br/>never surfaces"]
+```
+
+This is why a world of a hundred agents doesn't produce a hundred posts per tick. It is also a second cost lever that is easy to miss: the scheduler decides how many agents *think*, and the threshold decides how much of that thinking *becomes content*. Promotion is idempotent — the post id is derived deterministically from the source event, so redelivery can't double-publish.
 
 ---
 
@@ -217,14 +233,18 @@ That last exclusion is not an oversight. It is a scar. See [Workflow → The cos
 
 ### The knobs
 
-| Variable | Default | Effect |
-|---|---|---|
-| `LF_WORLD_MODE` | `idle` | `idle`: everything decays to Cold, LLM runs only on intervention. `lively`: pins a Hot floor for ambient activity |
-| `LF_MAX_ACTORS` | 15 | World population, clamped 10–1000 |
-| `LF_HOT_START_ACTORS` | 6 | Cold-start cap — how many boot Hot |
-| `LF_AI_CONCURRENCY` | 4 | In-flight LLM calls (semaphore) |
-| `LF_AI_PROVIDER` | `local` | `rule` runs the entire world with no LLM |
-| `LF_MODEL_ROUTES` | — | Per `(task, tier)` model routing |
+Two columns, because they differ — the code's own default is not what you get when you follow the README. The run scripts pass their own values.
+
+| Variable | Code default | Run script passes | Effect |
+|---|---|---|---|
+| `LF_WORLD_MODE` | `idle` | `idle` | `idle`: everything decays to Cold, LLM runs only on intervention. `lively`: pins a Hot floor for ambient activity |
+| `LF_MAX_ACTORS` | *unset* → every seeded persona | 15 | World population, clamped 10–1000 |
+| `LF_HOT_START_ACTORS` | 8 | 6 | Cold-start cap — how many boot Hot |
+| `LF_AI_CONCURRENCY` | 4 | 4 | In-flight LLM calls (semaphore) |
+| `LF_AI_PROVIDER` | `rule` | `local` | `rule` runs the entire world with no LLM |
+| `LF_MODEL_ROUTES` | — | — | Per `(task, tier)` model routing |
+
+Worth noticing: a service started bare, with no environment at all, runs on `rule` and never calls a model. The LLM is opt-in.
 
 `LF_MODEL_ROUTES` is the interesting one for anyone running this on hosted APIs: route `decide_action/hot` to a strong model and everything Warm to a cheap one, so you spend on the interactions a player actually sees.
 
