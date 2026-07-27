@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from lf_ai_runtime.model import ContextBundle, InferenceRequest
+from lf_ai_runtime.model import Completion, ContextBundle, InferenceRequest, Usage
 from lf_ai_runtime.providers import (
     OpenAICompatProvider,
     ProviderError,
@@ -207,18 +207,22 @@ class SchemaViolatingProvider:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def complete(self, request, model, *, repair_errors=None):
+    async def complete(self, request, model, *, repair_errors=None, max_output_tokens=None):
         self.calls += 1
         if repair_errors is None:
-            return {"action_kind": "speak"}  # required 누락 — 위반
-        return {
-            "action_kind": "speak",
-            "intent": "수정된 응답",
-            "target_actor_id": None,
-            "location_id": None,
-            "params": {},
-            "decision_trace": {"trace_id": "t-1", "tier": "hot"},
-        }
+            # required 누락 — 위반. usage는 실려 있다(토큰은 나갔다)
+            return Completion(output={"action_kind": "speak"}, usage=Usage(100, 20))
+        return Completion(
+            output={
+                "action_kind": "speak",
+                "intent": "수정된 응답",
+                "target_actor_id": None,
+                "location_id": None,
+                "params": {},
+                "decision_trace": {"trace_id": "t-1", "tier": "hot"},
+            },
+            usage=Usage(120, 30),
+        )
 
 
 async def test_schema_violation_triggers_single_repair_retry():
@@ -233,8 +237,8 @@ async def test_schema_violation_triggers_single_repair_retry():
 class AlwaysInvalidProvider:
     name = "broken"
 
-    async def complete(self, request, model, *, repair_errors=None):
-        return {"nonsense": True}
+    async def complete(self, request, model, *, repair_errors=None, max_output_tokens=None):
+        return Completion(output={"nonsense": True})
 
 
 async def test_persistent_violation_returns_explicit_error():

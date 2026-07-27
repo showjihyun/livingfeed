@@ -2,13 +2,7 @@ import { memo, useState } from "react";
 
 import { ICON, NAV_DEFS } from "@/lib/data";
 import { playerName } from "@/lib/config";
-import {
-  LOCALES,
-  LOCALE_NAMES,
-  useLocale,
-  useMessages,
-  type Locale,
-} from "@/lib/i18n";
+import { useLocale, useMessages, type Locale } from "@/lib/i18n";
 import type { Tab } from "@/lib/types";
 import { useWorldClock } from "@/lib/world-clock";
 import { useDemoWorldTime } from "@/lib/world-clock-display";
@@ -17,6 +11,7 @@ import { COLOR, WEIGHT, RADIUS } from "@/lib/tokens";
 import { Face } from "./Face";
 import { Icon } from "./Icon";
 import { Pressable } from "./Pressable";
+import { SettingsPanel } from "./SettingsPanel";
 import styles from "./lf.module.css";
 
 const en = {
@@ -35,7 +30,6 @@ const en = {
   speedNote: "Flowing at 4× real time",
   meddler: (n: number) => `Meddler · ${n} intervention${n === 1 ? "" : "s"}`,
   settings: "Settings",
-  language: "Language",
 };
 const M: Record<Locale, typeof en> = {
   en,
@@ -55,7 +49,6 @@ const M: Record<Locale, typeof en> = {
     speedNote: "현실의 4배속으로 흐르는 중",
     meddler: (n) => `참견러 · 개입 ${n}회`,
     settings: "설정",
-    language: "언어",
   },
 };
 
@@ -81,7 +74,7 @@ function SidebarInner({
   // 세계 시간의 진실은 엔진 tick이다 — 앵커 관측 전(연결 전)에는 데모 폴백 시계
   const clock = useWorldClock(useDemoWorldTime());
   const t = useMessages(M);
-  const { locale, setLocale } = useLocale();
+  const { locale } = useLocale();  // 표시명이 UI 언어를 따른다 (언어 전환은 설정 패널)
   const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <div
@@ -260,58 +253,10 @@ function SidebarInner({
           </div>
         </div>
 
-        {/* 설정 — 언어 선택 (기본 English, 선택은 localStorage에 남는다) */}
-        {settingsOpen && (
-          <div
-            style={{
-              background: COLOR.white,
-              borderRadius: RADIUS.md,
-              padding: "12px 12px",
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              boxShadow: "0 4px 12px rgba(109,141,214,0.10)",
-            }}
-          >
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: WEIGHT.heavy,
-                color: COLOR.fainter,
-                letterSpacing: 0.5,
-                padding: "0 6px 4px",
-              }}
-            >
-              {t.language}
-            </div>
-            {LOCALES.map((loc) => {
-              const active = locale === loc;
-              return (
-                <Pressable
-                  key={loc}
-                  onClick={() => setLocale(loc)}
-                  aria-pressed={active}
-                  className={styles.navItem}
-                  style={{
-                    width: "100%",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "8px 10px",
-                    borderRadius: RADIUS.sm,
-                    background: active ? COLOR.primarySoft : undefined,
-                    color: active ? COLOR.primaryDeep : COLOR.muted,
-                  }}
-                >
-                  <div style={{ fontSize: 13, fontWeight: WEIGHT.bold, flex: 1 }}>
-                    {LOCALE_NAMES[loc]}
-                  </div>
-                  {active && <Icon d={ICON.check} size={14} />}
-                </Pressable>
-              );
-            })}
-          </div>
-        )}
+        {/* 설정 — 언어(이 브라우저)와 LLM API 비용 상한(세계에 걸리는 값)은 한
+            패널에서 다룬다. 사이드바 폭(252px)에 숫자 입력·사용량 게이지를 넣을
+            자리가 없어 오버레이다 (온보딩과 같은 결) */}
+        {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
         <Pressable
           onClick={() => setSettingsOpen((open) => !open)}
           aria-expanded={settingsOpen}

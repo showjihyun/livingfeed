@@ -1,10 +1,13 @@
-"""AI Runtime 코어 — task×tier 라우팅 + 구조화 출력 검증 (ADR-018).
+"""AI Runtime 코어 — task×tier 라우팅 + 구조화 출력 검증 + 예산 집행 (ADR-018).
 
 정책: 응답은 output_schema로 검증한다. 실패 시 1회 수정 재시도,
 재실패는 명시적 오류로 반환한다 — 조용한 성공 위장 금지 (ADR-018 §1/4).
 
 라우트 값은 "모델명" 또는 "프로바이더:모델명"이다. 프리픽스가 없으면
 기본 프로바이더 소속이다 — 프로바이더·모델 매핑은 전부 설정이다 (ADR-018).
+
+비용·레이트 상한은 BudgetGuard가 집행한다 (budget.py, ADR-018 §3): 호출 전
+판정(강등·거절), 호출 후 계량. 가드 없이도 동작한다 — 그때는 상한이 없다.
 """
 
 from __future__ import annotations
@@ -13,7 +16,8 @@ import logging
 
 from jsonschema import Draft202012Validator
 
-from lf_ai_runtime.model import InferenceRequest, InferenceResponse
+from lf_ai_runtime.budget import BudgetGuard
+from lf_ai_runtime.model import Completion, InferenceRequest, InferenceResponse
 from lf_ai_runtime.providers import Provider, ProviderError
 
 logger = logging.getLogger("lf.ai_runtime")
@@ -85,6 +89,8 @@ class AiRuntime:
         *,
         providers: dict[str, Provider] | None = None,
         default_provider: str | None = None,
+        guard: BudgetGuard | None = None,
+        world_id: str = "w_main",
     ) -> None:
         if provider is not None:
             providers = {provider.name: provider, **(providers or {})}
@@ -96,6 +102,10 @@ class AiRuntime:
         self._providers = providers
         self._default = default_provider
         self._routes = DEFAULT_ROUTES if routes is None else routes
+        self._guard = guard
+        #: trace에 world_id가 없을 때의 예산 버킷 — 예산은 세계 단위다 (ADR-020 §2).
+        #: 엔진이 trace.world_id를 싣기 시작하면 그 값이 우선한다 (wire 변경 불요).
+        self._world_id = world_id
 
     def _resolve(self, task: str, tier: str) -> tuple[str, str] | None:
         route = self._routes.get((task, tier))
@@ -109,11 +119,22 @@ class AiRuntime:
         return self._default, route
 
     async def infer(self, request: InferenceRequest) -> InferenceResponse:
-        resolved = self._resolve(request.task, request.actor_tier)
+        world_id = str(request.trace.get("world_id") or self._world_id)
+        tier, cap = request.actor_tier, None
+        if self._guard is not None:
+            decision = await self._guard.check(world_id, tier)
+            if not decision.allow:
+                # 상한 거절은 명시적 오류다 — 액터는 규칙 행동으로 폴백하고
+                # params.fallback으로 화면에서 구분된다 (ADR-012/018 §4)
+                logger.warning("예산 거절 (trace=%s): %s", request.bundle.trace_id, decision.reason)
+                return InferenceResponse(ok=False, error=decision.reason)
+            tier, cap = decision.tier, decision.max_output_tokens
+
+        resolved = self._resolve(request.task, tier)
         if resolved is None:
             return InferenceResponse(
                 ok=False,
-                error=f"라우팅 없음: task={request.task} tier={request.actor_tier}",
+                error=f"라우팅 없음: task={request.task} tier={tier}",
             )
         provider_name, model = resolved
         provider = self._providers.get(provider_name)
@@ -124,24 +145,50 @@ class AiRuntime:
             )
 
         try:
-            output = await provider.complete(request, model)
+            completion = await self._call(provider, provider_name, request, model, world_id, cap)
         except ProviderError as e:
             logger.warning("추론 실패 (trace=%s): %s", request.bundle.trace_id, e)
             return InferenceResponse(ok=False, error=str(e), model=model)
 
-        errors = _validation_errors(output, request.output_schema)
+        errors = _validation_errors(completion.output, request.output_schema)
         if errors:
-            # 1회 수정 재시도 (ADR-018 §1)
+            # 1회 수정 재시도 (ADR-018 §1) — 재시도분 토큰도 계량된다
             logger.info("스키마 위반 — 수정 재시도 (trace=%s): %s", request.bundle.trace_id, errors)
             try:
-                output = await provider.complete(request, model, repair_errors=errors)
+                completion = await self._call(
+                    provider, provider_name, request, model, world_id, cap, repair_errors=errors
+                )
             except ProviderError as e:
                 return InferenceResponse(ok=False, error=str(e), model=model)
-            errors = _validation_errors(output, request.output_schema)
+            errors = _validation_errors(completion.output, request.output_schema)
             if errors:
                 return InferenceResponse(
                     ok=False, model=model,
                     error="출력 스키마 위반 (재시도 후에도): " + "; ".join(errors),
                 )
 
-        return InferenceResponse(ok=True, output=output, model=model)
+        return InferenceResponse(ok=True, output=completion.output, model=model)
+
+    async def _call(
+        self,
+        provider: Provider,
+        provider_name: str,
+        request: InferenceRequest,
+        model: str,
+        world_id: str,
+        cap: int | None,
+        *,
+        repair_errors: list[str] | None = None,
+    ) -> Completion:
+        """프로바이더 호출 + 사용량 계량.
+
+        검증 실패 여부와 무관하게 기록한다 — 토큰은 이미 나갔다. 예외 경로(타임아웃
+        등)는 usage를 알 수 없어 기록하지 못하므로, 지출이 실제보다 과소 집계될 수
+        있다(상한은 그만큼 늦게 걸린다).
+        """
+        completion = await provider.complete(
+            request, model, repair_errors=repair_errors, max_output_tokens=cap
+        )
+        if self._guard is not None:
+            await self._guard.record(world_id, provider_name, model, completion.usage)
+        return completion

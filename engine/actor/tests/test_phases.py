@@ -46,13 +46,20 @@ async def nc():
 @pytest.fixture
 async def ai_service(nc):
     """rule 프로바이더 AI Runtime을 in-process로 — 테스트별 고유 env로 격리."""
+    from lf_ai_runtime.budget import BudgetGuard, MemoryStore
     from lf_ai_runtime.config import Config
     from lf_ai_runtime.service import serve
 
     env = f"t{os.urandom(4).hex()}"
     stop = asyncio.Event()
     task = asyncio.create_task(
-        serve(Config(nats_url=NATS_URL, env=env, provider="rule"), stop=stop)
+        serve(
+            Config(nats_url=NATS_URL, env=env, provider="rule"),
+            stop=stop,
+            # 예산 카운터를 프로세스 안에만 둔다 — 주입하지 않으면 REDIS_URL(기본
+            # localhost:6379/0)에 붙어 상주 세계의 카운터에 섞어 쓴다 (격리 규약)
+            guard=BudgetGuard(env, MemoryStore()),
+        )
     )
     await asyncio.sleep(0.2)
     try:

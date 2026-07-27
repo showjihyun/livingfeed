@@ -16,6 +16,42 @@ TIERS = frozenset({"hot", "warm", "system"})
 
 
 @dataclass(frozen=True)
+class Usage:
+    """한 호출이 실제로 쓴 토큰 — 비용 집행의 계량기 (ADR-018 §3).
+
+    input_tokens는 **캐시 밖 입력만** 담는다: 프로바이더 어댑터가 캐시 적중분을
+    cache_read_tokens로 떼어 옮기므로 단가 계산에서 겹세지 않는다 (pricing.py).
+    프로바이더가 usage를 주지 않으면(로컬 서버 등) 전부 0 — 비용 0으로 셈해진다.
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+
+    @property
+    def total_tokens(self) -> int:
+        return (
+            self.input_tokens
+            + self.output_tokens
+            + self.cache_read_tokens
+            + self.cache_write_tokens
+        )
+
+
+@dataclass(frozen=True)
+class Completion:
+    """프로바이더 한 호출의 결과 — 스키마 검증 전 구조화 출력 후보 + 계량기.
+
+    usage를 응답과 한 몸으로 돌린다: 프로바이더 인스턴스에 마지막 usage를
+    얹어두는 방식은 동시 호출(LF_AI_CONCURRENCY)에서 서로의 값을 덮는다.
+    """
+
+    output: dict[str, Any]
+    usage: Usage = Usage()
+
+
+@dataclass(frozen=True)
 class ContextBundle:
     """Context Fabric이 조립한 프롬프트 (ADR-009).
 

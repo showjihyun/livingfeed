@@ -13,7 +13,7 @@ import json
 import zlib
 from typing import Any, Protocol
 
-from lf_ai_runtime.model import InferenceRequest
+from lf_ai_runtime.model import Completion, InferenceRequest, Usage
 
 
 class ProviderError(Exception):
@@ -29,8 +29,13 @@ class Provider(Protocol):
         model: str,
         *,
         repair_errors: list[str] | None = None,
-    ) -> dict[str, Any]:
-        """스키마 검증 전의 구조화 출력 후보를 반환한다."""
+        max_output_tokens: int | None = None,
+    ) -> Completion:
+        """스키마 검증 전의 구조화 출력 후보 + 이번 호출의 토큰 계량기.
+
+        max_output_tokens는 설정된 응답 토큰 상한이다 (budget.AiLimits) —
+        프로바이더 기본 예산과 함께 **더 작은 쪽**이 걸린다.
+        """
         ...
 
 
@@ -83,7 +88,8 @@ class RuleBasedProvider:
         model: str,
         *,
         repair_errors: list[str] | None = None,
-    ) -> dict[str, Any]:
+        max_output_tokens: int | None = None,
+    ) -> Completion:
         if request.task != "decide_action":
             raise ProviderError(f"RuleBasedProvider는 '{request.task}' task를 지원하지 않는다")
         actor_id = str(request.trace.get("actor_id", "unknown"))
@@ -92,17 +98,20 @@ class RuleBasedProvider:
         phrases = _ROUTINE_INTENTS[kind]
         # 표현 회전은 별도 소금으로 — kind 선택과 상관되면 같은 문장만 돈다
         intent = phrases[zlib.crc32(f"{actor_id}:{tick}:intent".encode()) % len(phrases)]
-        return {
-            "action_kind": kind,
-            "intent": intent,
-            "target_actor_id": None,
-            "location_id": None,
-            "params": {},
-            "decision_trace": {
-                "trace_id": request.bundle.trace_id,
-                "tier": "cold_rule",
-            },
-        }
+        # usage는 전부 0 — 규칙 경로에는 토큰도 청구도 없다 (pricing.FREE_PROVIDERS)
+        return Completion(
+            output={
+                "action_kind": kind,
+                "intent": intent,
+                "target_actor_id": None,
+                "location_id": None,
+                "params": {},
+                "decision_trace": {
+                    "trace_id": request.bundle.trace_id,
+                    "tier": "cold_rule",
+                },
+            }
+        )
 
 
 #: 구조화 출력이 지원하지 않는 키워드 — 전송본에서 제거 (응답 검증은 원본 스키마로 별도 수행)
@@ -138,6 +147,45 @@ def _sanitize_schema(schema: Any) -> Any:
     return schema
 
 
+def _token_budget(provider_budget: int, cap: int | None) -> int:
+    """프로바이더 기본 예산과 설정 상한 중 더 작은 쪽 (상한은 상한이다)."""
+    return min(provider_budget, cap) if cap else provider_budget
+
+
+def _int_attr(obj: Any, name: str) -> int:
+    """SDK usage 객체의 정수 필드 — 없거나 None이면 0 (벤더·모델별 편차 흡수)."""
+    return int(getattr(obj, name, 0) or 0)
+
+
+def anthropic_usage(usage: Any) -> Usage:
+    """Anthropic usage → Usage. input_tokens는 이미 캐시 밖 잔여분이다."""
+    if usage is None:
+        return Usage()
+    return Usage(
+        input_tokens=_int_attr(usage, "input_tokens"),
+        output_tokens=_int_attr(usage, "output_tokens"),
+        cache_read_tokens=_int_attr(usage, "cache_read_input_tokens"),
+        cache_write_tokens=_int_attr(usage, "cache_creation_input_tokens"),
+    )
+
+
+def openai_usage(usage: Any) -> Usage:
+    """OpenAI 호환 usage → Usage.
+
+    Anthropic과 달리 prompt_tokens는 **캐시 적중분을 포함한 총량**이다. 캐시분을
+    빼내야 단가 계산에서 겹세지 않는다 (캐시 읽기는 입력의 1/10 단가).
+    """
+    if usage is None:
+        return Usage()  # 로컬 서버(Ollama 등)는 usage를 안 줄 수 있다 — 비용 0
+    prompt = _int_attr(usage, "prompt_tokens")
+    cached = _int_attr(getattr(usage, "prompt_tokens_details", None), "cached_tokens")
+    return Usage(
+        input_tokens=max(0, prompt - cached),
+        output_tokens=_int_attr(usage, "completion_tokens"),
+        cache_read_tokens=cached,
+    )
+
+
 class AnthropicProvider:
     """Anthropic Claude 호출 (구조화 출력).
 
@@ -161,7 +209,8 @@ class AnthropicProvider:
         model: str,
         *,
         repair_errors: list[str] | None = None,
-    ) -> dict[str, Any]:
+        max_output_tokens: int | None = None,
+    ) -> Completion:
         user_content = request.bundle.user
         if repair_errors:
             user_content += (
@@ -171,7 +220,7 @@ class AnthropicProvider:
         try:
             response = await self._client.messages.create(
                 model=model,
-                max_tokens=self._max_tokens,
+                max_tokens=_token_budget(self._max_tokens, max_output_tokens),
                 system=[
                     {
                         "type": "text",
@@ -204,7 +253,7 @@ class AnthropicProvider:
             raise ProviderError(f"JSON 파싱 실패: {e}") from e
         if not isinstance(output, dict):
             raise ProviderError("구조화 출력이 객체가 아니다")
-        return output
+        return Completion(output=output, usage=anthropic_usage(response.usage))
 
 
 def extract_json_object(text: str) -> dict[str, Any]:
@@ -269,7 +318,8 @@ class OpenAICompatProvider:
         model: str,
         *,
         repair_errors: list[str] | None = None,
-    ) -> dict[str, Any]:
+        max_output_tokens: int | None = None,
+    ) -> Completion:
         schema_text = json.dumps(request.output_schema, ensure_ascii=False)
         user_content = (
             f"{request.bundle.user}\n\n"
@@ -289,7 +339,9 @@ class OpenAICompatProvider:
         # 끈다 — qwen3 계열에만 적용(다른 로컬 모델엔 무의미한 토큰이라 건드리지 않는다).
         if self._no_think and model.startswith("qwen3"):
             system_content = f"{system_content} /no_think"
-        kwargs: dict[str, Any] = {self._token_param: self._max_tokens}
+        kwargs: dict[str, Any] = {
+            self._token_param: _token_budget(self._max_tokens, max_output_tokens)
+        }
         if self._json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         # reasoning 모델의 지연 통제 — decide류는 깊은 추론이 불필요하다 (tick 예산, ADR-020)
@@ -314,4 +366,7 @@ class OpenAICompatProvider:
         if not text:
             reason = choice.finish_reason if choice else "no-choice"
             raise ProviderError(f"{self.name}: 텍스트 응답이 없다 (finish_reason={reason})")
-        return extract_json_object(text)
+        return Completion(
+            output=extract_json_object(text),
+            usage=openai_usage(getattr(response, "usage", None)),
+        )

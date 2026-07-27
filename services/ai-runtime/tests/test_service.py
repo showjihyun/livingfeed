@@ -8,12 +8,23 @@ import time
 
 import nats
 import pytest
+from lf_ai_runtime.budget import BudgetGuard, MemoryStore
 from lf_ai_runtime.config import Config
-from lf_ai_runtime.model import infer_subject
+from lf_ai_runtime.model import Completion, infer_subject
 from lf_ai_runtime.providers import ProviderError
 from lf_ai_runtime.service import serve
 
 NATS_URL = os.environ.get("LF_TEST_NATS_URL", "nats://localhost:4222")
+
+
+def isolated_guard(env: str) -> BudgetGuard:
+    """프로세스 안 카운터만 쓰는 가드 — 테스트가 상주 Redis를 건드리지 않게 한다.
+
+    주입하지 않으면 serve()가 REDIS_URL(기본 localhost:6379/0)에 붙어 상주 세계의
+    예산 카운터에 섞어 쓴다 — 테스트는 격리 표적만 겨눈다는 규약(conftest 가드)의
+    연장이다.
+    """
+    return BudgetGuard(env, MemoryStore())
 
 
 @pytest.fixture
@@ -29,7 +40,11 @@ async def ai_service():
     env = "aitest"
     stop = asyncio.Event()
     task = asyncio.create_task(
-        serve(Config(nats_url=NATS_URL, env=env, provider="rule"), stop=stop)
+        serve(
+            Config(nats_url=NATS_URL, env=env, provider="rule"),
+            stop=stop,
+            guard=isolated_guard(env),
+        )
     )
     # 구독 준비를 폴링으로 기다린다 — 고정 sleep은 콜드 스타트(첫 import openai)에서
     # 레이스가 난다. 응답이 오면(파싱 실패라도) 구독이 선 것이다 (NoRespondersError 소멸)
@@ -90,7 +105,7 @@ class GaugeProvider:
         self.completed = 0
         self.entered = asyncio.Event()  # 첫 요청이 처리에 들어선 순간
 
-    async def complete(self, request, model, *, repair_errors=None):
+    async def complete(self, request, model, *, repair_errors=None, max_output_tokens=None):
         self.inflight += 1
         self.max_inflight = max(self.max_inflight, self.inflight)
         self.entered.set()
@@ -99,13 +114,13 @@ class GaugeProvider:
         finally:
             self.inflight -= 1
         self.completed += 1
-        return {"echo": request.trace.get("n")}
+        return Completion(output={"echo": request.trace.get("n")})
 
 
 class FailingProvider:
     name = "failing"
 
-    async def complete(self, request, model, *, repair_errors=None):
+    async def complete(self, request, model, *, repair_errors=None, max_output_tokens=None):
         raise ProviderError("의도된 실패")
 
 
@@ -121,7 +136,9 @@ async def serve_stub(env: str, provider, *, concurrency: int = 4):
 
     stop = asyncio.Event()
     cfg = Config(nats_url=NATS_URL, env=env, provider="rule", concurrency=concurrency)
-    task = asyncio.create_task(serve(cfg, stop=stop, providers={"rule": provider}))
+    task = asyncio.create_task(
+        serve(cfg, stop=stop, providers={"rule": provider}, guard=isolated_guard(env))
+    )
     # 구독 준비 폴링 — ai_service 픽스처와 동일한 이유 (고정 sleep은 레이스)
     for _ in range(100):
         try:
