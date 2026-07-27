@@ -139,6 +139,14 @@ services:
       # WS 세션이 player.* 이벤트를 적재한다 (ADR-010/017)
       LF_PG_DSN: postgresql://${POSTGRES_USER:-livingfeed}:${POSTGRES_PASSWORD:-livingfeed}@postgres:5432/${POSTGRES_DB:-livingfeed}
       LF_ENV: dev
+      # LLM 한도 화면(/admin/ai-limits)이 '저장본 없음'일 때 보여줄 바닥값 —
+      # ai-runtime과 같은 변수를 읽어야 화면 값과 집행 값이 갈리지 않는다
+      LF_AI_LIMITS_ENABLED: ${LF_AI_LIMITS_ENABLED:-1}
+      LF_AI_DAILY_USD: ${LF_AI_DAILY_USD:-5}
+      LF_AI_MONTHLY_USD: ${LF_AI_MONTHLY_USD:-0}
+      LF_AI_RPM: ${LF_AI_RPM:-60}
+      LF_AI_DEGRADE_RATIO: ${LF_AI_DEGRADE_RATIO:-0.8}
+      LF_AI_MAX_OUTPUT_TOKENS: ${LF_AI_MAX_OUTPUT_TOKENS:-0}
     depends_on:
       nats:
         condition: service_healthy
@@ -229,10 +237,25 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       GLM_API_KEY: ${GLM_API_KEY:-}
+      # 비용·레이트 상한 (budget.py) — 카운터·한도 문서는 Redis에 산다. gateway와
+      # 같은 Redis를 봐야 설정 화면이 집행되는 값을 쓴다. 아래는 바닥값이고,
+      # 운영 중 조정은 설정 › LLM API가 Redis에 덮어쓴다 (재시작 불요)
+      REDIS_URL: redis://redis:6379/0
+      LF_WORLD_ID: ${LF_WORLD_ID:-w_main}
+      LF_AI_LIMITS_ENABLED: ${LF_AI_LIMITS_ENABLED:-1}
+      LF_AI_DAILY_USD: ${LF_AI_DAILY_USD:-5}
+      LF_AI_MONTHLY_USD: ${LF_AI_MONTHLY_USD:-0}
+      LF_AI_RPM: ${LF_AI_RPM:-60}
+      LF_AI_DEGRADE_RATIO: ${LF_AI_DEGRADE_RATIO:-0.8}
+      LF_AI_MAX_OUTPUT_TOKENS: ${LF_AI_MAX_OUTPUT_TOKENS:-0}
+      # 벤더 가격표가 바뀌거나 미등재 모델을 쓸 때의 단가 재정의 (pricing.py)
+      LF_MODEL_PRICES: ${LF_MODEL_PRICES:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"   # Linux에서도 호스트 Ollama 접근 가능하게
     depends_on:
       nats:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   tick:

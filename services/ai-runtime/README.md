@@ -98,6 +98,61 @@ LF_MODEL_ROUTES='{"decide_action/hot": "anthropic:claude-opus-4-8", "decide_acti
 `additionalProperties: false` 강제, `"type": [A, B]` 유니언 → `anyOf`.
 **응답 검증은 항상 원본 스키마로** 수행되므로 게이트 강도는 유지된다.
 
+## 비용·레이트 상한 (LLM API 예산 집행)
+
+모든 모델 호출이 `BudgetGuard`(budget.py)를 지난다 — ADR-018 §3·ADR-020 §2의
+정책을 그대로 집행한다:
+
+| 상태 | 동작 |
+|------|------|
+| 지출 < 상한 × 강등비율 | 통과 |
+| 지출 ≥ 상한 × 강등비율 (기본 80%) | **티어 강등** — hot 요청이 warm 모델로 나간다 |
+| 지출 ≥ 상한 | **명시적 거절** — 액터는 규칙 행동 폴백 (`params.fallback: true`) |
+| 분당 호출 > RPM 상한 | 같은 경로로 거절 (벤더 레이트리밋에 부딪히기 전에) |
+
+- **화면에서 조정한다**: 설정 › LLM API (웹 앱 사이드바 톱니) → gateway
+  `PUT /admin/ai-limits` → Redis. 가드가 3초 TTL로 읽으므로 **재시작이 필요 없다**.
+- **카운터는 Redis에 산다** (`lf:{env}:ai:*`): 무상태 다중 인스턴스에서 세계 단위
+  상한을 집행하려면 카운터가 프로세스 밖에 있어야 한다 (ADR-019). Redis가 없으면
+  프로세스 안 카운터로 강등되고 경고를 남긴다 — 그때 상한은 인스턴스별로만 걸린다.
+- **예산은 세계 단위다**: 요청 `trace.world_id`가 있으면 그 세계의 버킷, 없으면
+  `LF_WORLD_ID`(기본 `w_main`). 일·월 경계는 UTC.
+- **저장소 장애 시에는 통과시킨다** — 카운터를 못 읽어 추론을 막으면 Redis 장애가
+  곧 세계 정지가 된다. 상한이 반드시 걸려야 하는 배포는 Redis 가용성으로 보장하라.
+
+env 바닥값 (Redis 저장본이 없을 때의 유효 한도). **아무것도 설정하지 않으면 일 상한은
+$5**다 — 비용 가드의 미설정 기본값은 싼 쪽으로 실패해야 한다(개인 키로 로컬을 돌리다
+루프가 밤새 도는 쪽이 훨씬 흔한 사고다). ADR-020 §2의 Phase 1 예산($50/day/세계)은
+배포에서 아래 env로 명시한다:
+
+```bash
+LF_AI_LIMITS_ENABLED=1      # 0이면 상한 없음
+LF_AI_DAILY_USD=5           # 일 상한 USD (0 = 끔). 운영(Phase 1)은 50 (ADR-020 §2)
+LF_AI_MONTHLY_USD=0         # 월 상한 USD (0 = 끔)
+LF_AI_RPM=60                # 분당 호출 상한 (0 = 끔)
+LF_AI_DEGRADE_RATIO=0.8     # 이 비율에서 hot→warm 강등
+LF_AI_MAX_OUTPUT_TOKENS=0   # 응답 토큰 상한 (0 = 프로바이더 기본값)
+REDIS_URL=redis://localhost:6379/0
+LF_WORLD_ID=w_main
+```
+
+### 단가 표 (pricing.py)
+
+비용은 모델 단가로 셈한다 (USD/1M tokens, 캐시 읽기·기록 단가 포함). 표는 씨앗이고
+벤더 가격표가 바뀌면 `LF_MODEL_PRICES`로 재정의한다:
+
+```bash
+LF_MODEL_PRICES='{"gpt-5": {"input": 1.25, "output": 10.0, "cache_read": 0.125}}'
+```
+
+- `rule`·`local` 프로바이더는 **비용 0**이다 (토큰당 청구가 없다).
+- **미등재 모델은 최상위 티어 단가로 보수적으로 셈하고** 이름을 남긴다
+  (설정 화면에 경고로 올라온다). 모르는 모델을 공짜로 셈하면 상한이 조용히
+  무력해지기 때문이다 — 실제 단가를 알면 위 env로 바로잡아라.
+- ⚠️ 씨앗 표는 2026-07-27 기준이다. `openai` 기본 라우트의 `gpt-5`/`gpt-5-mini`는
+  현행 가격표에 없어(모델 세대가 지났다) 미등재로 잡힌다 — 실제 쓰는 모델을
+  `LF_MODEL_ROUTES`로 지정하고 단가를 넣어라. `deepseek`·`glm`도 미등재다.
+
 ## 남은 정책 (이후 단계)
 
-세계별 토큰 예산 하드 캡, 서킷브레이커/폴백 모델, Langfuse 트레이싱, embed(bge-m3), MCP 도구 루프.
+서킷브레이커/폴백 모델, Langfuse 트레이싱(호출별 비용 추적), embed(bge-m3), MCP 도구 루프.

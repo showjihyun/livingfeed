@@ -8,6 +8,9 @@ dependencies = [
     "jsonschema>=4.23",
     "anthropic>=0.116",
     "openai>=1.60",
+    # 예산·레이트 카운터의 공유 저장소 (budget.py) — 무상태 다중 인스턴스에서
+    # 세계 단위 상한을 집행하려면 카운터가 프로세스 밖에 있어야 한다 (ADR-019)
+    "redis>=5.0",
     "lf-schemas",
 ]
 

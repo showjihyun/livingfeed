@@ -429,7 +429,13 @@ class RetiredSummary(BaseModel):
 # ── 라우터 ───────────────────────────────────────────────────────────────────
 
 
-def create_admin_router(cfg: Config) -> APIRouter:
+def admin_guard(cfg: Config):
+    """/admin/* 공용 게이트 — LF_ADMIN_TOKEN 설정 시 Bearer 일치를 요구한다(403).
+
+    관리 API가 여러 모듈로 나뉘어도(ai_limits.py 등) 게이트는 하나여야 한다 —
+    새 라우터가 자기 판본을 만들면 한쪽만 열린 채 남는 사고가 난다.
+    """
+
     async def require_admin(authorization: Annotated[str, Header()] = "") -> None:
         if cfg.admin_token is None:
             return  # dev 개방 — 로컬 밖 노출 전 LF_ADMIN_TOKEN을 설정하라
@@ -439,7 +445,11 @@ def create_admin_router(cfg: Config) -> APIRouter:
         ):
             raise HTTPException(403, "관리 토큰이 필요하다 (LF_ADMIN_TOKEN)")
 
-    router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])
+    return require_admin
+
+
+def create_admin_router(cfg: Config) -> APIRouter:
+    router = APIRouter(prefix="/admin", dependencies=[Depends(admin_guard(cfg))])
 
     @router.get("/personas")
     async def list_personas() -> dict[str, list[PersonaDoc]]:

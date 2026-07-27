@@ -35,6 +35,7 @@ from psycopg_pool import AsyncConnectionPool
 from redis.asyncio import Redis
 
 from lf_gateway.admin import create_admin_router
+from lf_gateway.ai_limits import create_ai_limits_router
 from lf_gateway.config import Config
 from lf_gateway.feed_stream import (
     FEED_KINDS,
@@ -146,6 +147,8 @@ def create_app(
     # 페르소나 스튜디오 — 파일(SoT) CRUD 중재 (admin.py). es 적재는 은퇴(DELETE)
     # 하나뿐이다 — actor.identity.retired, read 모델 소멸은 프로젝터의 몫
     app.include_router(create_admin_router(cfg))
+    # LLM API 비용·레이트 한도 — 집행은 ai-runtime, 여기는 Redis 창구 (ai_limits.py)
+    app.include_router(create_ai_limits_router(cfg))
     # 서사 푸시 구독 저장/해지 — 구독은 상태가 아니라 전달 채널, es 적재 없음 (push.py)
     app.include_router(create_push_router(cfg))
     if not owned_nc:

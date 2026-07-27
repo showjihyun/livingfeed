@@ -15,11 +15,14 @@ import asyncio
 import json
 import logging
 import os
+from typing import Any
 
 import nats
 
+from lf_ai_runtime.budget import BudgetGuard, MemoryStore
 from lf_ai_runtime.config import Config
 from lf_ai_runtime.model import InferenceRequest, InferenceResponse, infer_subject
+from lf_ai_runtime.pricing import PriceBook, load_price_overrides
 from lf_ai_runtime.providers import (
     AnthropicProvider,
     OpenAICompatProvider,
@@ -87,23 +90,52 @@ def make_providers(cfg: Config) -> dict[str, Provider]:
     return providers
 
 
+async def make_guard(cfg: Config) -> tuple[BudgetGuard, Any]:
+    """예산 가드 + (소유한) Redis 연결. 미가용이면 프로세스 안 카운터로 강등한다.
+
+    강등은 조용하지 않다: 그 상태에서 상한은 **인스턴스별**로만 걸리므로 다중
+    인스턴스 배포에서는 세계 단위 상한이 성립하지 않는다 (ADR-019 무상태 확장).
+    """
+    prices = PriceBook(load_price_overrides())
+    store: Any = MemoryStore()
+    owned = None
+    try:
+        from redis.asyncio import Redis
+
+        client = Redis.from_url(cfg.redis_url)
+        await client.ping()
+        store, owned = client, client
+    except Exception as e:
+        logger.warning(
+            "Redis 미가용(%s) — 예산 카운터가 프로세스 안에만 산다. 상한은 "
+            "인스턴스별로만 걸린다 (REDIS_URL 확인)", e,
+        )
+    return BudgetGuard(cfg.env, store, defaults=cfg.limits, prices=prices), owned
+
+
 async def serve(
     cfg: Config,
     *,
     stop: asyncio.Event | None = None,
     providers: dict[str, Provider] | None = None,
+    guard: BudgetGuard | None = None,
 ) -> None:
-    """서비스 루프. providers 주입은 테스트 시임 — 기본은 make_providers(cfg)."""
+    """서비스 루프. providers·guard 주입은 테스트 시임 — 기본은 env에서 조립한다."""
     stop = stop or asyncio.Event()
     providers = make_providers(cfg) if providers is None else providers
     if cfg.provider not in providers:
         raise RuntimeError(
             f"기본 프로바이더 '{cfg.provider}'가 구성되지 않았다 — API 키 환경변수를 확인하라"
         )
+    owned_redis = None
+    if guard is None:
+        guard, owned_redis = await make_guard(cfg)
     runtime = AiRuntime(
         providers=providers,
         default_provider=cfg.provider,
         routes=cfg.routes or build_default_routes(cfg.provider),
+        guard=guard,
+        world_id=cfg.world_id,
     )
 
     nc = await nats.connect(cfg.nats_url)
@@ -134,9 +166,13 @@ async def serve(
 
         subject = infer_subject(cfg.env)
         sub = await nc.subscribe(subject, queue=QUEUE_GROUP, cb=handle)
+        limits = cfg.limits
         logger.info(
-            "ai-runtime 대기 — subject=%s 기본=%s 동시상한=%d 등록=%s",
+            "ai-runtime 대기 — subject=%s 기본=%s 동시상한=%d 등록=%s "
+            "예산=%s(일 $%.2f/월 $%.2f/분당 %d회)",
             subject, cfg.provider, cfg.concurrency, ",".join(sorted(providers)),
+            "on" if limits.enabled else "off",
+            limits.daily_usd, limits.monthly_usd, limits.rpm,
         )
         try:
             await stop.wait()
@@ -147,3 +183,5 @@ async def serve(
                 await asyncio.gather(*in_flight, return_exceptions=True)
     finally:
         await nc.drain()
+        if owned_redis is not None:  # 우리가 연 연결만 닫는다 (주입분은 호출자 것)
+            await owned_redis.aclose()
