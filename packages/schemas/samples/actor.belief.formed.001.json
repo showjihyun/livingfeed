@@ -9,11 +9,17 @@
   "occurred_at": "2026-07-11T11:00:00Z",
   "causation_id": null,
   "correlation_id": "01JZK7Q3W0000000000000000V",
+  "provenance": {
+    "kind": "derived",
+    "rule_id": "reflection:supporter"
+  },
   "payload": {
     "statement": "p_observer_0417은 내게 힘이 되는 사람이다 — 어려울 때 먼저 다가와줬다.",
     "kind": "supporter",
     "confidence": 0.58,
     "about_id": "p_observer_0417",
-    "source_event_ids": ["01JZK7Q3W0000000000000000G"]
+    "source_event_ids": [
+      "01JZK7Q3W0000000000000000G"
+    ]
   }
 }

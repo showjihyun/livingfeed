@@ -17,7 +17,14 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
-from lf_eventstore import ConcurrencyConflict, NewEvent, ValidationFailed, append, current_head
+from lf_eventstore import (
+    ConcurrencyConflict,
+    NewEvent,
+    Provenance,
+    ValidationFailed,
+    append,
+    current_head,
+)
 from nats.js import JetStreamContext
 from nats.js.api import AckPolicy, ConsumerConfig, DeliverPolicy
 from psycopg import AsyncConnection
@@ -73,6 +80,8 @@ def build_player_event(
         tick=0,
         actor_id=None,
         correlation_id=correlation if isinstance(correlation, str) else None,
+        # 사람이 직접 한 개입 — 세계가 지어낸 것과 결코 섞이면 안 된다 (ADR-021 §1)
+        provenance=Provenance.authored(player_id),
         payload=data,
     )
 

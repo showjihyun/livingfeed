@@ -9,6 +9,12 @@
   "occurred_at": "2026-07-11T09:02:20Z",
   "causation_id": "01JZK7Q3W0000000000000000G",
   "correlation_id": "01JZK7Q3W0000000000000000G",
+  "provenance": {
+    "kind": "recalled",
+    "source_event_ids": [
+      "01JZK7Q3W0000000000000000G"
+    ]
+  },
   "payload": {
     "summary": "플레이어 p_observer_0417이 DM으로 나를 지지해줬다. 아무한테도 못 하던 얘기였는데 — 고마움이 오래 남았다.",
     "importance": 0.62,
@@ -18,7 +24,12 @@
       "goal": 0.0,
       "rarity": 0.3
     },
-    "source_event_ids": ["01JZK7Q3W0000000000000000G"],
-    "tags": ["player_dm", "gratitude"]
+    "source_event_ids": [
+      "01JZK7Q3W0000000000000000G"
+    ],
+    "tags": [
+      "player_dm",
+      "gratitude"
+    ]
   }
 }

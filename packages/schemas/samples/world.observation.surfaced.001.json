@@ -9,6 +9,10 @@
   "occurred_at": "2026-07-11T10:20:00Z",
   "causation_id": "01JZK7Q3W0000000000000000Q",
   "correlation_id": "01JZK7Q3W0000000000000000S",
+  "provenance": {
+    "kind": "derived",
+    "rule_id": "director.rules:surface_observation"
+  },
   "payload": {
     "target_actor_id": "a_aria_kim",
     "observation": "박준호가 어제 했던 말과 앞뒤가 맞지 않는 메모를 우연히 보게 됐다",

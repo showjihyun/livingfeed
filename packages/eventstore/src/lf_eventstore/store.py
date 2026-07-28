@@ -18,6 +18,7 @@ from lf_schemas import registry
 from psycopg import AsyncConnection
 
 from lf_eventstore.model import (
+    UNKNOWN_KIND,
     ConcurrencyConflict,
     NewEvent,
     PermissionDenied,
@@ -33,8 +34,9 @@ OUTBOX_CHANNEL = "lf_outbox"
 _INSERT_EVENT = """
 INSERT INTO es.events (
     event_id, world_id, stream, stream_key, stream_seq, type,
-    schema_version, actor_id, tick, occurred_at, causation_id, correlation_id, payload
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+    schema_version, actor_id, tick, occurred_at, causation_id, correlation_id,
+    provenance, payload
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb)
 RETURNING global_seq
 """
 
@@ -45,7 +47,7 @@ def _isoformat_z(dt: datetime) -> str:
 
 def _build_envelope(event: NewEvent, occurred_at: datetime) -> dict[str, Any]:
     event_id = event.event_id or new_ulid()
-    return {
+    envelope = {
         "event_id": event_id,
         "stream": event.stream,
         "type": event.type,
@@ -59,6 +61,10 @@ def _build_envelope(event: NewEvent, occurred_at: datetime) -> dict[str, Any]:
         "correlation_id": event.correlation_id or event_id,
         "payload": event.payload,
     }
+    # 미지정이면 키를 만들지 않는다 — _validate가 봉투 필수 위반으로 잡는다 (ADR-021 §1)
+    if event.provenance is not None:
+        envelope["provenance"] = event.provenance.to_json()
+    return envelope
 
 
 # 검증기는 스키마당 한 번만 컴파일한다 — Draft202012Validator 생성은 메타스키마
@@ -79,6 +85,25 @@ def _validate(principal: str, event: NewEvent, envelope: dict[str, Any]) -> None
     if not event.type.startswith(f"{event.stream}."):
         raise ValidationFailed(
             f"이벤트 타입 '{event.type}'이 stream '{event.stream}'에 속하지 않는다"
+        )
+    # 출처 집행 (ADR-021 §1) — 스키마도 같은 규칙을 갖지만, 가장 흔한 두 위반은
+    # 여기서 먼저 잡아 생산자가 무엇을 빠뜨렸는지 바로 알게 한다.
+    if event.provenance is None:
+        raise ValidationFailed(
+            f"'{event.type}'에 provenance가 없다 — 출처를 대지 못하는 이벤트는"
+            " 적재할 수 없다 (ADR-021 §1). Provenance.recalled/derived/generated/authored"
+            " 중 이 내용이 실제로 온 곳을 고르십시오"
+        )
+    if event.provenance.kind == UNKNOWN_KIND:
+        raise ValidationFailed(
+            f"'{event.type}'의 provenance가 '{UNKNOWN_KIND}'다 — ADR-021 이전 적재분을"
+            " 읽을 때만 쓰이는 값이며 새 이벤트에는 쓸 수 없다"
+        )
+    missing = event.provenance.missing_evidence()
+    if missing is not None:
+        raise ValidationFailed(
+            f"'{event.type}'의 provenance가 '{event.provenance.kind}'인데 {missing}이(가)"
+            " 없다 — 근거를 대지 못하는 출처 주장은 적재할 수 없다 (ADR-021 §1)"
         )
     if not registry.is_allowed(principal, event.type):
         raise PermissionDenied(
@@ -164,6 +189,7 @@ async def append(
                     envelope["event_id"], world_id, stream, stream_key, stream_seq,
                     e.type, e.schema_version, e.actor_id, e.tick, occurred_at,
                     envelope["causation_id"], envelope["correlation_id"],
+                    json.dumps(envelope["provenance"], ensure_ascii=False),
                     json.dumps(e.payload, ensure_ascii=False),
                 ),
             )
@@ -217,7 +243,7 @@ async def read_stream(
     cur = await conn.execute(
         """
         SELECT global_seq, stream_seq, event_id, type, schema_version, actor_id, tick,
-               occurred_at, causation_id, correlation_id, payload
+               occurred_at, causation_id, correlation_id, provenance, payload
         FROM es.events
         WHERE world_id = %s AND stream = %s AND stream_key = %s AND stream_seq >= %s
         ORDER BY stream_seq
@@ -238,7 +264,8 @@ async def read_stream(
             "occurred_at": _isoformat_z(row[7]),
             "causation_id": row[8],
             "correlation_id": row[9],
-            "payload": row[10],
+            "provenance": row[10],
+            "payload": row[11],
         }
         result.append(StoredEvent(global_seq=row[0], stream_seq=row[1], envelope=envelope))
     return result

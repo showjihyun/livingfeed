@@ -6,7 +6,7 @@
 
 from contextlib import asynccontextmanager
 
-from lf_eventstore import NewEvent, append
+from lf_eventstore import NewEvent, Provenance, append
 from lf_eventstore.migrate import migrate
 from lf_feed_api.story import StoryReads
 from lf_projector.pg_read import ReadStore
@@ -39,6 +39,7 @@ async def _append_env(pg, principal: str, env: dict, *, head: int) -> None:
             world_id=env["world_id"], stream=env["stream"], stream_key=key,
             type=env["type"], tick=env["tick"], actor_id=env.get("actor_id"),
             payload=env["payload"], event_id=env["event_id"],
+            provenance=Provenance.from_json(env["provenance"]),
             causation_id=env.get("causation_id"), correlation_id=env["correlation_id"],
         )],
         expected_head=head,

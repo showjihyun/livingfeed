@@ -3,7 +3,7 @@ import { memo } from "react";
 import { ICON } from "@/lib/data";
 import { useMessages, type Locale } from "@/lib/i18n";
 import { relativeTime } from "@/lib/live-feed";
-import type { ActorProfile } from "@/lib/profile";
+import type { ActorProfile, ProvenanceKind } from "@/lib/profile";
 import { arcStageLabel, FADED_BELIEF_MAX, humanize } from "@/lib/profile";
 import type { Range } from "@/lib/range";
 import { COLOR, WEIGHT, RADIUS } from "@/lib/tokens";
@@ -41,6 +41,8 @@ const en = {
   emptyEpisodesAll: "No memories yet — what you live through together will settle here.",
   loadingMemories: "Retrieving memories...",
   loadMoreMemories: "Load more memories",
+  fromWhatHappened: "from what happened",
+  aHunch: "a hunch, not a memory",
 };
 const M: Record<Locale, typeof en> = {
   en,
@@ -71,6 +73,8 @@ const M: Record<Locale, typeof en> = {
     emptyEpisodesAll: "아직 쌓인 기억이 없어요 — 함께 겪은 일이 생기면 여기에 남습니다.",
     loadingMemories: "기억을 꺼내는 중...",
     loadMoreMemories: "기억 더 보기",
+    fromWhatHappened: "겪은 일에서",
+    aHunch: "기억이 아니라 짐작",
   },
 };
 
@@ -87,6 +91,31 @@ interface ProfileTabProps {
   hasMoreEpisodes: boolean;
   loadingEpisodes: boolean;
   onLoadMoreEpisodes: () => void;
+}
+
+/**
+ * 이 문장이 겪은 일에서 온 것인지, 지금 지어낸 짐작인지 (ADR-021 §1).
+ *
+ * 근거 있는 것(recalled)과 지어낸 것(generated)만 표시한다 — 규칙 파생·저작물은
+ * 사람이 읽고 판단할 구분이 아니라 조용히 둔다. 기계 어휘는 화면에 오르지
+ * 않는다: 세계는 "generated"라고 말하지 않고 "짐작"이라고 말한다.
+ */
+function ProvenanceMark({ provenance }: { provenance: ProvenanceKind }) {
+  const t = useMessages(M);
+  if (provenance !== "recalled" && provenance !== "generated") return null;
+  const grounded = provenance === "recalled";
+  return (
+    <span
+      style={{
+        fontSize: 11,
+        fontWeight: WEIGHT.bold,
+        color: grounded ? COLOR.muted : "#B7C2D8",
+        fontStyle: grounded ? "normal" : "italic",
+      }}
+    >
+      {grounded ? t.fromWhatHappened : t.aHunch}
+    </span>
+  );
 }
 
 export const ProfileTab = memo(ProfileTabInner);
@@ -226,7 +255,8 @@ function ProfileTabInner({
                     {humanize(b.statement)}{" "}
                     <span style={{ color: "#A87F24", fontWeight: WEIGHT.bold }}>
                       {t.beliefMeta(Math.round(b.confidence * 100), b.revisions)}
-                    </span>
+                    </span>{" "}
+                    <ProvenanceMark provenance={b.provenance} />
                   </span>
                 ),
               )}
@@ -357,8 +387,22 @@ function ProfileTabInner({
                   gap: 8,
                 }}
               >
-                <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: WEIGHT.bold }}>
-                  {relativeTime(ep.occurredAt)} · {t.memoryWeight(Math.round(ep.importance * 100))}
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: COLOR.faint,
+                    fontWeight: WEIGHT.bold,
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 6,
+                    alignItems: "baseline",
+                  }}
+                >
+                  <span>
+                    {relativeTime(ep.occurredAt)} ·{" "}
+                    {t.memoryWeight(Math.round(ep.importance * 100))}
+                  </span>
+                  <ProvenanceMark provenance={ep.provenance} />
                 </div>
                 <div style={{ fontSize: 14, lineHeight: 1.65, fontWeight: WEIGHT.regular }}>
                   {humanize(ep.summary)}

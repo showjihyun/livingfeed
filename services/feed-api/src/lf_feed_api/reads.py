@@ -23,7 +23,7 @@ ORDER BY actor_id
 
 _BELIEFS_SQL = """
 SELECT kind, NULLIF(about_id, '-') AS about_id, statement, confidence,
-       source_event_ids, event_id, first_formed_at, updated_at, revisions
+       source_event_ids, provenance_kind, event_id, first_formed_at, updated_at, revisions
 FROM read.actor_beliefs
 WHERE world_id = %s AND actor_id = %s
 ORDER BY confidence DESC, kind, about_id
@@ -32,7 +32,8 @@ ORDER BY confidence DESC, kind, about_id
 _IDENTITY_COLS = ("actor_id", "name", "archetype", "bio", "goals")
 
 _EPISODES_SQL = """
-SELECT event_id, tick, occurred_at, summary, importance, factors, tags, source_event_ids
+SELECT event_id, tick, occurred_at, summary, importance, factors, tags,
+       source_event_ids, provenance_kind
 FROM read.actor_episodes
 WHERE world_id = %s AND actor_id = %s AND (%s::text IS NULL OR event_id < %s)
   AND (%s::bigint IS NULL OR tick >= %s)
@@ -156,7 +157,7 @@ class ProfileReads:
         )
         episode_items = _rows_to_dicts(
             ("event_id", "tick", "occurred_at", "summary", "importance",
-             "factors", "tags", "source_event_ids"),
+             "factors", "tags", "source_event_ids", "provenance_kind"),
             episodes,
         )
         return {
@@ -165,7 +166,8 @@ class ProfileReads:
             "identity": identity,
             "beliefs": _rows_to_dicts(
                 ("kind", "about_id", "statement", "confidence", "source_event_ids",
-                 "event_id", "first_formed_at", "updated_at", "revisions"),
+                 "provenance_kind", "event_id", "first_formed_at", "updated_at",
+                 "revisions"),
                 beliefs,
             ),
             "episodes": {

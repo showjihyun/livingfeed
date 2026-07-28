@@ -18,7 +18,7 @@ import uvicorn
 import websockets
 from lf_dispatcher.relay import relay_once
 from lf_dispatcher.streams import ensure_streams
-from lf_eventstore import NewEvent, append, current_head
+from lf_eventstore import NewEvent, Provenance, append, current_head
 from lf_gateway.config import Config as GatewayConfig
 from lf_gateway.main import create_app
 from lf_projector.config import Config as ProjectorConfig
@@ -110,6 +110,7 @@ async def main() -> None:
         [stored] = await append(conn, "engine.feed", [NewEvent(
             world_id=WORLD, stream="feed", stream_key=f"smk{RUN}",
             type="feed.post.published", tick=99, actor_id=ACTOR,
+            provenance=Provenance.derived("smoke:follow_chain"),
             payload=post["payload"],
         )], expected_head=head)
         await relay_once(conn, js, ENV)

@@ -27,6 +27,15 @@ TIER = "system"
 TASK = "director_plan"
 
 
+def director_trace_id(world_id: str, tick: int) -> str:
+    """개입 선택 호출의 trace_id — (세계, tick)에서 결정적으로 파생된다.
+
+    이벤트의 출처(provenance.trace_id, ADR-021 §1)가 이 값을 참조하므로 단일
+    원천이어야 한다. 포맷을 두 곳에서 따로 만들면 감사 체인이 조용히 끊긴다.
+    """
+    return f"director-{world_id}-{tick}"
+
+
 class DirectorAiClient:
     def __init__(self, nc: NatsClient, env: str, *, timeout_s: float = DEFAULT_TIMEOUT_S) -> None:
         self._nc = nc
@@ -43,7 +52,7 @@ class DirectorAiClient:
         tick: int,
     ) -> tuple[dict[str, Any] | None, str | None]:
         """개입 선택을 요청한다. 반환: (구조화 출력, 사용 모델). 실패는 (None, None)."""
-        trace_id = f"director-{world_id}-{tick}"
+        trace_id = director_trace_id(world_id, tick)
         request = {
             "task": TASK,
             "bundle": {"system": system, "user": user, "trace_id": trace_id},

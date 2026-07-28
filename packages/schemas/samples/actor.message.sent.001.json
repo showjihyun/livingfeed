@@ -9,6 +9,10 @@
   "occurred_at": "2026-07-11T09:02:05Z",
   "causation_id": "01JZK7Q3W0000000000000000G",
   "correlation_id": "01JZK7Q3W0000000000000000G",
+  "provenance": {
+    "kind": "generated",
+    "trace_id": "01JZK7Q3W0000000000000000C"
+  },
   "payload": {
     "channel": "dm",
     "target_player_id": "p_observer_0417",

@@ -5,7 +5,7 @@ import json
 import nats.errors
 from lf_dispatcher.relay import RELAY_LOCK_KEY, relay_once, try_acquire_leadership
 from lf_dispatcher.streams import ensure_streams
-from lf_eventstore import NewEvent, append, outbox_lag
+from lf_eventstore import NewEvent, Provenance, append, outbox_lag
 from psycopg import AsyncConnection
 
 from .conftest import PG_DSN
@@ -30,6 +30,7 @@ def tick_event(n: int) -> NewEvent:
         type="system.tick.completed",
         tick=n,
         payload={**TICK_PAYLOAD, "tick": n},
+        provenance=Provenance.derived("tick.pipeline:completed"),
     )
 
 

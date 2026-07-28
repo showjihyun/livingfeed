@@ -16,7 +16,7 @@ from lf_ai_runtime.config import Config as AiConfig
 from lf_ai_runtime.service import serve
 from lf_dispatcher.relay import relay_once
 from lf_dispatcher.streams import ensure_streams
-from lf_eventstore import NewEvent, append, current_head, read_stream
+from lf_eventstore import NewEvent, Provenance, append, current_head, read_stream
 from lf_feed.compose import derive_post_id
 from lf_feed.composer import FeedComposer
 from lf_feed.config import Config as FeedConfig
@@ -75,6 +75,7 @@ async def main() -> None:
         await append(conn, "engine.director", [NewEvent(
             world_id=WORLD, stream="system", stream_key="boost",
             type="system.director.feed_boosted", tick=40,
+            provenance=Provenance.derived("smoke:narrate_boost"),
             payload={"target_actor_id": "a_aria_kim", "boost": 0.6, "until_tick": 200},
         )], expected_head=head)
         await relay_once(conn, js, ENV)
@@ -89,6 +90,7 @@ async def main() -> None:
         [stored_action] = await append(conn, "engine.actor", [NewEvent(
             world_id=WORLD, stream="actor", stream_key="a_aria_kim",
             type="actor.action.performed", tick=50, actor_id="a_aria_kim",
+            provenance=Provenance.derived("smoke:narrate_boost"),
             payload=work_payload,
         )], expected_head=action_head)
         await relay_once(conn, js, ENV)
@@ -107,6 +109,7 @@ async def main() -> None:
         [stored_inc] = await append(conn, "engine.director", [NewEvent(
             world_id=WORLD, stream="world", stream_key="incidents",
             type="world.incident.occurred", tick=60,
+            provenance=Provenance.derived("smoke:narrate_boost"),
             payload=incident["payload"],
         )], expected_head=inc_head)
         await relay_once(conn, js, ENV)

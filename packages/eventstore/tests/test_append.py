@@ -8,6 +8,7 @@ from lf_eventstore import (
     ConcurrencyConflict,
     NewEvent,
     PermissionDenied,
+    Provenance,
     UnknownEventType,
     ValidationFailed,
     append,
@@ -36,6 +37,7 @@ def action_event(**overrides) -> NewEvent:
         tick=42,
         payload=ACTION_PAYLOAD,
         actor_id="a_mint",
+        provenance=Provenance.generated(ACTION_PAYLOAD["decision_trace"]["trace_id"]),
     )
     base.update(overrides)
     return NewEvent(**base)
@@ -70,6 +72,35 @@ async def test_append_multiple_and_continue(conn):
     assert [e.stream_seq for e in events] == [1, 2, 3]
     assert [e.envelope["tick"] for e in events] == [42, 43, 44]
     assert all(e.envelope["actor_id"] == "a_mint" for e in events)  # 봉투 복원 (ADR-002)
+
+
+async def test_provenance_survives_the_round_trip(conn):
+    """출처는 봉투에 실려 나가고 컬럼에 남는다 — 둘이 갈리면 감사 체인이 끊긴다."""
+    [stored] = await append(conn, "engine.actor", [action_event()], expected_head=0)
+    expected = {"kind": "generated", "trace_id": "t-0001"}
+    assert stored.envelope["provenance"] == expected
+
+    [reread] = await read_stream(conn, "w_test", "actor", "a_mint")
+    assert reread.envelope["provenance"] == expected
+
+    # outbox 봉투(relay가 발행하는 것)와 events 컬럼이 같은 값을 갖는다
+    cur = await conn.execute(
+        "SELECT e.provenance, o.envelope -> 'provenance'"
+        " FROM es.events e JOIN es.outbox o ON o.event_id = e.event_id"
+    )
+    assert list(await cur.fetchone()) == [expected, expected]
+
+
+async def test_evidence_free_provenance_leaves_no_trace(conn):
+    """근거 없는 출처 주장은 DB에 닿기 전에 거부된다 (ADR-021 §1)."""
+    from lf_eventstore.model import Provenance as P
+
+    with pytest.raises(ValidationFailed):
+        await append(
+            conn, "engine.actor", [action_event(provenance=P(kind="generated"))], expected_head=0
+        )
+    cur = await conn.execute("SELECT count(*) FROM es.events")
+    assert (await cur.fetchone())[0] == 0
 
 
 async def test_concurrency_conflict_on_new_stream(conn):

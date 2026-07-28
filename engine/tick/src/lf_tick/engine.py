@@ -13,7 +13,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from lf_eventstore import NewEvent, append, current_head, read_stream
+from lf_eventstore import NewEvent, Provenance, append, current_head, read_stream
 from psycopg import AsyncConnection
 
 from lf_tick.clock import TickClock
@@ -111,6 +111,8 @@ async def run_tick(
                 stream_key=TICK_STREAM_KEY,
                 type="system.tick.started",
                 tick=tick,
+                # 세계 시계의 기계적 사실 — 해석이 개입하지 않는다 (ADR-021 §1)
+                provenance=Provenance.derived("tick.pipeline:started"),
                 payload={
                     "tick": tick,
                     "started_at": _isoformat_z(started_at),
@@ -144,6 +146,7 @@ async def run_tick(
                 tick=tick,
                 causation_id=started.envelope["event_id"],
                 correlation_id=started.envelope["correlation_id"],
+                provenance=Provenance.derived("tick.pipeline:completed"),
                 payload={
                     "tick": tick,
                     "started_at": _isoformat_z(started_at),

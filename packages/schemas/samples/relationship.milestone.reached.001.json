@@ -9,6 +9,10 @@
   "occurred_at": "2026-07-11T09:02:08Z",
   "causation_id": "01JZK7Q3W0000000000000000G",
   "correlation_id": "01JZK7Q3W0000000000000000G",
+  "provenance": {
+    "kind": "derived",
+    "rule_id": "relationship.engine"
+  },
   "payload": {
     "from_id": "a_aria_kim",
     "to_id": "p_observer_0417",

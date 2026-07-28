@@ -3,7 +3,7 @@
  * 재생성: pnpm --filter @livingfeed/schemas generate
  * 수동 타입 작성 금지 (ADR-001).
  */
-export type { EventEnvelope } from "./generated/envelope.schema";
+export type { EventEnvelope, Provenance } from "./generated/envelope.schema";
 export type { ActorActionPerformed } from "./generated/actor.action.performed.schema";
 export type { ActorEmotionShifted } from "./generated/actor.emotion.shifted.schema";
 export type { ActorMessageSent } from "./generated/actor.message.sent.schema";

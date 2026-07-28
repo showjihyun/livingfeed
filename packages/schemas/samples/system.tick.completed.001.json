@@ -9,6 +9,10 @@
   "occurred_at": "2026-07-11T09:01:00Z",
   "causation_id": "01JZK7Q3W0000000000000000A",
   "correlation_id": "01JZK7Q3W0000000000000000E",
+  "provenance": {
+    "kind": "derived",
+    "rule_id": "tick.pipeline:completed"
+  },
   "payload": {
     "tick": 42,
     "started_at": "2026-07-11T09:00:00Z",

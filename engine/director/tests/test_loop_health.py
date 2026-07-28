@@ -10,7 +10,7 @@ tick 0 규약(gateway)이라 tick 창이 아니라 그 날의 벽시계 창으�
 from datetime import UTC, datetime, timedelta
 
 from lf_director.loop_health import fold_loop_health, loop_health
-from lf_eventstore import NewEvent, append, current_head
+from lf_eventstore import NewEvent, Provenance, append, current_head
 
 WORLD = "w_test"
 BASE = datetime(2026, 7, 17, 9, 0, 0, tzinfo=UTC)
@@ -193,6 +193,7 @@ async def test_loop_health_reads_only_that_day_window(conn):
             world_id=WORLD, stream="system", stream_key="tick",
             type="system.tick.completed", tick=tick, event_id=eid,
             occurred_at=BASE + timedelta(seconds=sec),
+            provenance=Provenance.derived("tick.pipeline:completed"),
             payload={"tick": tick, "started_at": stamp, "completed_at": stamp,
                      "duration_ms": 1, "actors_decided": {"hot": 0, "warm": 0, "cold": 0},
                      "events_emitted": 0},
@@ -206,11 +207,13 @@ async def test_loop_health_reads_only_that_day_window(conn):
     await seed("services.gateway", NewEvent(
         world_id=WORLD, stream="player", stream_key="p_one", type="player.dm.sent",
         tick=0, event_id=dm1, occurred_at=BASE + timedelta(seconds=100),
+        provenance=Provenance.authored("p_one"),
         payload={"player_id": "p_one", "target_actor_id": "a_minji", "text": "hi"},
     ))
     await seed("services.gateway", NewEvent(
         world_id=WORLD, stream="player", stream_key="p_one", type="player.dm.sent",
         tick=0, event_id=dm2, occurred_at=BASE + timedelta(seconds=2000),  # day 1
+        provenance=Provenance.authored("p_one"),
         payload={"player_id": "p_one", "target_actor_id": "a_minji", "text": "again"},
     ))
     # 응답 — 실제 tick이 실린다 (day 0), causation이 개입을 가리킨다
@@ -219,6 +222,7 @@ async def test_loop_health_reads_only_that_day_window(conn):
         tick=6, actor_id="a_minji", event_id=ULID + "1A",
         occurred_at=BASE + timedelta(seconds=103),
         causation_id=dm1, correlation_id=dm1,
+        provenance=Provenance.generated("t-loop-health"),
         payload={"channel": "dm", "target_player_id": "p_one", "text": "hey",
                  "post_id": None, "in_reply_to": dm1},
     ))
@@ -228,6 +232,7 @@ async def test_loop_health_reads_only_that_day_window(conn):
         tick=7, actor_id="a_minji", event_id=ULID + "2A",
         occurred_at=BASE + timedelta(seconds=110),
         causation_id=ULID + "1A", correlation_id=dm1,
+        provenance=Provenance.derived("feed.compose:action"),
         payload={"visibility": "world", "title": "t", "body": "b",
                  "narration_kind": "template", "participants": ["a_minji"],
                  "community_id": None, "location_id": None, "drama_score": 0.5,

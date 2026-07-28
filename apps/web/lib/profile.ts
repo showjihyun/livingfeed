@@ -11,6 +11,8 @@
 import { useCallback, useEffect, useMemo } from "react";
 import useSWRInfinite from "swr/infinite";
 
+import type { Provenance } from "@livingfeed/schemas";
+
 import type { ActorIdentity } from "./actors";
 import { PLAYER_ID } from "./config";
 import { pickMessages, type Locale } from "./i18n";
@@ -23,6 +25,16 @@ const FEED_API_URL = process.env.NEXT_PUBLIC_LF_FEED_API_URL ?? "http://localhos
 /** 에피소드 한 페이지 크기 — 이보다 덜 오면 더 과거가 없다는 뜻 (커서를 닫는 근거) */
 const EPISODE_PAGE_SIZE = 8;
 
+/**
+ * 이 문장이 어디서 왔는가 (ADR-021 §1).
+ * 화면이 "기억한 것"과 "지금 짐작하는 것"을 가르는 유일한 근거다 —
+ * 이 구분이 없으면 인물의 모든 말이 같은 무게로 읽힌다.
+ *
+ * 등급 목록은 봉투 스키마에서 파생한다: 화면이 자기 목록을 따로 들면
+ * 스키마에 등급이 늘어도 여기만 조용히 낡는다 (ADR-001 수동 타입 금지).
+ */
+export type ProvenanceKind = Provenance["kind"];
+
 export interface ActorBelief {
   kind: string;
   aboutId: string | null;
@@ -30,6 +42,7 @@ export interface ActorBelief {
   confidence: number;
   /** 같은 자리(kind, about)의 갱신 횟수 — 생각이 굳어간 흔적 */
   revisions: number;
+  provenance: ProvenanceKind;
 }
 
 /**
@@ -44,6 +57,7 @@ export interface ActorEpisode {
   importance: number;
   occurredAt: string;
   tags: string[];
+  provenance: ProvenanceKind;
 }
 
 /** Director가 그린 이번 시즌의 인생 방향 (ADR-013, plan/08 Life Journey) */
@@ -106,6 +120,7 @@ interface ProfileResponse {
     statement: string;
     confidence: number;
     revisions: number;
+    provenance_kind: string;
   }[];
   episodes: {
     items: {
@@ -114,6 +129,7 @@ interface ProfileResponse {
       importance: number;
       occurred_at: string;
       tags: string[];
+      provenance_kind: string;
     }[];
     /** 더 과거 에피소드 커서 — 마지막 페이지에서도 남는다 (빈 페이지가 곧 끝) */
     next_cursor: string | null;
@@ -136,6 +152,19 @@ export function humanize(text: string): string {
   );
 }
 
+const PROVENANCE_KINDS: readonly ProvenanceKind[] = [
+  "recalled",
+  "derived",
+  "generated",
+  "authored",
+  "unknown",
+];
+
+/** 서버 값을 좁힌다 — 모르는 등급은 unknown이다 (화면이 출처를 추측하지 않는다) */
+function toProvenance(kind: string | undefined): ProvenanceKind {
+  return PROVENANCE_KINDS.find((p) => p === kind) ?? "unknown";
+}
+
 function toEpisode(e: ProfileResponse["episodes"]["items"][number]): ActorEpisode {
   return {
     id: e.event_id,
@@ -143,6 +172,7 @@ function toEpisode(e: ProfileResponse["episodes"]["items"][number]): ActorEpisod
     importance: e.importance,
     occurredAt: e.occurred_at,
     tags: e.tags,
+    provenance: toProvenance(e.provenance_kind),
   };
 }
 
@@ -158,6 +188,7 @@ function fromResponse(body: ProfileResponse): ActorProfile {
     statement: b.statement,
     confidence: b.confidence,
     revisions: b.revisions,
+    provenance: toProvenance(b.provenance_kind),
   }));
   const id = body.identity;
   return {
