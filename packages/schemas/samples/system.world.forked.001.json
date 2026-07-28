@@ -1,0 +1,22 @@
+{
+  "event_id": "01JZK7Q3W0000000000000000X",
+  "stream": "system",
+  "type": "system.world.forked",
+  "schema_version": 1,
+  "world_id": "w_main_fork_a",
+  "actor_id": null,
+  "tick": 500,
+  "occurred_at": "2026-07-11T12:00:00Z",
+  "causation_id": null,
+  "correlation_id": "01JZK7Q3W0000000000000000X",
+  "provenance": {
+    "kind": "derived",
+    "rule_id": "eventstore.fork:copy_prefix"
+  },
+  "payload": {
+    "source_world_id": "w_main",
+    "through_tick": 500,
+    "boundary_global_seq": 184203,
+    "events_copied": 184203
+  }
+}

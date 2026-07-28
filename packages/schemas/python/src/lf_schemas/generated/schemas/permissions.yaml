@@ -28,5 +28,8 @@ principals:
     - "actor.identity.retired"
     # 복원(returned)도 스튜디오의 결정이다 — 은퇴의 역방향, 같은 저자성 (재사영은 프로젝터의 몫).
     - "actor.identity.returned"
+    # 세계 분기의 자기 진술 (ADR-021 §4 L4) — 운영자 조작이라 관리 표면이 발행한다.
+    # system.director.*와 달리 서사가 아니라 실험 설계의 사실이다.
+    - "system.world.forked"
   services.ai-runtime: []        # AI Runtime은 이벤트를 발행하지 않는다 (ADR-018)
   services.projector: []         # 프로젝터는 절대 발행하지 않는다 (ADR-003 계약 4)
