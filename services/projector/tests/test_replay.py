@@ -192,3 +192,46 @@ async def test_kuzu_from_es_rebuild_restores_integrity(pg, tmp_path):
         assert (await verify_worlds(pg, projector.graph))["ok"]
     finally:
         projector.graph.close()
+
+
+async def test_follow_fold_uses_append_order_not_ulid_order(pg, redis):
+    """같은 밀리초에 적재된 선언/철회도 '마지막이 이긴다'가 흔들리지 않는다.
+
+    new_ulid는 같은 ms 안에서 80비트가 순수 난수라 단조가 아니다. 접는 순서를
+    event_id로 잡으면 연달아 적재된 두 이벤트의 앞뒤가 무작위로 뒤집혀,
+    검증기가 '선언이 마지막'이라 잘못 접는다. 접기는 프로젝터가 실제로 적용한
+    순서(global_seq)를 따라야 한다.
+
+    event_id를 직접 지정해 ULID 역전을 확정적으로 재현한다 — 철회를 나중에
+    적재하면서 그 event_id를 선언보다 **작게** 준다.
+    """
+    await _seed_es(pg)
+    follow = sample("player.follow.changed")
+    declare = {**follow["payload"], "following": True}
+    withdraw = {**follow["payload"], "following": False}
+
+    # 적재 순서: 선언 → 철회. ULID 순서: 철회 → 선언 (역전)
+    for head, payload, event_id in (
+        (0, declare, "01JZK7Q3W0000000000000000Z"),
+        (1, withdraw, "01JZK7Q3W0000000000000000A"),
+    ):
+        await append(
+            pg, "services.gateway",
+            [NewEvent(
+                world_id=follow["world_id"], stream="player",
+                stream_key=payload["player_id"], type=follow["type"],
+                tick=follow["tick"], payload=payload, event_id=event_id,
+                provenance=Provenance.from_json(follow["provenance"]),
+            )],
+            expected_head=head,
+        )
+
+    # 진실은 '철회가 마지막' — 팔로워 인덱스는 비어 있어야 무결이다
+    store = TimelineStore(redis)
+    assert (await verify_timeline(pg, redis))["ok"]
+
+    # 반대로 선언 상태를 심으면 어긋남으로 잡혀야 한다
+    await store.set_follow(
+        follow["world_id"], declare["target_actor_id"], declare["player_id"], True
+    )
+    assert not (await verify_timeline(pg, redis))["ok"]

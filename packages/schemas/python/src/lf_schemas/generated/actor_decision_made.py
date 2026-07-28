@@ -50,6 +50,21 @@ class Sampling(BaseModel):
     max_output_tokens: conint(ge=0) | None
 
 
+class CognitiveBudget(BaseModel):
+    """
+    이 결정에 적용된 인지 예산 (ADR-021 §3). 실험 결과를 예산과 이어 읽으려면 결정마다 그 값이 함께 있어야 한다 — 나중에 설정 파일을 보면 '그때 무슨 값이었나'를 되짚을 수 없다.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    recall_slots: conint(ge=1) = Field(..., description="회상 top-k (Qdrant, ADR-008)")
+    memory_tokens: conint(ge=1) = Field(
+        ..., description="회상+작업 기억의 합산 토큰 예산"
+    )
+    calls_per_tick: conint(ge=1) = Field(..., description="tick당 추론 호출 상한")
+
+
 class Outcome(StrEnum):
     """
     결정이 어떻게 끝났는가. acted=결정이 행동이 됐다, hesitated=LLM이 답하지 않아 이번 tick은 머뭇거렸다, fallback=규칙이 대신 정했다. 강등·실패가 데이터에 남아야 '조용한 성공 위장'이 불가능해진다 (ADR-018 §4).
@@ -95,6 +110,10 @@ class ActorDecisionMade(BaseModel):
     sampling: Sampling | None = Field(
         ...,
         description="샘플링 파라미터 — L3(LLM 재실행)를 보증하지는 않지만(ADR-021 §4), 재현이 안 될 때 무엇이 달랐는지 좁히는 데 필요하다. 규칙 경로면 null.",
+    )
+    cognitive_budget: CognitiveBudget = Field(
+        ...,
+        description="이 결정에 적용된 인지 예산 (ADR-021 §3). 실험 결과를 예산과 이어 읽으려면 결정마다 그 값이 함께 있어야 한다 — 나중에 설정 파일을 보면 '그때 무슨 값이었나'를 되짚을 수 없다.",
     )
     outcome: Outcome = Field(
         ...,

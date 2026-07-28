@@ -19,6 +19,8 @@
 키 계약 (gateway ai_limits.py와 합의된 고정 계약 — 한쪽만 바꾸면 안 된다):
     lf:{env}:ai:limits                        한도 문서 JSON
     lf:{env}:ai:spend:{world}:{YYYY-MM-DD}    일 누적 USD (UTC 경계)
+    lf:{env}:ai:spend:{world}:a:{actor}:{YYYY-MM-DD}  액터별 일 누적 USD (ADR-021 §3)
+    lf:{env}:ai:calls:{world}:a:{actor}:{YYYY-MM-DD}  액터별 일 호출 수
     lf:{env}:ai:spend:{world}:{YYYY-MM}       월 누적 USD (UTC 경계)
     lf:{env}:ai:calls:{world}:{YYYY-MM-DD}    일 호출 수
     lf:{env}:ai:tokens:{world}:{YYYY-MM-DD}   일 토큰 수
@@ -72,6 +74,13 @@ class AiLimits:
     monthly_usd: float = 0.0
     #: 이 비율을 넘으면 hot을 warm으로 강등한다 (0.8 = 80%)
     degrade_ratio: float = 0.8
+    #: 액터 1명의 일 지출 상한 USD (0 = 끔) — 세계 상한 **안에서의 배분**이다.
+    #: 한 인물이 세계 예산을 독식하는 것을 막고, 동시에 '인지 자원이 다른
+    #: 인물들'을 만들어 실험 변수를 연다 (ADR-021 §3). 기본은 끔 — 켜는 것이
+    #: 곧 실험 설정이며, 끄면 현행 동작과 완전히 같다.
+    actor_daily_usd: float = 0.0
+    #: 액터 1명의 일 호출 수 상한 (0 = 끔)
+    actor_daily_calls: int = 0
     #: 응답 토큰 상한 (0 = 프로바이더 기본값 사용). 출력 단가가 입력의 5배라
     #: 가장 직접적인 비용 손잡이지만, 추론 모델(gpt-5 계열)은 추론 토큰이 이
     #: 예산을 함께 쓰므로 너무 낮게 잡으면 응답이 잘린다 — 기본은 끔.
@@ -84,6 +93,8 @@ class AiLimits:
             "daily_usd": self.daily_usd,
             "monthly_usd": self.monthly_usd,
             "degrade_ratio": self.degrade_ratio,
+            "actor_daily_usd": self.actor_daily_usd,
+            "actor_daily_calls": self.actor_daily_calls,
             "max_output_tokens": self.max_output_tokens,
         }
 
@@ -103,6 +114,12 @@ class AiLimits:
             monthly_usd=max(0.0, _as_float(data.get("monthly_usd"), base.monthly_usd)),
             # 0 이하·1 초과는 강등을 무의미하게 만든다 (즉시 강등 / 강등 없음)
             degrade_ratio=min(1.0, max(0.1, raw_ratio)),
+            actor_daily_usd=max(
+                0.0, _as_float(data.get("actor_daily_usd"), base.actor_daily_usd)
+            ),
+            actor_daily_calls=max(
+                0, _as_int(data.get("actor_daily_calls"), base.actor_daily_calls)
+            ),
             max_output_tokens=max(
                 0, _as_int(data.get("max_output_tokens"), base.max_output_tokens)
             ),
@@ -186,12 +203,19 @@ def limits_key(env: str) -> str:
     return f"lf:{env}:ai:limits"
 
 
-def spend_key(env: str, world_id: str, period: str) -> str:
-    return f"lf:{env}:ai:spend:{world_id}:{period}"
+def spend_key(env: str, world_id: str, period: str, actor_id: str | None = None) -> str:
+    """지출 카운터 키 — actor_id를 주면 그 액터의 몫만 센다 (ADR-021 §3).
+
+    액터 세그먼트 앞에 'a'를 두는 이유는 충돌 방지다: 액터 id가 날짜 모양이면
+    세계 키와 같은 자리를 차지해 두 카운터가 섞인다.
+    """
+    scope = f"{world_id}:a:{actor_id}" if actor_id else world_id
+    return f"lf:{env}:ai:spend:{scope}:{period}"
 
 
-def calls_key(env: str, world_id: str, day: str) -> str:
-    return f"lf:{env}:ai:calls:{world_id}:{day}"
+def calls_key(env: str, world_id: str, day: str, actor_id: str | None = None) -> str:
+    scope = f"{world_id}:a:{actor_id}" if actor_id else world_id
+    return f"lf:{env}:ai:calls:{scope}:{day}"
 
 
 def tokens_key(env: str, world_id: str, day: str) -> str:
@@ -259,13 +283,15 @@ class BudgetGuard:
         self._cached, self._cached_at = limits, now
         return limits
 
-    async def check(self, world_id: str, tier: str) -> Decision:
+    async def check(
+        self, world_id: str, tier: str, *, actor_id: str | None = None
+    ) -> Decision:
         limits = await self.limits()
         if not limits.enabled:
             return Decision(True, tier)
         cap = _output_cap(limits)
         try:
-            return await self._check(limits, world_id, tier, cap)
+            return await self._check(limits, world_id, tier, cap, actor_id)
         except Exception as e:
             # 카운터 미가용 — 막지 않는다 (가용성 우선). 상한이 이 순간 무력하다는
             # 사실은 경고로 남긴다
@@ -273,7 +299,8 @@ class BudgetGuard:
             return Decision(True, tier, max_output_tokens=cap)
 
     async def _check(
-        self, limits: AiLimits, world_id: str, tier: str, cap: int | None
+        self, limits: AiLimits, world_id: str, tier: str, cap: int | None,
+        actor_id: str | None = None,
     ) -> Decision:
         now = self._now()
         day, month = periods(now)
@@ -283,6 +310,16 @@ class BudgetGuard:
         exhausted = _exhausted(limits, day_spend, month_spend)
         if exhausted is not None:
             return Decision(False, tier, reason=exhausted, max_output_tokens=cap)
+
+        # 액터 상한은 세계 상한 **안에서의 배분**이다 — 세계가 남아 있어도
+        # 제 몫을 다 쓴 인물은 규칙으로 산다 (ADR-021 §3). 소진의 결과는 세계
+        # 예산과 같다: 강등 후 규칙 폴백이며, 그 폴백이 provenance=derived
+        # 이벤트로 남아 "인지 자원이 말랐을 때 이 인물은 어떻게 달라지는가"가
+        # 데이터로 관측된다.
+        if actor_id:
+            actor_exhausted = await self._actor_exhausted(limits, world_id, actor_id, day)
+            if actor_exhausted is not None:
+                return Decision(False, tier, reason=actor_exhausted, max_output_tokens=cap)
 
         if limits.rpm > 0:
             minute = int(now.timestamp()) // 60
@@ -310,8 +347,29 @@ class BudgetGuard:
             return Decision(True, degraded_tier, degraded=True, max_output_tokens=cap)
         return Decision(True, tier, max_output_tokens=cap)
 
+    async def _actor_exhausted(
+        self, limits: AiLimits, world_id: str, actor_id: str, day: str
+    ) -> str | None:
+        """이 액터가 제 몫을 다 썼는가 — 아니면 None."""
+        if limits.actor_daily_usd > 0:
+            spent = await self._read_float(spend_key(self._env, world_id, day, actor_id))
+            if spent >= limits.actor_daily_usd:
+                return (
+                    f"액터 일 비용 상한 소진: {actor_id} ${spent:.4f} / "
+                    f"${limits.actor_daily_usd:.4f} — 이 인물은 오늘 규칙으로 산다"
+                )
+        if limits.actor_daily_calls > 0:
+            calls = await self._read_int(calls_key(self._env, world_id, day, actor_id))
+            if calls >= limits.actor_daily_calls:
+                return (
+                    f"액터 일 호출 상한 소진: {actor_id} {calls}회 / "
+                    f"{limits.actor_daily_calls}회 — 이 인물은 오늘 규칙으로 산다"
+                )
+        return None
+
     async def record(
-        self, world_id: str, provider: str, model: str, usage: Usage
+        self, world_id: str, provider: str, model: str, usage: Usage,
+        *, actor_id: str | None = None,
     ) -> float:
         """이번 호출의 비용을 누적하고 USD를 반환한다 (관측용).
 
@@ -326,6 +384,14 @@ class BudgetGuard:
             calls = calls_key(self._env, world_id, day)
             await self._store.incr(calls)
             await self._store.expire(calls, DAY_TTL_S)
+            if actor_id:
+                # 액터 몫은 세계 몫과 **함께** 오른다 — 배분이지 별도 지갑이 아니다
+                await self._add_float(
+                    spend_key(self._env, world_id, day, actor_id), cost, DAY_TTL_S
+                )
+                actor_calls = calls_key(self._env, world_id, day, actor_id)
+                await self._store.incr(actor_calls)
+                await self._store.expire(actor_calls, DAY_TTL_S)
             if usage.total_tokens:
                 tokens = tokens_key(self._env, world_id, day)
                 await self._store.incrby(tokens, usage.total_tokens)
@@ -439,6 +505,10 @@ def limits_from_env(env_map: Any = None) -> AiLimits:
             "daily_usd": source.get("LF_AI_DAILY_USD", base.daily_usd),
             "monthly_usd": source.get("LF_AI_MONTHLY_USD", base.monthly_usd),
             "degrade_ratio": source.get("LF_AI_DEGRADE_RATIO", base.degrade_ratio),
+            "actor_daily_usd": source.get("LF_AI_ACTOR_DAILY_USD", base.actor_daily_usd),
+            "actor_daily_calls": source.get(
+                "LF_AI_ACTOR_DAILY_CALLS", base.actor_daily_calls
+            ),
             "max_output_tokens": source.get(
                 "LF_AI_MAX_OUTPUT_TOKENS", base.max_output_tokens
             ),

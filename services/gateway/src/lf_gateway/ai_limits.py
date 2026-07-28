@@ -82,6 +82,11 @@ class AiLimitsDoc(BaseModel):
     monthly_usd: float = Field(0.0, ge=0, le=1_000_000)
     #: 이 비율을 넘으면 hot 티어를 warm으로 강등한다
     degrade_ratio: float = Field(0.8, ge=0.1, le=1.0)
+    #: 액터 1명의 일 지출 상한 USD (0 = 끔) — 세계 상한 안에서의 배분 (ADR-021 §3).
+    #: 인지 자원이 다른 인물들을 만들어 실험 변수를 여는 손잡이다.
+    actor_daily_usd: float = Field(0.0, ge=0, le=1_000_000)
+    #: 액터 1명의 일 호출 수 상한 (0 = 끔) — 비용 0인 로컬 모델에서도 빈도는 제한된다
+    actor_daily_calls: int = Field(0, ge=0, le=10_000_000)
     #: 응답 토큰 상한 (0 = 프로바이더 기본값)
     max_output_tokens: int = Field(0, ge=0, le=200_000)
 
@@ -98,6 +103,8 @@ def defaults_from_env() -> AiLimitsDoc:
         ("daily_usd", "LF_AI_DAILY_USD"),
         ("monthly_usd", "LF_AI_MONTHLY_USD"),
         ("degrade_ratio", "LF_AI_DEGRADE_RATIO"),
+        ("actor_daily_usd", "LF_AI_ACTOR_DAILY_USD"),
+        ("actor_daily_calls", "LF_AI_ACTOR_DAILY_CALLS"),
         ("max_output_tokens", "LF_AI_MAX_OUTPUT_TOKENS"),
     ):
         raw = os.environ.get(key)
@@ -199,9 +206,11 @@ def create_ai_limits_router(cfg: Config) -> APIRouter:
         except Exception as e:  # 저장은 됐다 — 사용량 조회 실패는 화면만 비운다
             logger.warning("저장 후 사용량 조회 실패: %s", e)
         logger.info(
-            "LLM 한도 저장 (env=%s): 켬=%s 일 $%.2f 월 $%.2f 분당 %d회 강등 %.0f%% 출력상한 %d",
+            "LLM 한도 저장 (env=%s): 켬=%s 일 $%.2f 월 $%.2f 분당 %d회 강등 %.0f%%"
+            " 출력상한 %d 액터/일 $%.4f·%d회",
             cfg.env, doc.enabled, doc.daily_usd, doc.monthly_usd, doc.rpm,
             doc.degrade_ratio * 100, doc.max_output_tokens,
+            doc.actor_daily_usd, doc.actor_daily_calls,
         )
         return {
             "world_id": world_id,

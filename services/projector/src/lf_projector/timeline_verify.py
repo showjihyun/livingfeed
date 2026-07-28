@@ -24,9 +24,13 @@ _REL_KEYS_SQL = (
     "SELECT DISTINCT stream_key FROM es.events"
     " WHERE world_id = %s AND stream = 'relationship'"
 )
+#: 접는 순서는 **프로젝터가 실제로 적용한 순서**여야 한다 — global_seq가 그 순서다
+#: (replay.py도 global_seq 오름차순으로 먹인다). event_id(ULID)로 정렬하면 안 된다:
+#: new_ulid는 같은 밀리초 안에서 80비트가 순수 난수라 단조가 아니고, 연달아 적재된
+#: 선언/철회의 앞뒤가 뒤집혀 "마지막이 이긴다"가 무작위로 갈린다.
 _FOLLOW_SQL = (
     "SELECT payload FROM es.events"
-    " WHERE world_id = %s AND type = 'player.follow.changed' ORDER BY event_id"
+    " WHERE world_id = %s AND type = 'player.follow.changed' ORDER BY global_seq"
 )
 #: 액터별 마지막 라이프사이클(은퇴/부활) — 마지막이 retired인 액터만 은퇴자다
 #: (부활이 이긴다 — reproject_returned가 인덱스·발신분을 되살렸다)
@@ -34,7 +38,7 @@ _LIFECYCLE_SQL = (
     "SELECT DISTINCT ON (actor_id) actor_id, type FROM es.events"
     " WHERE world_id = %s AND type IN"
     " ('actor.identity.retired', 'actor.identity.returned')"
-    " ORDER BY actor_id, event_id DESC"
+    " ORDER BY actor_id, global_seq DESC"  # 같은 이유 — 은퇴/부활의 마지막을 고른다
 )
 _WORLDS_SQL = (
     "SELECT DISTINCT world_id FROM es.events"

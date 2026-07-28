@@ -65,3 +65,33 @@ social:
   comment_cooldown_ticks: 5
   # 다음 LLM decide까지 들고 가는 '본 글' 최대 수 — 오래된 것부터 밀려난다
   seen_posts_max: 3
+
+# 인지 예산 (ADR-021 §3) — 이 인물이 한 번 생각할 때 쓸 수 있는 자원.
+#
+# 비용 절감이 아니라 **실험 변수**다: 회상 슬롯·기억 예산·추론 빈도가 인물별로
+# 달라야 "기억 용량이 작은 인물의 관계는 어떻게 달라지는가"를 물을 수 있다.
+# 세계 단위 비용 상한(ADR-018/020)은 그대로 상위 하드 캡이고, 여기 값들은 그
+# 안에서의 배분이다.
+cognition:
+  # 티어별 기본 — LOD(ADR-011)에서 그대로 유도한 현행 값이다. 이 절을 건드리지
+  # 않으면 세계는 지금과 똑같이 돈다 (관측 장치가 시뮬레이션을 바꾸지 않는다).
+  tiers:
+    # 주목받는 인물 — 회상도 기억도 넉넉하게
+    hot:
+      recall_slots: 3
+      memory_tokens: 1800
+      calls_per_tick: 4
+    # 드라마 인접 — 같은 폭이되 호출은 적게 (10 tick 케이던스)
+    warm:
+      recall_slots: 3
+      memory_tokens: 1800
+      calls_per_tick: 2
+    # 배경 — 규칙 기반이라 추론을 부르지 않는다 (값은 승격 시의 출발점)
+    cold:
+      recall_slots: 3
+      memory_tokens: 1800
+      calls_per_tick: 1
+  # 액터별 오버라이드 — 실험 설정. 준 항목만 티어 기본을 덮는다.
+  # 비어 있는 것이 기본이며, 채우는 순간 그 세계는 대조군이 아니게 된다.
+  # 예) a_someone: { recall_slots: 1 }  # 기억이 얕은 인물
+  overrides: {}
