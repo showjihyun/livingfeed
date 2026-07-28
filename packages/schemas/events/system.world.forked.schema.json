@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/system.world.forked.schema.json",
+  "title": "SystemWorldForked",
+  "description": "이 세계는 다른 세계의 분기다 (ADR-021 §4 L4). 분기된 세계의 첫 자기 진술이며, 이 기록이 없으면 갈라진 세계가 독립 세계로 오해되어 두 세계의 비교가 '두 실험'이 아니라 '두 사실'로 읽힌다. 반사실 실험의 대조군 표식이다.",
+  "type": "object",
+  "properties": {
+    "source_world_id": {
+      "type": "string",
+      "description": "어느 세계에서 갈라져 나왔는가",
+      "pattern": "^w_[a-z0-9_]+$"
+    },
+    "through_tick": {
+      "type": "integer",
+      "description": "사람이 지정한 분기점 — 'tick N까지'",
+      "minimum": 0
+    },
+    "boundary_global_seq": {
+      "type": "integer",
+      "description": "실제로 잘린 지점. tick이 아니라 global_seq가 경계인 이유는 플레이어 개입이 tick 0 규약이기 때문이다 — tick으로 자르면 미래의 개입이 과거의 분기에 들어앉는다. 이 값은 tick N의 system.tick.completed가 적재된 지점이다.",
+      "minimum": 1
+    },
+    "events_copied": {
+      "type": "integer",
+      "description": "복사된 이벤트 수 — 분기점까지의 역사 크기",
+      "minimum": 0
+    }
+  },
+  "required": ["source_world_id", "through_tick", "boundary_global_seq", "events_copied"],
+  "additionalProperties": false
+}

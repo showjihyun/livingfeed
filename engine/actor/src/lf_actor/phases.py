@@ -180,8 +180,23 @@ def _action_provenance(payload: dict[str, Any]) -> Provenance:
     """
     trace = payload.get("decision_trace") or {}
     if trace.get("tier") == "cold_rule":
-        return Provenance.derived("actor.rules:fallback_action")
+        return Provenance.derived(f"actor.rules:{_rule_name(payload)}")
     return Provenance.generated(trace.get("trace_id") or "")
+
+
+def _rule_name(payload: dict[str, Any]) -> str:
+    """어느 규칙이 이 행동을 만들었나 — payload가 이미 알고 있다.
+
+    셋 다 tier=cold_rule이라 티어만으로는 갈리지 않는다. rule_id는 L2 재실행의
+    진입점이므로(ADR-021 §1) 뭉뚱그리면 검증기가 다른 규칙을 돌려 놓고
+    '어긋났다'고 보고한다 — 없는 회귀를 만드는 셈이다.
+    """
+    params = payload.get("params") or {}
+    if params.get("routine"):
+        return "routine_action"
+    if params.get("resonance"):
+        return "fallback_follow_up"
+    return "fallback_action"
 
 
 def _episode_provenance(episode: Episode) -> Provenance:

@@ -25,5 +25,6 @@ from lf_schemas.generated import system_director_season_set as system_director_s
 from lf_schemas.generated import system_director_spotlighted as system_director_spotlighted
 from lf_schemas.generated import system_tick_completed as system_tick_completed
 from lf_schemas.generated import system_tick_started as system_tick_started
+from lf_schemas.generated import system_world_forked as system_world_forked
 from lf_schemas.generated import world_incident_occurred as world_incident_occurred
 from lf_schemas.generated import world_observation_surfaced as world_observation_surfaced
