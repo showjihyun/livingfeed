@@ -42,7 +42,8 @@ from lf_tick.pipeline import TickContext
 from redis.asyncio import Redis
 
 from lf_actor.arc import Arc, ArcStore
-from lf_actor.client import AiRuntimeClient
+from lf_actor.client import AiRuntimeClient, Inference
+from lf_actor.cognition import CognitiveBudget, CognitiveBudgets
 from lf_actor.consolidation import (
     Episode,
     ImportanceWeights,
@@ -227,6 +228,7 @@ class ActorPhases:
         hot_floor: int = 0,
         decide_concurrency: int = 8,
         trace_policy: TracePolicy | None = None,
+        cognition: CognitiveBudgets | None = None,
     ) -> None:
         if not personas:
             raise ValueError("액터가 없다 — 최소 1명의 페르소나가 필요하다")
@@ -250,6 +252,11 @@ class ActorPhases:
         #: 정책이 무엇이든 actor.decision.made 이벤트 자체는 언제나 남는다
         #: (L1 재조립 보증의 근거라 샘플링 대상이 아니다).
         self._trace_policy = trace_policy or TracePolicy()
+        #: 인지 예산 해석기 (ADR-021 §3) — 오버라이드가 없으면 현행 동작 그대로.
+        #: 실험 설정이 걸린 세계는 대조군이 아니므로 기동 로그에 남긴다.
+        self._cognition = cognition or CognitiveBudgets.from_params(default_params())
+        if self._cognition.has_overrides:
+            logger.info("인지 예산 오버라이드 적용 — 이 세계는 실험 설정이다 (ADR-021 §3)")
         self._memory = memory
         #: Director의 인생 아크 저장 — 있으면 decide 컨텍스트에 방향을 주입한다 (ADR-013)
         self._arc = arc
@@ -298,6 +305,8 @@ class ActorPhases:
         #: 이번 tick의 결정 기록 — actor_id → payload들 (ADR-021 §2).
         #: RESOLVE에서 그 액터의 스트림에 함께 적재된다.
         self._decisions: dict[str, list[dict[str, Any]]] = {}
+        #: 이번 tick에 이 액터가 쓴 추론 호출 수 — calls_per_tick의 집행 계수
+        self._calls_this_tick: dict[str, int] = {}
         #: 선제 DM 빈도 장부 — 없으면 선제 DM 경로 자체가 없다 (후방 호환)
         self._outreach = outreach
         #: 여운 저장소 (드라마 재생산, plan/02) — 없으면 경로 자체가 없다 (후방 호환)
@@ -539,6 +548,7 @@ class ActorPhases:
         self._intents = []
         self._replies = []
         self._decisions = {}
+        self._calls_this_tick = {}
         self._pending_comments = []
         self._proactive_dms = []
         decided = {"hot": 0, "warm": 0, "cold": 0}
@@ -705,8 +715,9 @@ class ActorPhases:
             persona, working, world, purpose="reply_to_player",
             episodes=episodes, conversation=conversation, arc=arc,
             relationships=relationships,
+            memory_tokens=self._budget_for(actor_id).memory_tokens,
         )
-        res = await self._ai.converse(bundle, tier="hot", actor_id=actor_id, tick=ctx.tick)
+        res = await self._ai_converse(ctx, actor_id, bundle, tier="hot")
         text = res.value
         if text is None:
             text = fallback_reply(persona, envelope["payload"]["text"])
@@ -736,8 +747,9 @@ class ActorPhases:
             persona, working, world, purpose="reply_to_comment",
             episodes=await self._recall(ctx.world_id, actor_id, working),
             arc=arc, relationships=relationships,
+            memory_tokens=self._budget_for(actor_id).memory_tokens,
         )
-        res = await self._ai.converse(bundle, tier="hot", actor_id=actor_id, tick=ctx.tick)
+        res = await self._ai_converse(ctx, actor_id, bundle, tier="hot")
         text = res.value
         if text is None:
             text = fallback_reply(persona, envelope["payload"]["text"])
@@ -764,8 +776,9 @@ class ActorPhases:
         bundle = build(
             persona, working, world, purpose="greet_reaction",
             relationships=await self._relationship_summary(ctx.world_id, actor_id),
+            memory_tokens=self._budget_for(actor_id).memory_tokens,
         )
-        res = await self._ai.converse(bundle, tier="warm", actor_id=actor_id, tick=ctx.tick)
+        res = await self._ai_converse(ctx, actor_id, bundle, tier="warm")
         text = res.value
         if text is None:
             text = fallback_greeting(persona, envelope["payload"]["player_id"])
@@ -815,8 +828,9 @@ class ActorPhases:
             conversation=conversation_turns(working, target),
             arc=await self._arc_of(ctx.world_id, actor_id),
             relationships=await self._relationship_summary(ctx.world_id, actor_id),
+            memory_tokens=self._budget_for(actor_id).memory_tokens,
         )
-        res = await self._ai.converse(bundle, tier="warm", actor_id=actor_id, tick=ctx.tick)
+        res = await self._ai_converse(ctx, actor_id, bundle, tier="warm")
         text = res.value
         await self._record_decision(
             ctx, actor_id, bundle, purpose=bundle.purpose, tier="warm",
@@ -865,11 +879,10 @@ class ActorPhases:
             episodes=await self._recall(ctx.world_id, actor_id, working),
             arc=await self._arc_of(ctx.world_id, actor_id),
             relationships=await self._relationship_summary(ctx.world_id, actor_id),
+            memory_tokens=self._budget_for(actor_id).memory_tokens,
         )
         # res는 여운(Resonance)이다 — 추론 결과는 따로 받는다 (이름이 겹치면 조용히 샌다)
-        inference = await self._ai.decide_action(
-            bundle, schema, tier=Tier.WARM.value, actor_id=actor_id, tick=ctx.tick
-        )
+        inference = await self._ai_decide(ctx, actor_id, bundle, schema, tier=Tier.WARM.value)
         payload = inference.value
         await self._record_decision(
             ctx, actor_id, bundle, purpose=bundle.purpose, tier=Tier.WARM.value,
@@ -980,10 +993,9 @@ class ActorPhases:
             episodes=episodes, arc=arc, relationships=relationships,
             # (post_id, 표시줄) — 본 글은 사건이라 결정의 근거로 기록된다 (ADR-021 §2)
             seen_posts=[(e["event_id"], self._post_line(e)) for e in seen] or None,
+            memory_tokens=self._budget_for(actor_id).memory_tokens,
         )
-        res = await self._ai.decide_action(
-            bundle, schema, tier=tier, actor_id=actor_id, tick=ctx.tick
-        )
+        res = await self._ai_decide(ctx, actor_id, bundle, schema, tier=tier)
         payload = res.value
         await self._record_decision(
             ctx, actor_id, bundle, purpose=bundle.purpose, tier=tier,
@@ -1032,6 +1044,57 @@ class ActorPhases:
             if state is not None:
                 edges[author] = state.dimensions
         return edges
+
+    async def _ai_converse(
+        self, ctx: TickContext, actor_id: str, bundle: Bundle, *, tier: str
+    ) -> Inference:
+        """예산을 쓰고 converse — 슬롯이 없으면 부르지 않는다 (ADR-021 §3)."""
+        if not self._spend_call(actor_id):
+            logger.info("인지 예산 소진: %s tick=%d — %s를 규칙으로",
+                        actor_id, ctx.tick, bundle.purpose)
+            return Inference()
+        return await self._ai.converse(bundle, tier=tier, actor_id=actor_id, tick=ctx.tick)
+
+    async def _ai_decide(
+        self, ctx: TickContext, actor_id: str, bundle: Bundle,
+        schema: dict[str, Any], *, tier: str,
+    ) -> Inference:
+        """예산을 쓰고 decide_action — 슬롯이 없으면 부르지 않는다."""
+        if not self._spend_call(actor_id):
+            logger.info("인지 예산 소진: %s tick=%d — %s를 규칙으로",
+                        actor_id, ctx.tick, bundle.purpose)
+            return Inference()
+        return await self._ai.decide_action(
+            bundle, schema, tier=tier, actor_id=actor_id, tick=ctx.tick
+        )
+
+    async def _ai_reflect(
+        self, ctx: TickContext, actor_id: str, bundle: Bundle, schema: dict[str, Any]
+    ) -> Inference:
+        """예산을 쓰고 reflect — 슬롯이 없으면 곱씹지 않는다 (규칙 신념이 바닥을 지킨다)."""
+        if not self._spend_call(actor_id):
+            logger.info("인지 예산 소진: %s tick=%d — 곱씹음 생략", actor_id, ctx.tick)
+            return Inference()
+        return await self._ai.reflect(bundle, schema, actor_id=actor_id, tick=ctx.tick)
+
+    def _spend_call(self, actor_id: str) -> bool:
+        """이번 tick의 추론 슬롯을 하나 쓴다 — 남아 있지 않으면 False.
+
+        소진의 결과는 세계 예산과 같다: 규칙 폴백이며, 그 폴백이
+        provenance=derived 이벤트로 남아 화면에서도 데이터에서도 구분된다
+        (ADR-012/018 §4, ADR-021 §1/§3). 조용한 성공 위장은 없다.
+        """
+        used = self._calls_this_tick.get(actor_id, 0)
+        if used >= self._budget_for(actor_id).calls_per_tick:
+            return False
+        self._calls_this_tick[actor_id] = used + 1
+        return True
+
+    def _budget_for(self, actor_id: str) -> CognitiveBudget:
+        """이 인물의 인지 예산 — 티어 기본 위에 오버라이드가 얹힌다."""
+        lod = self._lods.get(actor_id)
+        tier = lod.tier.value if lod is not None else Tier.WARM.value
+        return self._cognition.for_actor(actor_id, tier)
 
     async def _record_decision(
         self,
@@ -1089,6 +1152,9 @@ class ActorPhases:
                 # 샘플링 파라미터는 AI Runtime이 아직 응답에 싣지 않는다 —
                 # 스키마는 null을 허용하며, 에코가 붙는 단계에서 채워진다 (ADR-018).
                 "sampling": None,
+                # 어떤 인지 예산으로 내린 결정인지 (ADR-021 §3) — 실험 결과를
+                # 예산과 이어 읽으려면 결정마다 그 값이 함께 있어야 한다
+                "cognitive_budget": self._budget_for(actor_id).to_json(),
                 "outcome": outcome,
                 "trace_retained": retained,
             }
@@ -1097,10 +1163,15 @@ class ActorPhases:
     async def _recall(
         self, world_id: str, actor_id: str, working: list[str]
     ) -> list[Recollection]:
-        """장기 기억 회상 — 최신 지각을 질의로 유사 에피소드 top-k (ADR-008)."""
+        """장기 기억 회상 — 최신 지각을 질의로 유사 에피소드 top-k (ADR-008).
+
+        슬롯 수는 이 인물의 인지 예산이 정한다 (ADR-021 §3) — 기본값은 지금까지
+        쓰던 3이라, 오버라이드가 없으면 회상의 폭이 달라지지 않는다.
+        """
         if self._semantic is None or not working:
             return []
-        return await self._semantic.recall(world_id, actor_id, working[0], k=3)
+        slots = self._budget_for(actor_id).recall_slots
+        return await self._semantic.recall(world_id, actor_id, working[0], k=slots)
 
     async def _arc_of(self, world_id: str, actor_id: str) -> Arc | None:
         """Director가 준 인생 아크 — 없으면 None (아직 아크 없는 액터는 일상을 산다)."""
@@ -1675,10 +1746,9 @@ class ActorPhases:
         bundle = build(
             self._personas[actor_id], [f"아는 사람들: {roster}", *working],
             world, purpose="reflect",
+            memory_tokens=self._budget_for(actor_id).memory_tokens,
         )
-        res = await self._ai.reflect(
-            bundle, insight_schema(known), actor_id=actor_id, tick=ctx.tick
-        )
+        res = await self._ai_reflect(ctx, actor_id, bundle, insight_schema(known))
         output = res.value
         await self._record_decision(
             ctx, actor_id, bundle, purpose=bundle.purpose, tier="warm",

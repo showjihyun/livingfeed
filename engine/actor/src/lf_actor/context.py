@@ -199,7 +199,18 @@ def _identity_section(persona: Persona) -> str:
     return _clip(text, BUDGET_IDENTITY)
 
 
-def _episodes_section(episodes: list[Recollection]) -> Section:
+def _memory_split(memory_tokens: int) -> tuple[int, int]:
+    """기억 예산을 (회상, 작업 기억)으로 나눈다 — 현행 비율(600:1200)을 유지한다.
+
+    액터별 상한이 걸려도 두 기억의 균형은 그대로여야 한다: 한쪽만 줄이면
+    '자원이 적은 인물'이 아니라 '한쪽 기억만 없는 인물'이 되어 다른 실험이 된다.
+    """
+    total = BUDGET_EPISODES + BUDGET_WORKING
+    episodes = max(1, round(memory_tokens * BUDGET_EPISODES / total))
+    return episodes, max(1, memory_tokens - episodes)
+
+
+def _episodes_section(episodes: list[Recollection], budget: int) -> Section:
     """Episodes(4) — 장기 기억 회상 (ADR-008 recall). 비어 있으면 섹션 생략이 아니라
     고정 문구를 둔다 — 섹션 존재 자체가 프리픽스 안정성에 기여한다 (ADR-009/018).
 
@@ -208,7 +219,7 @@ def _episodes_section(episodes: list[Recollection]) -> Section:
     """
     if not episodes:
         return Section("episodes", "## 떠오르는 기억\n(지금 상황과 이어지는 오래된 기억은 없다)")
-    limit = int(BUDGET_EPISODES * CHARS_PER_TOKEN)
+    limit = int(budget * CHARS_PER_TOKEN)
     kept: list[Recollection] = []
     used = 0
     for episode in episodes:
@@ -245,9 +256,9 @@ def _conversation_section(
     return "## 이 사람과 나눈 대화 (오래된 순)\n" + "\n".join(lines)
 
 
-def _working_section(entries: list[str]) -> str:
+def _working_section(entries: list[str], budget: int) -> str:
     """최근 우선 절단 (ADR-009 규칙 2) — 예산 안에서 최신 항목부터 담는다."""
-    limit = int(BUDGET_WORKING * CHARS_PER_TOKEN)
+    limit = int(budget * CHARS_PER_TOKEN)
     kept: list[str] = []
     used = 0
     for entry in entries:  # entries는 최신 우선
@@ -383,6 +394,9 @@ def build(
     arc: Arc | None = None,
     relationships: str | None = None,
     seen_posts: list[tuple[str, str]] | None = None,
+    #: 기억 두 섹션(회상·작업)의 합산 예산 — 액터별 인지 예산이 여기로 들어온다
+    #: (ADR-021 §3). 기본은 현행 상수의 합이라 주지 않으면 동작이 같다.
+    memory_tokens: int = BUDGET_EPISODES + BUDGET_WORKING,
 ) -> Bundle:
     """ContextBundle 조립 — 섹션 순서 고정 (ADR-009 규칙 1: Relationship(3) <
     Episodes(4) < Working(5)).
@@ -403,7 +417,8 @@ def build(
         sections.append(Section("arc", arc_text))
     if (rel_text := _relationships_section(relationships)):
         sections.append(Section("relationships", rel_text))
-    sections.append(_episodes_section(episodes or []))
+    episode_budget, working_budget = _memory_split(memory_tokens)
+    sections.append(_episodes_section(episodes or [], episode_budget))
     if conversation:
         sections.append(
             Section(
@@ -411,7 +426,7 @@ def build(
                 _conversation_section(conversation, mark_last=purpose == "reply_to_player"),
             )
         )
-    sections.append(Section("working", _working_section(working)))
+    sections.append(Section("working", _working_section(working, working_budget)))
     if (posts := _seen_posts_section(seen_posts or [])) is not None:
         sections.append(posts)
     sections += [

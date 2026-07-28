@@ -81,6 +81,17 @@ def _validation_errors(output: dict, schema: dict) -> list[str]:
     ]
 
 
+def _actor_bucket(request: InferenceRequest) -> str | None:
+    """이 호출이 누구의 인지 예산에서 나가는가 (ADR-021 §3).
+
+    trace.actor_id가 원천이다. 세계 단위 결정(Director의 director_plan)엔 주체가
+    없어 None이며, 그때는 세계 예산만 집행된다 — 없는 액터에 지출을 달면
+    "이 인물이 얼마나 생각했나"가 오염된다.
+    """
+    actor_id = request.trace.get("actor_id")
+    return str(actor_id) if actor_id else None
+
+
 class AiRuntime:
     def __init__(
         self,
@@ -122,7 +133,9 @@ class AiRuntime:
         world_id = str(request.trace.get("world_id") or self._world_id)
         tier, cap = request.actor_tier, None
         if self._guard is not None:
-            decision = await self._guard.check(world_id, tier)
+            decision = await self._guard.check(
+                world_id, tier, actor_id=_actor_bucket(request)
+            )
             if not decision.allow:
                 # 상한 거절은 명시적 오류다 — 액터는 규칙 행동으로 폴백하고
                 # params.fallback으로 화면에서 구분된다 (ADR-012/018 §4)
@@ -190,5 +203,8 @@ class AiRuntime:
             request, model, repair_errors=repair_errors, max_output_tokens=cap
         )
         if self._guard is not None:
-            await self._guard.record(world_id, provider_name, model, completion.usage)
+            await self._guard.record(
+                world_id, provider_name, model, completion.usage,
+                actor_id=_actor_bucket(request),
+            )
         return completion

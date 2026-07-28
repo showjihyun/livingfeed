@@ -18,16 +18,38 @@
     "purpose": "decide_action",
     "tier": "hot",
     "sections": [
-      { "kind": "identity", "source_ids": [], "token_count": 118 },
-      { "kind": "relationships", "source_ids": [], "token_count": 47 },
+      {
+        "kind": "identity",
+        "source_ids": [],
+        "token_count": 118
+      },
+      {
+        "kind": "relationships",
+        "source_ids": [],
+        "token_count": 47
+      },
       {
         "kind": "episodes",
-        "source_ids": ["01JZK7Q3W0000000000000000G"],
+        "source_ids": [
+          "01JZK7Q3W0000000000000000G"
+        ],
         "token_count": 39
       },
-      { "kind": "working", "source_ids": [], "token_count": 62 },
-      { "kind": "world", "source_ids": [], "token_count": 31 },
-      { "kind": "task_frame", "source_ids": [], "token_count": 144 }
+      {
+        "kind": "working",
+        "source_ids": [],
+        "token_count": 62
+      },
+      {
+        "kind": "world",
+        "source_ids": [],
+        "token_count": 31
+      },
+      {
+        "kind": "task_frame",
+        "source_ids": [],
+        "token_count": 144
+      }
     ],
     "bundle_digest": "v1:sha256:3b0c2e1a7d4f95886c1f0a2b5d3e47c9a8f6021d4e7b93c5a0182f6d4b9e7c30",
     "model": "claude-sonnet-5",
@@ -36,6 +58,11 @@
       "top_p": 1.0,
       "seed": null,
       "max_output_tokens": 600
+    },
+    "cognitive_budget": {
+      "recall_slots": 3,
+      "memory_tokens": 1800,
+      "calls_per_tick": 4
     },
     "outcome": "acted",
     "trace_retained": false

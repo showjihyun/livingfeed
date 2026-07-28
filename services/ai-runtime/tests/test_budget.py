@@ -435,3 +435,82 @@ async def test_runtime_without_guard_has_no_limits():
     """가드 미주입 경로는 그대로 동작한다 (기존 배선·테스트 호환)."""
     runtime = AiRuntime(providers={"spy": SpyProvider()}, default_provider="spy")
     assert (await runtime.infer(hot_request())).ok
+
+
+# ── 액터별 인지 예산 — 세계 상한 안에서의 배분 (ADR-021 §3) ────────────────────
+
+
+def test_actor_key_contract_is_literal():
+    """액터 세그먼트 앞의 'a'가 계약이다 — 없으면 날짜 모양 액터 id가 세계 키와 겹친다."""
+    assert spend_key(ENV, WORLD, "2026-07-27", "a_mint") == (
+        f"lf:{ENV}:ai:spend:{WORLD}:a:a_mint:2026-07-27"
+    )
+    assert calls_key(ENV, WORLD, "2026-07-27", "a_mint") == (
+        f"lf:{ENV}:ai:calls:{WORLD}:a:a_mint:2026-07-27"
+    )
+    # actor_id가 없으면 지금까지의 세계 키 그대로다 (기존 카운터와 호환)
+    assert spend_key(ENV, WORLD, "2026-07-27") == f"lf:{ENV}:ai:spend:{WORLD}:2026-07-27"
+
+
+async def test_actor_budget_is_off_by_default():
+    """켜는 것이 곧 실험 설정이다 — 끄면 현행 동작과 완전히 같다."""
+    g = guard(AiLimits(daily_usd=10.0))
+    for _ in range(50):
+        await g.record(WORLD, "anthropic", "claude-sonnet-5", Usage(1_000, 1_000),
+                       actor_id="a_greedy")
+    assert (await g.check(WORLD, "hot", actor_id="a_greedy")).allow
+
+
+async def test_actor_exhaustion_rejects_while_the_world_still_has_room():
+    """한 인물이 제 몫을 다 써도 세계는 계속 돈다 — 그 인물만 규칙으로 산다."""
+    store = MemoryStore()
+    g = guard(AiLimits(daily_usd=100.0, actor_daily_usd=0.01), store=store)
+    for _ in range(5):
+        await g.record(WORLD, "anthropic", "claude-sonnet-5", Usage(10_000, 10_000),
+                       actor_id="a_spender")
+
+    spent = await g.check(WORLD, "hot", actor_id="a_spender")
+    assert not spent.allow
+    assert "a_spender" in (spent.reason or "")
+
+    # 다른 인물과 세계 전체는 멀쩡하다 — 배분이지 세계 정지가 아니다
+    assert (await g.check(WORLD, "hot", actor_id="a_thrifty")).allow
+    assert (await g.check(WORLD, "hot")).allow
+
+
+async def test_actor_call_cap_rejects_independently_of_cost():
+    """비용이 0인 로컬·규칙 프로바이더에서도 '얼마나 자주 생각했나'는 제한된다."""
+    store = MemoryStore()
+    g = guard(AiLimits(daily_usd=0.0, actor_daily_calls=3), store=store)
+    for _ in range(3):
+        await g.record(WORLD, "local", "gemma", Usage(10, 10), actor_id="a_chatty")
+
+    rejected = await g.check(WORLD, "hot", actor_id="a_chatty")
+    assert not rejected.allow
+    assert "호출 상한" in (rejected.reason or "")
+    assert (await g.check(WORLD, "hot", actor_id="a_quiet")).allow
+
+
+async def test_actor_spend_rides_along_with_the_world_counter():
+    """액터 몫은 세계 몫과 함께 오른다 — 별도 지갑이 아니라 같은 지출의 분해다."""
+    store = MemoryStore()
+    g = guard(AiLimits(actor_daily_usd=1.0), store=store)
+    cost = await g.record(WORLD, "anthropic", "claude-sonnet-5", Usage(1_000, 1_000),
+                          actor_id="a_mint")
+
+    day = "2026-07-27"
+    world_spend = float((await store.get(spend_key(ENV, WORLD, day))).decode())
+    actor_spend = float((await store.get(spend_key(ENV, WORLD, day, "a_mint"))).decode())
+    assert world_spend == pytest.approx(cost)
+    assert actor_spend == pytest.approx(cost)
+
+
+async def test_world_decisions_have_no_actor_bucket():
+    """Director의 세계 단위 결정에 액터 지출을 달면 '이 인물이 얼마나 생각했나'가 오염된다."""
+    store = MemoryStore()
+    g = guard(AiLimits(actor_daily_usd=1.0), store=store)
+    await g.record(WORLD, "anthropic", "claude-sonnet-5", Usage(1_000, 1_000))
+
+    day = "2026-07-27"
+    assert await store.get(spend_key(ENV, WORLD, day)) is not None
+    assert await store.get(spend_key(ENV, WORLD, day, "None")) is None
