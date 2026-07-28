@@ -1,4 +1,4 @@
-﻿"""ActorPhases 통합 검증 — 실제 PG+Redis(+NATS의 AI Runtime) 대상.
+"""ActorPhases 통합 검증 — 실제 PG+Redis(+NATS의 AI Runtime) 대상.
 
 아리아가 tick 파이프라인을 타고 actor.action.performed를 남기는지 확인한다.
 """
@@ -30,6 +30,15 @@ from .conftest import NATS_URL, PERSONAS_DIR
 
 WORLD = "w_test"
 CLOCK = TickClock(genesis=datetime(2026, 3, 1, tzinfo=UTC))
+
+
+def actions_of(stored: list) -> list:
+    """액터 스트림에서 확정 행동만 — 결정 기록(actor.decision.made)은 뺀다.
+
+    ADR-021 §2 이후 같은 스트림에 "무엇을 보고 그렇게 했는가"가 함께 쌓인다.
+    행동을 세는 단언이 그 기록까지 세면, 늘어난 관측이 곧 실패로 보인다.
+    """
+    return [s for s in stored if s.envelope["type"] == "actor.action.performed"]
 
 
 @pytest.fixture
@@ -81,7 +90,7 @@ async def test_aria_acts_through_full_tick(conn, redis, nc, ai_service):
     head = await run_tick(conn, phases, CLOCK, WORLD, tick=0, head=0)
     assert head == 2  # started + completed
 
-    [action] = await read_stream(conn, WORLD, "actor", "a_aria_kim")
+    [action] = actions_of(await read_stream(conn, WORLD, "actor", "a_aria_kim"))
     env = action.envelope
     assert env["type"] == "actor.action.performed"
     assert env["actor_id"] == "a_aria_kim"
@@ -94,7 +103,9 @@ async def test_aria_acts_through_full_tick(conn, redis, nc, ai_service):
     events = await read_stream(conn, WORLD, "system", "tick")
     completed = events[-1].envelope
     assert completed["payload"]["actors_decided"] == {"hot": 1, "warm": 0, "cold": 0}
-    assert completed["payload"]["events_emitted"] == 1
+    # 결정 기록 1 + 행동 1 — 결정하는 액터는 tick당 이벤트를 둘 낸다 (ADR-021 §2).
+    # 이벤트 발생률이 이만큼 늘어난다는 사실 자체가 ADR-020 예산의 입력이다.
+    assert completed["payload"]["events_emitted"] == 2
 
     # 자기 행동이 Working Memory로 유입됐다 (ADR-008)
     memory = WorkingMemory(redis)
@@ -108,7 +119,7 @@ async def test_fallback_when_ai_runtime_is_down(conn, redis, nc):
     head = await run_tick(conn, phases, CLOCK, WORLD, tick=0, head=0)
     assert head == 2
 
-    [action] = await read_stream(conn, WORLD, "actor", "a_aria_kim")
+    [action] = actions_of(await read_stream(conn, WORLD, "actor", "a_aria_kim"))
     payload = action.envelope["payload"]
     assert payload["params"].get("fallback") is True
     assert payload["decision_trace"]["tier"] == "cold_rule"
@@ -120,7 +131,7 @@ async def test_working_memory_feeds_next_tick_context(conn, redis, nc, ai_servic
     head = await run_tick(conn, phases, CLOCK, WORLD, tick=0, head=0)
     await run_tick(conn, phases, CLOCK, WORLD, tick=1, head=head)
 
-    actions = await read_stream(conn, WORLD, "actor", "a_aria_kim")
+    actions = actions_of(await read_stream(conn, WORLD, "actor", "a_aria_kim"))
     assert [a.envelope["tick"] for a in actions] == [0, 1]
 
     memory = WorkingMemory(redis)
@@ -152,7 +163,7 @@ async def test_cold_actor_uses_routine_action_without_llm(conn, redis, nc, ai_se
     due_tick = phase_offset("a_aria_kim", COLD_INTERVAL)  # 이 tick에 cold가 due
     await run_tick(conn, phases, CLOCK, WORLD, tick=due_tick, head=0)
 
-    [action] = await read_stream(conn, WORLD, "actor", "a_aria_kim")
+    [action] = actions_of(await read_stream(conn, WORLD, "actor", "a_aria_kim"))
     payload = action.envelope["payload"]
     assert payload["params"].get("fallback") is True       # 규칙 경로 (LLM 미호출)
     assert payload["params"].get("routine") is True        # 일과 행동이다

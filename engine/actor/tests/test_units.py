@@ -4,10 +4,17 @@ from datetime import UTC, datetime
 
 from jsonschema import Draft202012Validator
 from lf_actor.arc import Arc
-from lf_actor.context import WorldContext, build
+from lf_actor.context import (
+    ASSEMBLER_VERSION,
+    DigestVerdict,
+    WorldContext,
+    build,
+    verify_digest,
+)
 from lf_actor.persona import load_persona, load_personas
 from lf_actor.phases import lod_after_perception, sanitize_target
 from lf_actor.rules import fallback_action, routine_action
+from lf_actor.semantic import Recollection
 from lf_schemas import registry
 from lf_tick.lod import ActorLod, Tier
 
@@ -115,7 +122,7 @@ def test_context_seen_posts_section_sits_between_working_and_world():
     aria = load_persona(PERSONAS_DIR / "aria-kim.yaml")
     bundle = build(
         aria, ["tick 6: 나는 work — 취재"], WORLD, trace_id="t",
-        seen_posts=['[01ABC] 박준호: "새 시작" — 오늘부터 다시 쓴다'],
+        seen_posts=[("01ABC", '[01ABC] 박준호: "새 시작" — 오늘부터 다시 쓴다')],
     )
     assert (
         bundle.user.index("## 작업 기억")
@@ -264,3 +271,71 @@ def test_lod_soft_signal_touches_without_promoting():
         [_envelope("player.reaction.added")], 42,
     )
     assert cold.tier is Tier.COLD and cold.last_interest_tick == 42
+
+
+# --- 결정 기록의 뿌리: 섹션 구조와 재조립 지문 (ADR-021 §2/§4 L1) -----------------
+
+
+def _persona():
+    return load_persona(PERSONAS_DIR / "aria-kim.yaml")
+
+
+def test_bundle_sections_fold_into_system_and_user():
+    """system/user는 sections에서 파생된다 — 둘이 갈리면 재조립 대조가 무의미해진다."""
+    bundle = build(_persona(), ["tick 6: 나는 work"], WORLD, trace_id="t")
+    identity, *rest = bundle.sections
+    assert identity.kind == "identity"
+    assert bundle.system == identity.text
+    assert bundle.user == "\n\n".join(s.text for s in rest)
+
+
+def test_episodes_section_carries_the_ids_that_entered_the_prompt():
+    """회상은 본문과 출처를 함께 싣는다 — '어떤 기억이 이 결정에 들어갔나'의 답."""
+    bundle = build(
+        _persona(), ["tick 6: 나는 work"], WORLD, trace_id="t",
+        episodes=[
+            Recollection("01JZK7Q3W0000000000000000G", "그가 지지해줬다"),
+            Recollection("01JZK7Q3W0000000000000000H", "그와 다퉜다"),
+        ],
+    )
+    [episodes] = [s for s in bundle.sections if s.kind == "episodes"]
+    assert episodes.source_ids == (
+        "01JZK7Q3W0000000000000000G",
+        "01JZK7Q3W0000000000000000H",
+    )
+
+
+def test_episodes_clipped_by_budget_are_not_claimed_as_sources():
+    """예산에 잘려 프롬프트에 못 들어간 회상은 근거가 아니다 (ADR-021 §2)."""
+    huge = [
+        Recollection(f"01JZK7Q3W000000000000000{i:02X}", f"기억{i} " + "긴 " * 400)
+        for i in range(5)
+    ]
+    bundle = build(_persona(), [], WORLD, trace_id="t", episodes=huge)
+    [episodes] = [s for s in bundle.sections if s.kind == "episodes"]
+
+    # 예산이 일부만 통과시킨다 — 통과분과 근거가 정확히 같은 집합이어야 한다
+    assert 0 < len(episodes.source_ids) < len(huge)
+    kept = huge[: len(episodes.source_ids)]
+    assert episodes.source_ids == tuple(r.event_id for r in kept)
+    assert all(f"기억{i} " in episodes.text for i, _ in enumerate(kept))
+    dropped = huge[len(episodes.source_ids) :]
+    assert all(f"기억{i} " not in episodes.text for i, _ in enumerate(dropped, len(kept)))
+
+
+def test_digest_ignores_trace_id_but_follows_input():
+    """조립이 순수 함수라 같은 입력은 같은 지문 — trace_id는 호출마다 다르니 제외된다."""
+    persona = _persona()
+    a = build(persona, ["tick 6: 나는 work"], WORLD, trace_id="t1")
+    b = build(persona, ["tick 6: 나는 work"], WORLD, trace_id="t2")
+    c = build(persona, ["tick 7: 나는 rest"], WORLD, trace_id="t1")
+    assert verify_digest(a.digest, b.digest) is DigestVerdict.MATCH
+    assert verify_digest(a.digest, c.digest) is DigestVerdict.MISMATCH
+
+
+def test_digest_across_assembler_versions_is_unverifiable_not_failed():
+    """조립기가 바뀌면 '검증 불가'다 — '검증 실패'로 뭉개면 없는 사고를 보고한다."""
+    bundle = build(_persona(), [], WORLD, trace_id="t")
+    assert bundle.digest.startswith(f"{ASSEMBLER_VERSION}:")
+    older = bundle.digest.replace(f"{ASSEMBLER_VERSION}:", "v0:", 1)
+    assert verify_digest(older, bundle.digest) is DigestVerdict.UNVERIFIABLE

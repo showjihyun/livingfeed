@@ -1,6 +1,7 @@
 """codegen 산출물 — 수동 편집 금지 (scripts/generate.py 로 재생성)."""
 from lf_schemas.generated import actor_action_performed as actor_action_performed
 from lf_schemas.generated import actor_belief_formed as actor_belief_formed
+from lf_schemas.generated import actor_decision_made as actor_decision_made
 from lf_schemas.generated import actor_emotion_shifted as actor_emotion_shifted
 from lf_schemas.generated import actor_goal_achieved as actor_goal_achieved
 from lf_schemas.generated import actor_goal_advanced as actor_goal_advanced

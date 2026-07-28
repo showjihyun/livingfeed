@@ -78,12 +78,15 @@ async def test_player_dm_gets_reply_through_tick(conn, redis, nc, ai_service):  
 
     events = [s.envelope for s in await read_stream(conn, WORLD, "actor", "a_aria_kim")]
     types = [e["type"] for e in events]
-    # 응답이 행동보다 앞선다 (상호작용 우선, ADR-012 규칙 2) — 응고가 tick을 닫는다
+    # 응답이 행동보다 앞선다 (상호작용 우선, ADR-012 규칙 2) — 응고가 tick을 닫는다.
+    # 앞의 결정 기록 둘은 답장과 행동의 입력이다 (DECIDE(3) → RESOLVE(4), ADR-021 §2)
     assert types == [
+        "actor.decision.made", "actor.decision.made",
         "actor.message.sent", "actor.action.performed", "actor.memory.consolidated",
     ]
 
-    reply = events[0]
+    # 위치가 아니라 타입으로 집는다 — 결정 기록이 앞에 붙어도 계약은 그대로다
+    [reply] = [e for e in events if e["type"] == "actor.message.sent"]
     assert reply["causation_id"] == dm["event_id"]
     assert reply["correlation_id"] == dm["correlation_id"]
     assert reply["payload"]["channel"] == "dm"
@@ -165,9 +168,10 @@ async def test_reaction_is_perceived_but_not_replied(conn, redis, nc, ai_service
     await run_tick(conn, phases, CLOCK, WORLD, tick=0, head=0)
 
     events = [s.envelope for s in await read_stream(conn, WORLD, "actor", "a_aria_kim")]
-    # 응답 의무는 없지만 지각은 기억으로 응고된다 (ADR-008)
+    # 응답 의무는 없지만 지각은 기억으로 응고된다 (ADR-008).
+    # 답할 의무가 없으니 결정도 하나뿐이다 — 행동의 결정 (ADR-021 §2)
     assert [e["type"] for e in events] == [
-        "actor.action.performed", "actor.memory.consolidated",
+        "actor.decision.made", "actor.action.performed", "actor.memory.consolidated",
     ]
 
     recent = await WorkingMemory(redis).recent(WORLD, "a_aria_kim")

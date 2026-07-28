@@ -5,6 +5,7 @@
  */
 export type { EventEnvelope, Provenance } from "./generated/envelope.schema";
 export type { ActorActionPerformed } from "./generated/actor.action.performed.schema";
+export type { ActorDecisionMade } from "./generated/actor.decision.made.schema";
 export type { ActorEmotionShifted } from "./generated/actor.emotion.shifted.schema";
 export type { ActorMessageSent } from "./generated/actor.message.sent.schema";
 export type { FeedPostPublished } from "./generated/feed.post.published.schema";

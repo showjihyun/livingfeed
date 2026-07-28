@@ -15,12 +15,26 @@ import logging
 import math
 import time
 import uuid
+from dataclasses import dataclass
 
 import httpx
 
 logger = logging.getLogger("lf.actor.semantic")
 
 EMBED_DIM = 256
+
+
+@dataclass(frozen=True)
+class Recollection:
+    """회상된 기억 한 조각 — 본문과 그 출처.
+
+    본문만 돌려주면 프롬프트는 만들 수 있어도 "어떤 기억이 이 결정에
+    들어갔나"를 사후에 답할 수 없다 (ADR-021 §2 sections[].source_ids).
+    Qdrant payload에 event_id가 이미 실려 있어 추가 조회 없이 따라온다.
+    """
+
+    event_id: str
+    text: str
 
 #: 망각 곡선 — 중요도 0이면 1일, 1이면 30일 (실시간 기준, Phase 1 단순화)
 DECAY_MIN_S = 86_400
@@ -135,7 +149,7 @@ class SemanticMemory:
         k: int = 3,
         min_importance: float = RECALL_MIN_IMPORTANCE,
         now_s: float | None = None,
-    ) -> list[str]:
+    ) -> list[Recollection]:
         """자기 기억만, 만료 전 것만, 유사한 것부터 (ADR-008 규칙 3/5)."""
         now_s = now_s if now_s is not None else time.time()
         try:
@@ -156,7 +170,14 @@ class SemanticMemory:
                 },
             )
             r.raise_for_status()
-            return [hit["payload"]["text"] for hit in r.json()["result"]]
+            return [
+                Recollection(
+                    # 구 포인트엔 event_id가 없을 수 있다 — 본문은 살리고 출처만 빈다
+                    event_id=hit["payload"].get("event_id", ""),
+                    text=hit["payload"]["text"],
+                )
+                for hit in r.json()["result"]
+            ]
         except Exception as e:
             logger.warning("회상 실패(빈 회상으로 우회): %s", e)
             return []

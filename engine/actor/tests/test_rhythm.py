@@ -8,6 +8,7 @@
 import copy
 from datetime import UTC, date, datetime, timedelta
 
+from lf_actor.client import Inference
 from lf_actor.memory import WorkingMemory
 from lf_actor.persona import Persona, load_persona
 from lf_actor.phases import ActorPhases
@@ -20,6 +21,15 @@ from lf_tick.lod import ActorLod, Tier, is_due
 #: 세계 하루 = 360 tick (1 tick = 세계 240초, ADR-011 시간 모델)
 TICKS_PER_DAY = 360
 WORLD_SECONDS_PER_TICK = 240
+
+
+def actions_of(stored: list) -> list:
+    """액터 스트림에서 확정 행동만 — 결정 기록(actor.decision.made)은 뺀다.
+
+    ADR-021 §2 이후 같은 스트림에 "무엇을 보고 그렇게 했는가"가 함께 쌓인다.
+    행동을 세는 단언이 그 기록까지 세면, 늘어난 관측이 곧 실패로 보인다.
+    """
+    return [s for s in stored if s.envelope["type"] == "actor.action.performed"]
 
 
 def day_moments(actor_id: str, lifestyle: str, day: datetime, params) -> list[int]:
@@ -193,21 +203,23 @@ class _PostingStubAi:
     async def decide_action(self, bundle, schema, *, tier, actor_id, tick):
         self.bundles.append(bundle.user)
         if self._fail:
-            return None
-        return {
-            "action_kind": "share",
-            "intent": "오늘 있었던 일을 짧은 근황으로 남긴다",
-            "target_actor_id": "a_probe_ghost",  # 환각 대상 — sanitize가 끊어야 한다
-            "location_id": None,
-            "params": {},
-            "decision_trace": {"trace_id": f"stub-{actor_id}-{tick}", "tier": tier},
-        }
+            return Inference(None)
+        return Inference(
+    {
+                "action_kind": "share",
+                "intent": "오늘 있었던 일을 짧은 근황으로 남긴다",
+                "target_actor_id": "a_probe_ghost",  # 환각 대상 — sanitize가 끊어야 한다
+                "location_id": None,
+                "params": {},
+                "decision_trace": {"trace_id": f"stub-{actor_id}-{tick}", "tier": tier},
+            }
+        )
 
     async def converse(self, *args, **kwargs):
-        return None
+        return Inference(None)
 
     async def reflect(self, *args, **kwargs):
-        return None
+        return Inference(None)
 
 
 async def test_rhythm_moment_runs_llm_decide_for_non_due_actor(conn, redis):
@@ -221,7 +233,7 @@ async def test_rhythm_moment_runs_llm_decide_for_non_due_actor(conn, redis):
 
     await run_tick(conn, phases, CLOCK, WORLD, tick=tick, head=0)
 
-    [action] = await read_stream(conn, WORLD, "actor", POSTER)
+    [action] = actions_of(await read_stream(conn, WORLD, "actor", POSTER))
     payload = action.envelope["payload"]
     assert payload["action_kind"] == "share"
     assert payload["target_actor_id"] is None  # 환각 대상은 소스에서 끊겼다
@@ -248,7 +260,11 @@ async def test_rhythm_moment_skips_silently_on_ai_failure(conn, redis):
 
     assert ai.bundles  # LLM decide는 시도됐다
     assert head == 2  # started + completed 뿐 — 행동이 남지 않았다
-    assert await read_stream(conn, WORLD, "actor", POSTER) == []
+    # 행동은 없지만 시도는 남는다 — 머뭇거림도 기록되어야 "왜 조용했나"에 답한다
+    stored = await read_stream(conn, WORLD, "actor", POSTER)
+    assert actions_of(stored) == []
+    [decision] = [s for s in stored if s.envelope["type"] == "actor.decision.made"]
+    assert decision.envelope["payload"]["outcome"] == "hesitated"
     events = await read_stream(conn, WORLD, "system", "tick")
     decided = events[-1].envelope["payload"]["actors_decided"]
     assert decided == {"hot": 0, "warm": 0, "cold": 0}
@@ -270,7 +286,7 @@ async def test_due_actor_does_not_double_act_on_moment_tick(conn, redis):
 
     await run_tick(conn, phases, CLOCK, WORLD, tick=tick, head=0)
 
-    actions = await read_stream(conn, WORLD, "actor", POSTER)
+    actions = actions_of(await read_stream(conn, WORLD, "actor", POSTER))
     assert len(actions) == 1  # due 결정 하나뿐 — 리듬 중복 없음
     events = await read_stream(conn, WORLD, "system", "tick")
     decided = events[-1].envelope["payload"]["actors_decided"]

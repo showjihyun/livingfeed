@@ -44,9 +44,12 @@ async def test_dm_shifts_emotion_and_appends_event(conn, redis, nc, ai_service):
 
     events = [s.envelope for s in await read_stream(conn, WORLD, "actor", "a_aria_kim")]
     types = [e["type"] for e in events]
-    # 감정 변화(원인 상태)가 응답·행동보다 앞서고, 기억 응고가 tick을 닫는다
+    # 감정 변화(원인 상태)가 응답·행동보다 앞서고, 기억 응고가 tick을 닫는다.
+    # 결정 기록은 그 산출(답장·행동) 앞에 놓인다 (ADR-021 §2)
     assert types == [
-        "actor.emotion.shifted", "actor.message.sent",
+        "actor.emotion.shifted",
+        "actor.decision.made", "actor.decision.made",
+        "actor.message.sent",
         "actor.action.performed", "actor.memory.consolidated",
     ]
 

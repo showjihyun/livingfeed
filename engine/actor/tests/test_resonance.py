@@ -13,6 +13,7 @@ PG+Redis 필요 (conftest 게이트).
 
 from datetime import UTC, datetime
 
+from lf_actor.client import Inference
 from lf_actor.emotion import PendingShift
 from lf_actor.mailbox import Mailbox
 from lf_actor.memory import WorkingMemory
@@ -83,13 +84,13 @@ class _SilentAi:
     """LLM 없는 세계 — 규칙 폴백만 돈다 (dev 결정성)."""
 
     async def decide_action(self, bundle, schema, *, tier, actor_id, tick):
-        return None
+        return Inference(None)
 
     async def converse(self, bundle, *, tier, actor_id, tick):
-        return None
+        return Inference(None)
 
     async def reflect(self, *args, **kwargs):
-        return None
+        return Inference(None)
 
 
 class _DecideAi(_SilentAi):
@@ -100,15 +101,17 @@ class _DecideAi(_SilentAi):
 
     async def decide_action(self, bundle, schema, *, tier, actor_id, tick):
         self.decide_bundles.append(bundle.user)
-        return {
-            "action_kind": "speak",
-            "intent": "그 대화 이후로 생각이 조금 바뀌었다 — 오늘은 그 이야기를 쓴다",
-            "headline": "마음에 남은 대화에 대하여",
-            "target_actor_id": None,
-            "location_id": None,
-            "params": {},
-            "decision_trace": {"trace_id": f"stub-{actor_id}-{tick}", "tier": tier},
-        }
+        return Inference(
+    {
+                "action_kind": "speak",
+                "intent": "그 대화 이후로 생각이 조금 바뀌었다 — 오늘은 그 이야기를 쓴다",
+                "headline": "마음에 남은 대화에 대하여",
+                "target_actor_id": None,
+                "location_id": None,
+                "params": {},
+                "decision_trace": {"trace_id": f"stub-{actor_id}-{tick}", "tier": tier},
+            }
+        )
 
 
 class _EmotionStub:

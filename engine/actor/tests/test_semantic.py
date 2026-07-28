@@ -54,8 +54,10 @@ async def test_remember_and_recall_roundtrip():
         )
 
         recalled = await memory.recall(world, "a_aria_kim", "기획안 지지 DM")
-        assert any("지지해줬다" in text for text in recalled)
-        assert all("남의 기억" not in text for text in recalled)  # 자기 기억만 (ADR-008 규칙 5)
+        assert any("지지해줬다" in r.text for r in recalled)
+        assert all("남의 기억" not in r.text for r in recalled)  # 자기 기억만 (ADR-008 규칙 5)
+        # 회상은 본문과 함께 출처를 실어 온다 — 결정 기록의 근거가 된다 (ADR-021 §2)
+        assert all(r.event_id for r in recalled)
 
         # 중요도 하한 — 임계보다 낮은 기억은 회상되지 않는다
         assert await memory.recall(world, "a_aria_kim", "기획안", min_importance=0.9) == []
@@ -80,7 +82,7 @@ async def test_retracted_belief_falls_below_recall_floor():
             source_event_ids=[], point_key=key,
         )
         recalled = await memory.recall(world, "a_aria_kim", "힘이 되는 사람")
-        assert any("힘이 되는" in text for text in recalled)  # 확립된 신념은 떠오른다
+        assert any("힘이 되는" in r.text for r in recalled)  # 확립된 신념은 떠오른다
 
         # 철회 — 같은 자리를 잔불 확신으로 덮어쓴다 (reflection retract_stale 계약)
         await memory.remember(

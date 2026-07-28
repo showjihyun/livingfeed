@@ -5,7 +5,7 @@
 
 from datetime import UTC, datetime
 
-from lf_actor.client import AiRuntimeClient
+from lf_actor.client import AiRuntimeClient, Inference
 from lf_actor.emotion import EmotionAdapter
 from lf_actor.mailbox import Mailbox
 from lf_actor.memory import WorkingMemory
@@ -156,14 +156,14 @@ class _StubReflectAi:
         self.last_user: str | None = None
 
     async def decide_action(self, *args, **kwargs):
-        return None
+        return Inference(None)
 
     async def converse(self, *args, **kwargs):
-        return None
+        return Inference(None)
 
     async def reflect(self, bundle, schema, *, actor_id, tick):
         self.last_user = bundle.user
-        return self._insight
+        return Inference(self._insight)
 
 
 async def test_llm_insight_joins_rule_beliefs(conn, redis):

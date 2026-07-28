@@ -10,13 +10,22 @@ Task Frame(7). Beliefs(2)는 해당 계층 도입 시 채워진다.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 
 from lf_eventstore import new_ulid
 
 from lf_actor.arc import Arc
 from lf_actor.persona import Persona
+from lf_actor.semantic import Recollection
+
+#: 조립기 버전 — 섹션 구성·순서·문구를 바꾸면 **반드시 올린다** (ADR-021 §2).
+#: 이 값이 bundle_digest의 접두라, 올리지 않고 조립을 바꾸면 과거 결정의 재조립이
+#: '검증 불가'가 아니라 '검증 실패'로 보고된다 — 없는 사고를 만드는 쪽이 더 나쁘다.
+ASSEMBLER_VERSION = "v1"
 
 #: 문자 기반 토큰 근사 — 예산 집행용 보수적 환산 (한글 혼용 기준 1 token ≈ 2.5 chars)
 CHARS_PER_TOKEN = 2.5
@@ -75,15 +84,97 @@ class WorldContext:
 
 
 @dataclass(frozen=True)
+class Section:
+    """번들의 한 섹션 — 문자열로 접히기 **전**의 모습 (ADR-021 §2).
+
+    kind는 ADR-009의 고정 섹션 순서에서 온 이름이고, source_ids는 이 섹션에
+    실제로 들어간 사건들이다. 조립 결과(system/user 문자열)만 남기면 "어떤
+    기억이 이 결정에 들어갔나"를 사후에 뽑을 방법이 없다 — 결정 기록이
+    참조하는 것이 이 구조다.
+
+    source_ids가 비는 섹션이 있다: 작업 기억·대화는 Redis의 평문 줄이라 사건
+    id가 없다. 그때는 비운다 — 없는 근거를 지어내지 않는 것이 계약이다.
+    """
+
+    kind: str
+    text: str
+    source_ids: tuple[str, ...] = ()
+
+    @property
+    def token_count(self) -> int:
+        """예산 집행과 같은 자를 쓴다 (CHARS_PER_TOKEN) — 기록이 다른 자를 쓰면 대조가 안 된다."""
+        return round(len(self.text) / CHARS_PER_TOKEN)
+
+
+@dataclass(frozen=True)
 class Bundle:
     """AI Runtime으로 넘어가는 조립 결과 (ADR-009 ContextBundle).
 
     system = 정적 프리픽스(Identity), user = 변동 섹션들.
+    sections는 그 둘로 접히기 전의 원본이다 — system/user가 sections에서
+    파생되므로 둘이 갈릴 수 없다 (build가 유일한 생성 지점).
     """
 
     system: str
     user: str
     trace_id: str
+    #: 무엇을 결정하려 조립했는가 (Task Frame 이름) — 결정 기록의 실험 단위다
+    purpose: str = "decide_action"
+    sections: tuple[Section, ...] = ()
+
+    @property
+    def digest(self) -> str:
+        """번들의 결정적 지문 — L1 재조립 검증의 근거다 (ADR-021 §2/§4).
+
+        조립이 순수 함수(같은 입력 → 같은 번들)라는 성질을 이용한다: 리플레이
+        때 같은 입력으로 다시 조립해 이 값이 일치하면 "그때 이 인물이 무엇을
+        알고 있었는지"가 증명된다. **LLM 출력이 재현 불가능해도 입력은 재현
+        가능하다** — 이것이 연구용 관측성의 핵심 자산이다.
+
+        조립기 버전을 접두로 넣는다: 조립 로직이 바뀌면 과거 digest는 전부
+        불일치하는데, 그것을 '검증 실패'로 읽으면 없는 사고를 보고하게 된다.
+        버전이 다르면 대조하지 않고 '검증 불가'로 가른다 (verify_digest).
+
+        trace_id는 넣지 않는다 — 호출마다 다르니 넣으면 지문이 매번 달라져
+        재조립 대조라는 목적 자체가 사라진다.
+        """
+        payload = json.dumps(
+            [[s.kind, s.text, list(s.source_ids)] for s in self.sections],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return f"{ASSEMBLER_VERSION}:sha256:{hashlib.sha256(payload.encode()).hexdigest()}"
+
+
+class DigestVerdict(StrEnum):
+    """재조립 대조의 결과 — 세 값이며, 뒤 둘은 결코 같은 것이 아니다 (ADR-021 §2).
+
+    MATCH        결정 시점의 컨텍스트가 그대로 재현됐다 (L1 보증 성립).
+    MISMATCH     같은 조립기인데 결과가 다르다 — 실제 사고다. 입력이 달라졌거나
+                 조립이 순수하지 않다는 뜻이라 조사 대상이다.
+    UNVERIFIABLE 조립기 버전이 달라 대조 자체가 무의미하다. 실패가 아니라
+                 '알 수 없음'이며, 이것을 실패로 뭉개면 리포트가 거짓말을 한다.
+    """
+
+    MATCH = "match"
+    MISMATCH = "mismatch"
+    UNVERIFIABLE = "unverifiable"
+
+
+def verify_digest(recorded: str, rebuilt: str) -> DigestVerdict:
+    """기록된 digest와 재조립 digest를 대조한다 (ADR-021 §4 L1).
+
+    버전이 다르면 해시를 비교하지 않는다 — 다른 조립기의 산출물은 달라서
+    정상이고, 그 불일치를 보고하면 조립기를 고칠 때마다 과거 전체가
+    '어긋남'으로 보인다.
+    """
+    if _digest_version(recorded) != _digest_version(rebuilt):
+        return DigestVerdict.UNVERIFIABLE
+    return DigestVerdict.MATCH if recorded == rebuilt else DigestVerdict.MISMATCH
+
+
+def _digest_version(digest: str) -> str:
+    return digest.split(":", 1)[0] if ":" in digest else ""
 
 
 def _clip(text: str, token_budget: int) -> str:
@@ -108,20 +199,28 @@ def _identity_section(persona: Persona) -> str:
     return _clip(text, BUDGET_IDENTITY)
 
 
-def _episodes_section(episodes: list[str]) -> str:
+def _episodes_section(episodes: list[Recollection]) -> Section:
     """Episodes(4) — 장기 기억 회상 (ADR-008 recall). 비어 있으면 섹션 생략이 아니라
-    고정 문구를 둔다 — 섹션 존재 자체가 프리픽스 안정성에 기여한다 (ADR-009/018)."""
+    고정 문구를 둔다 — 섹션 존재 자체가 프리픽스 안정성에 기여한다 (ADR-009/018).
+
+    **예산에 잘려 나간 회상은 source_ids에도 없다** — 프롬프트에 실제로 들어간
+    것만 근거다. 자른 뒤에 담는 이 순서가 그 계약이다 (ADR-021 §2).
+    """
     if not episodes:
-        return "## 떠오르는 기억\n(지금 상황과 이어지는 오래된 기억은 없다)"
+        return Section("episodes", "## 떠오르는 기억\n(지금 상황과 이어지는 오래된 기억은 없다)")
     limit = int(BUDGET_EPISODES * CHARS_PER_TOKEN)
-    kept: list[str] = []
+    kept: list[Recollection] = []
     used = 0
     for episode in episodes:
-        if used + len(episode) > limit:
+        if used + len(episode.text) > limit:
             break
         kept.append(episode)
-        used += len(episode) + 1
-    return "## 떠오르는 기억 (관련 회상)\n" + "\n".join(f"- {e}" for e in kept)
+        used += len(episode.text) + 1
+    return Section(
+        "episodes",
+        "## 떠오르는 기억 (관련 회상)\n" + "\n".join(f"- {e.text}" for e in kept),
+        tuple(e.event_id for e in kept if e.event_id),
+    )
 
 
 def _conversation_section(
@@ -161,21 +260,22 @@ def _working_section(entries: list[str]) -> str:
     return "## 작업 기억 (최신 우선)\n" + "\n".join(f"- {e}" for e in kept)
 
 
-def _seen_posts_section(posts: list[str]) -> str:
+def _seen_posts_section(posts: list[tuple[str, str]]) -> Section | None:
     """방금 피드에서 본 이웃의 글 (액터 소셜 루프) — 자발 댓글 결정의 재료.
 
+    (post_event_id, 표시줄) 쌍을 받는다 — 본 글은 그 자체로 사건이라 출처가 있다.
     비어 있으면 섹션 생략 (아크·관계와 같은 규약 — 없는 것은 소음이다).
     댓글은 의무가 아니다 — 마음이 움직였을 때만, 그 결이 지침의 전부다.
     """
     if not posts:
-        return ""
+        return None
     text = (
         "## 방금 피드에서 본 글\n"
-        + "\n".join(f"- {p}" for p in posts)
+        + "\n".join(f"- {line}" for _, line in posts)
         + "\n마음이 움직이면 comment 필드로 짧은 답글을 남겨도 좋다 — 의무가 아니다."
         "\n지금 감정을 숨기지 마라 — 반가우면 반갑게, 심드렁하면 남기지 않는 것도 답이다."
     )
-    return _clip(text, BUDGET_SEEN_POSTS)
+    return Section("seen_posts", _clip(text, BUDGET_SEEN_POSTS), tuple(pid for pid, _ in posts))
 
 
 def _world_section(world: WorldContext) -> str:
@@ -278,11 +378,11 @@ def build(
     *,
     purpose: str = "decide_action",
     trace_id: str | None = None,
-    episodes: list[str] | None = None,
+    episodes: list[Recollection] | None = None,
     conversation: list[tuple[str, str]] | None = None,
     arc: Arc | None = None,
     relationships: str | None = None,
-    seen_posts: list[str] | None = None,
+    seen_posts: list[tuple[str, str]] | None = None,
 ) -> Bundle:
     """ContextBundle 조립 — 섹션 순서 고정 (ADR-009 규칙 1: Relationship(3) <
     Episodes(4) < Working(5)).
@@ -297,25 +397,32 @@ def build(
     frame = _TASK_FRAMES.get(purpose)
     if frame is None:
         raise ValueError(f"알 수 없는 purpose: {purpose}")
-    sections: list[str] = []
+    identity = Section("identity", _identity_section(persona))
+    sections: list[Section] = []
     if (arc_text := _arc_section(arc)):
-        sections.append(arc_text)
+        sections.append(Section("arc", arc_text))
     if (rel_text := _relationships_section(relationships)):
-        sections.append(rel_text)
+        sections.append(Section("relationships", rel_text))
     sections.append(_episodes_section(episodes or []))
     if conversation:
         sections.append(
-            _conversation_section(conversation, mark_last=purpose == "reply_to_player")
+            Section(
+                "conversation",
+                _conversation_section(conversation, mark_last=purpose == "reply_to_player"),
+            )
         )
-    sections.append(_working_section(working))
-    if (posts_text := _seen_posts_section(seen_posts or [])):
-        sections.append(posts_text)
+    sections.append(Section("working", _working_section(working)))
+    if (posts := _seen_posts_section(seen_posts or [])) is not None:
+        sections.append(posts)
     sections += [
-        _world_section(world),
-        _clip(frame, BUDGET_TASK_FRAME),
+        Section("world", _world_section(world)),
+        Section("task_frame", _clip(frame, BUDGET_TASK_FRAME)),
     ]
     return Bundle(
-        system=_identity_section(persona),
-        user="\n\n".join(sections),
+        purpose=purpose,
+        system=identity.text,
+        user="\n\n".join(s.text for s in sections),
         trace_id=trace_id or new_ulid(),
+        # identity가 맨 앞이다 — 기록된 순서가 곧 프롬프트 순서여야 재조립이 성립한다
+        sections=(identity, *sections),
     )
