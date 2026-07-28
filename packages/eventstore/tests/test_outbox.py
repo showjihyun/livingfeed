@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from lf_eventstore import (
     NewEvent,
+    Provenance,
     append,
     fetch_unpublished,
     mark_published,
@@ -29,6 +30,7 @@ def tick_event(n: int) -> NewEvent:
         type="system.tick.completed",
         tick=n,
         payload={**TICK_PAYLOAD, "tick": n},
+        provenance=Provenance.derived("tick.pipeline:completed"),
     )
 
 

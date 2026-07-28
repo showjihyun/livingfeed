@@ -9,6 +9,10 @@
   "occurred_at": "2026-07-11T10:45:00Z",
   "causation_id": "01JZK7Q3W0000000000000000Q",
   "correlation_id": "01JZK7Q3W0000000000000000T",
+  "provenance": {
+    "kind": "derived",
+    "rule_id": "director.rules:spotlighted"
+  },
   "payload": {
     "target_actor_id": "a_seongho_park"
   }

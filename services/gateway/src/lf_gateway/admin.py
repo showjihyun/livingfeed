@@ -39,7 +39,7 @@ from typing import Annotated, Any, Literal
 
 import yaml
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from lf_eventstore import ConcurrencyConflict, NewEvent, append, current_head
+from lf_eventstore import ConcurrencyConflict, NewEvent, Provenance, append, current_head
 from psycopg import AsyncConnection
 from pydantic import BaseModel, Field, field_validator
 from ruamel.yaml import YAML
@@ -369,6 +369,8 @@ def build_retired_event(
         # 스튜디오 개입은 tick 밖의 사건이다 — player.* 와 같은 tick 0 규약 (session.py)
         tick=0,
         actor_id=actor_id,
+        # 은퇴는 사람의 결정이다 — 세계가 스스로 내린 결론이 아니다 (ADR-021 §1)
+        provenance=Provenance.authored(retired_by),
         payload={"actor_id": actor_id, "name": name, "retired_by": retired_by},
     )
 
@@ -384,6 +386,7 @@ def build_returned_event(
         type=RETURNED_TYPE,
         tick=0,  # 스튜디오 개입은 tick 밖의 사건 — 은퇴와 같은 규약
         actor_id=actor_id,
+        provenance=Provenance.authored(returned_by),
         payload={"actor_id": actor_id, "name": name, "returned_by": returned_by},
     )
 

@@ -4,7 +4,7 @@ pg: 원천 적재→프로젝션→무결, 이벤트 하나 빼먹은 시나리�
 redis: fold_followers 순수(관계 stand-in ∪ 명시 선언 − 철회) + 인덱스 대비.
 """
 
-from lf_eventstore import NewEvent, append
+from lf_eventstore import NewEvent, Provenance, append
 from lf_eventstore.migrate import migrate
 from lf_projector.pg_read import ReadStore
 from lf_projector.pg_verify import verify_pg
@@ -49,6 +49,7 @@ async def test_verify_pg_detects_missing_projection(pg):
                 world_id=WORLD, stream=stream, stream_key=key, type=name,
                 tick=envelope["tick"], actor_id=envelope["actor_id"],
                 payload=envelope["payload"],
+                provenance=Provenance.from_json(envelope["provenance"]),
             )],
             expected_head=0 if name == "actor.identity.declared" else 1,
         )
@@ -67,6 +68,7 @@ async def test_verify_pg_detects_missing_projection(pg):
         [NewEvent(
             world_id=WORLD, stream="system", stream_key="arc",
             type="system.director.arc_planned", tick=arc["tick"], payload=arc["payload"],
+            provenance=Provenance.from_json(arc["provenance"]),
         )],
         expected_head=0,
     )
@@ -88,6 +90,7 @@ async def test_verify_timeline_detects_index_drift(pg, redis):
         [NewEvent(
             world_id=WORLD, stream="player", stream_key=follow["payload"]["player_id"],
             type="player.follow.changed", tick=follow["tick"], payload=follow["payload"],
+            provenance=Provenance.from_json(follow["provenance"]),
         )],
         expected_head=0,
     )

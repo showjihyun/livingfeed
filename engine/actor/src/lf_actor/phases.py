@@ -15,7 +15,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from lf_eventstore import NewEvent, append, current_head
+from lf_eventstore import NewEvent, Provenance, append, current_head
 from lf_relationship import STAGE_ACTION_KINDS
 from lf_schemas import registry
 from lf_tick.lod import (
@@ -158,6 +158,32 @@ def lod_after_perception(
     return touch(lod, tick)
 
 
+def _action_provenance(payload: dict[str, Any]) -> Provenance:
+    """확정 행동의 출처 — decision_trace가 이미 두 경로를 갈라 놓았다 (ADR-012).
+
+    cold_rule은 Cold 티어의 통계 행동이거나 LLM 실패 폴백이라 결정적 규칙 파생이고,
+    나머지는 LLM이 이 인물답게 지어낸 의도다. tier가 cold_rule이 아닌데 trace_id가
+    없으면 ValueError로 터진다 — 생성물을 규칙으로 잘못 부르느니 시끄럽게 실패한다
+    (payload 스키마도 decision_trace.trace_id를 필수로 요구하므로 정상 경로엔 없다).
+    """
+    trace = payload.get("decision_trace") or {}
+    if trace.get("tier") == "cold_rule":
+        return Provenance.derived("actor.rules:fallback_action")
+    return Provenance.generated(trace.get("trace_id") or "")
+
+
+def _episode_provenance(episode: Episode) -> Provenance:
+    """응고된 기억의 출처 — 근거 사건이 있으면 인출이다 (ADR-021 §1).
+
+    답장만으로 만들어진 tick은 근거가 비어 있다(build_episode는 replies를
+    source_ids에 넣지 않는다). 그때 recalled이라 부르면 근거 없는 기억 주장이
+    되므로, 규칙 파생으로 남기고 rule_id에 그 사정을 적어 데이터에서 보이게 한다.
+    """
+    if episode.source_event_ids:
+        return Provenance.recalled(episode.source_event_ids)
+    return Provenance.derived("memory.consolidate:replies_only")
+
+
 class ActorPhases:
     """등록된 페르소나들을 tick 파이프라인에 태운다.
 
@@ -252,7 +278,7 @@ class ActorPhases:
         #: intent만 5-튜플로 원 대화의 인과·사슬을 실어 온다 (resolve가 관대하게 푼다)
         self._intents: list[tuple[Any, ...]] = []
         #: 이번 tick에 응답할 상호작용: (actor_id, 원인 봉투, 답장 텍스트)
-        self._replies: list[tuple[str, dict[str, Any], str]] = []
+        self._replies: list[tuple[str, dict[str, Any], str, Provenance]] = []
         #: 선제 DM 빈도 장부 — 없으면 선제 DM 경로 자체가 없다 (후방 호환)
         self._outreach = outreach
         #: 여운 저장소 (드라마 재생산, plan/02) — 없으면 경로 자체가 없다 (후방 호환)
@@ -261,14 +287,14 @@ class ActorPhases:
         #: 엣지 존재는 perceive 시점(이번 tick의 관계 응고 이전) 기준이다 (plan/03)
         self._pending_greetings: list[tuple[str, dict[str, Any]]] = []
         #: 이번 tick의 선제 DM: (actor_id, player_id, 텍스트) — RESOLVE 적재 (plan/02)
-        self._proactive_dms: list[tuple[str, str, str]] = []
+        self._proactive_dms: list[tuple[str, str, str, Provenance]] = []
         #: perceive가 채우는 tick당 수신함
         self._inbox: dict[str, list[dict[str, Any]]] = {}
         #: 피드에서 본 이웃의 글 — 다음 LLM decide까지 들고 간다 (액터 소셜 루프).
         #: 그 decide에서 소진된다 — 댓글 기회는 한 번뿐이다 (상한: seen_posts_max)
         self._seen_posts: dict[str, list[dict[str, Any]]] = {}
         #: 이번 tick의 자발 댓글: (actor_id, 대상 포스트 봉투, 텍스트) — RESOLVE 적재
-        self._pending_comments: list[tuple[str, dict[str, Any], str]] = []
+        self._pending_comments: list[tuple[str, dict[str, Any], str, Provenance]] = []
         #: 액터별 마지막 자발 댓글 tick — 쿨다운(social.comment_cooldown_ticks)의
         #: 장부. in-memory — 재시작 시 쿨다운을 잊는 건 허용 오차다
         self._last_comment: dict[str, int] = {}
@@ -280,7 +306,7 @@ class ActorPhases:
         #: 적재 확정된 액터→액터 메시지 (규칙 1c 송신측 재료) — 유실분은 관계가 아니다
         self._resolved_messages: list[tuple[str, dict[str, Any]]] = []
         self._resolved_shifts: list[PendingShift] = []
-        self._resolved_replies: list[tuple[str, dict[str, Any], str]] = []
+        self._resolved_replies: list[tuple[str, dict[str, Any], str, Provenance]] = []
         #: 액터별 감쇠가 적용된 마지막 tick — Cold 배치의 장부 (ADR-012 §Cold 티어 처리).
         #: decay_ledger(있으면)가 Redis에 영속해 워커 재시작에도 경과가 이어진다.
         #: 없으면 in-memory만 — 재시작한 액터는 현재 tick부터 다시 센다 (dev/테스트 허용 오차)
@@ -365,6 +391,9 @@ class ActorPhases:
                     type=IDENTITY_TYPE,
                     tick=ctx.tick,
                     actor_id=persona.id,
+                    # 성격·목표·비밀은 전부 저작물이다 — 스튜디오면 빚은 사람,
+                    # 시드 페르소나면 저장소의 YAML이 저자다 (ADR-021 §1)
+                    provenance=Provenance.authored(persona.created_by or "system:seed"),
                     payload={
                         "name": persona.name,
                         "archetype": persona.archetype or "unknown",
@@ -639,7 +668,7 @@ class ActorPhases:
 
     async def _reply_to_player(
         self, ctx: TickContext, world: WorldContext, actor_id: str, envelope: dict[str, Any]
-    ) -> tuple[str, dict[str, Any], str]:
+    ) -> tuple[str, dict[str, Any], str, Provenance]:
         """플레이어의 댓글/DM에 답한다 — 반환한 튜플을 호출자가 순서대로 담는다.
 
         답장도 결정이다 — 인생 방향·관계의 온도·이 사람과의 대화 흐름이 결을
@@ -660,11 +689,14 @@ class ActorPhases:
         text = await self._ai.converse(bundle, tier="hot", actor_id=actor_id, tick=ctx.tick)
         if text is None:
             text = fallback_reply(persona, envelope["payload"]["text"])
-        return (actor_id, envelope, text)
+            provenance = Provenance.derived("actor.rules:fallback_reply")
+        else:
+            provenance = Provenance.generated(bundle.trace_id)
+        return (actor_id, envelope, text, provenance)
 
     async def _reply_to_comment(
         self, ctx: TickContext, world: WorldContext, actor_id: str, envelope: dict[str, Any]
-    ) -> tuple[str, dict[str, Any], str]:
+    ) -> tuple[str, dict[str, Any], str, Provenance]:
         """내 글에 달린 액터 댓글에 답한다 — 표현은 LLM, 보증은 규칙 폴백.
 
         플레이어 응답 의무와 동형이다 (반드시 한 번). 답글 이벤트의 in_reply_to는
@@ -683,11 +715,14 @@ class ActorPhases:
         text = await self._ai.converse(bundle, tier="hot", actor_id=actor_id, tick=ctx.tick)
         if text is None:
             text = fallback_reply(persona, envelope["payload"]["text"])
-        return (actor_id, envelope, text)
+            provenance = Provenance.derived("actor.rules:fallback_reply")
+        else:
+            provenance = Provenance.generated(bundle.trace_id)
+        return (actor_id, envelope, text, provenance)
 
     async def _greet_first_reaction(
         self, ctx: TickContext, world: WorldContext, actor_id: str, envelope: dict[str, Any]
-    ) -> tuple[str, dict[str, Any], str]:
+    ) -> tuple[str, dict[str, Any], str, Provenance]:
         """첫 접촉 좋아요에 가벼운 인사 한 줄 — 그 포스트의 댓글로 (plan/03 §첫 개입).
 
         표현은 LLM(converse, 가벼운 첫 인사 결의 Task Frame), 실패 시 결정적 규칙
@@ -703,11 +738,14 @@ class ActorPhases:
         text = await self._ai.converse(bundle, tier="warm", actor_id=actor_id, tick=ctx.tick)
         if text is None:
             text = fallback_greeting(persona, envelope["payload"]["player_id"])
+            provenance = Provenance.derived("actor.rules:fallback_greeting")
+        else:
+            provenance = Provenance.generated(bundle.trace_id)
         logger.info(
             "첫 접촉 인사: %s → %s tick=%d (plan/03 첫 개입)",
             actor_id, envelope["payload"]["player_id"], ctx.tick,
         )
-        return (actor_id, envelope, text)
+        return (actor_id, envelope, text, provenance)
 
     async def _proactive_dm(
         self, ctx: TickContext, world: WorldContext, actor_id: str
@@ -747,7 +785,9 @@ class ActorPhases:
         if text is None:
             return False  # 조용히 생략 — 쿨다운도 소모하지 않는다 (다음 모먼트에 다시)
         await self._outreach.mark(ctx.world_id, actor_id, target, ctx.tick)
-        self._proactive_dms.append((actor_id, target, text))
+        self._proactive_dms.append(
+            (actor_id, target, text, Provenance.generated(bundle.trace_id))
+        )
         logger.info("선제 DM: %s → %s tick=%d ('기억됨', plan/02)", actor_id, target, ctx.tick)
         return True
 
@@ -823,7 +863,7 @@ class ActorPhases:
             peak_by_cause[shift.causation_id] = max(
                 peak_by_cause.get(shift.causation_id, 0.0), intensity
             )
-        for actor_id, envelope, text in self._replies:
+        for actor_id, envelope, text, _ in self._replies:
             if envelope["type"] != COMMENT_TYPE:
                 continue
             intensity = peak_by_cause.get(envelope["event_id"], 0.0)
@@ -902,10 +942,12 @@ class ActorPhases:
             payload, comment = extract_comment(payload, seen)
             self._seen_posts.pop(actor_id, None)  # 댓글 기회는 이 결정에 소진됐다
             cap = int(social["max_comments_per_tick"])
-            written = sum(1 for a, _, _ in self._pending_comments if a == actor_id)
+            written = sum(1 for a, _, _, _ in self._pending_comments if a == actor_id)
             if comment is not None and written < cap:
                 post, text = comment
-                self._pending_comments.append((actor_id, post, text))
+                self._pending_comments.append(
+                    (actor_id, post, text, Provenance.generated(bundle.trace_id))
+                )
                 self._last_comment[actor_id] = ctx.tick
         return payload, bundle.trace_id
 
@@ -1022,7 +1064,8 @@ class ActorPhases:
         return plan
 
     def _reply_event(
-        self, ctx: TickContext, actor_id: str, source: dict[str, Any], text: str
+        self, ctx: TickContext, actor_id: str, source: dict[str, Any], text: str,
+        provenance: Provenance,
     ) -> NewEvent:
         if source["type"] == MESSAGE_TYPE:
             # 액터 댓글에의 답글 — in_reply_to가 댓글 event_id라 순환 기준(post_id와
@@ -1036,6 +1079,7 @@ class ActorPhases:
                 actor_id=actor_id,
                 causation_id=source["event_id"],
                 correlation_id=source["correlation_id"],  # 글이 시작한 사슬을 잇는다
+                provenance=provenance,
                 payload={
                     "channel": "comment",
                     "target_player_id": None,
@@ -1059,6 +1103,7 @@ class ActorPhases:
                 causation_id=source["event_id"],
                 # 첫 좋아요가 시작한 사슬을 잇는다 — '당신이 시작한 이야기' (ADR-013)
                 correlation_id=source["correlation_id"],
+                provenance=provenance,
                 payload={
                     "channel": "comment",
                     "target_player_id": source["payload"]["player_id"],
@@ -1078,6 +1123,7 @@ class ActorPhases:
             causation_id=source["event_id"],
             # 개입이 시작한 서사 사슬을 잇는다 — '당신이 시작한 이야기' (ADR-013)
             correlation_id=source["correlation_id"],
+            provenance=provenance,
             payload={
                 "channel": channel,
                 "target_player_id": source["payload"]["player_id"],
@@ -1088,7 +1134,8 @@ class ActorPhases:
         )
 
     def _comment_event(
-        self, ctx: TickContext, actor_id: str, post: dict[str, Any], text: str
+        self, ctx: TickContext, actor_id: str, post: dict[str, Any], text: str,
+        provenance: Provenance,
     ) -> NewEvent:
         """이웃의 글에 남기는 자발 댓글 (액터 소셜 루프).
 
@@ -1104,6 +1151,7 @@ class ActorPhases:
             actor_id=actor_id,
             causation_id=post["event_id"],
             correlation_id=post["correlation_id"],  # 글이 시작한 서사 사슬을 잇는다
+            provenance=provenance,
             payload={
                 "channel": "comment",
                 "target_player_id": None,
@@ -1126,9 +1174,9 @@ class ActorPhases:
         events_by_actor: dict[str, list[NewEvent]] = {}
         memos: dict[str, list[str]] = {}
 
-        for actor_id, envelope, text in self._replies:
+        for actor_id, envelope, text, provenance in self._replies:
             events_by_actor.setdefault(actor_id, []).append(
-                self._reply_event(ctx, actor_id, envelope, text)
+                self._reply_event(ctx, actor_id, envelope, text, provenance)
             )
             if envelope["type"] == MESSAGE_TYPE:
                 commenter = envelope["actor_id"]
@@ -1146,7 +1194,7 @@ class ActorPhases:
 
         # 선제 DM ('기억됨', plan/02) — 원인 플레이어 이벤트가 없는 자발 발화라
         # causation 없음·in_reply_to null (스키마가 허용, 사슬의 시작이 된다)
-        for actor_id, player_id, text in self._proactive_dms:
+        for actor_id, player_id, text, provenance in self._proactive_dms:
             events_by_actor.setdefault(actor_id, []).append(
                 NewEvent(
                     world_id=ctx.world_id,
@@ -1155,6 +1203,7 @@ class ActorPhases:
                     type=MESSAGE_TYPE,
                     tick=ctx.tick,
                     actor_id=actor_id,
+                    provenance=provenance,
                     payload={
                         "channel": "dm",
                         "target_player_id": player_id,
@@ -1170,9 +1219,9 @@ class ActorPhases:
             )
 
         # 자발 댓글 (액터 소셜 루프) — 응답 뒤·행동 앞: 사회적 반응이 일과보다 앞선다
-        for actor_id, post, text in self._pending_comments:
+        for actor_id, post, text, provenance in self._pending_comments:
             events_by_actor.setdefault(actor_id, []).append(
-                self._comment_event(ctx, actor_id, post, text)
+                self._comment_event(ctx, actor_id, post, text, provenance)
             )
             author = post["actor_id"]
             name = self._roster.get(author, author)
@@ -1197,6 +1246,7 @@ class ActorPhases:
                     actor_id=actor_id,
                     causation_id=causation_id,
                     correlation_id=correlation_id,
+                    provenance=_action_provenance(payload),
                     payload=payload,
                 )
             )
@@ -1228,6 +1278,7 @@ class ActorPhases:
                             actor_id=actor_id,
                             causation_id=s.causation_id,
                             correlation_id=s.correlation_id,
+                            provenance=Provenance.derived("emotion.appraise"),
                             payload=s.payload,
                         )
                         for s in shifts
@@ -1354,6 +1405,7 @@ class ActorPhases:
                     actor_id=actor_id,
                     causation_id=e.causation_id,
                     correlation_id=e.correlation_id,
+                    provenance=Provenance.derived("goal.engine"),
                     payload=e.payload,
                 )
                 for e in by_actor[actor_id]
@@ -1413,6 +1465,7 @@ class ActorPhases:
                         actor_id=actor_id,
                         causation_id=s.causation_id,
                         correlation_id=s.correlation_id,
+                        provenance=Provenance.derived("emotion.appraise:goal"),
                         payload=s.payload,
                     )
                     for s in shifts
@@ -1445,13 +1498,18 @@ class ActorPhases:
             # 신념 폐기 — 근거 상태가 무너진 발행 슬롯은 철회문으로 갱신된다 (ADR-008)
             published = await self._ledger.entries(ctx.world_id, actor_id)
             beliefs += retract_stale(published, beliefs, name_map=names)
+            # 규칙 신념은 감정·관계 '상태'에서 결정적으로 파생된다 — 사건 인출이
+            # 아니라 recalled이 아니고, 지어낸 해석도 아니라 generated가 아니다
+            pairs: list[tuple[Belief, Provenance]] = [
+                (b, Provenance.derived(f"reflection:{b.kind}")) for b in beliefs
+            ]
             insight = await self._llm_insight(ctx, actor_id, set(edges), names)
             if insight is not None:
-                beliefs = [*beliefs, insight]
-            for belief in beliefs:
+                pairs.append(insight)
+            for belief, provenance in pairs:
                 if not await self._ledger.changed(ctx.world_id, actor_id, belief):
                     continue
-                await self._store_belief(ctx, actor_id, belief)
+                await self._store_belief(ctx, actor_id, belief, provenance)
                 # 인물 통찰은 관계 비중에 스민다 — 그 사람이 마음에서 자리를 차지한다
                 # (ADR-016, 엣지가 있을 때만 — 생각만으로 관계가 시작되진 않는다)
                 if belief.kind == "person_insight" and belief.about_id:
@@ -1461,7 +1519,7 @@ class ActorPhases:
 
     async def _llm_insight(
         self, ctx: TickContext, actor_id: str, counterparts: set[str], names: dict[str, str]
-    ) -> Belief | None:
+    ) -> tuple[Belief, Provenance] | None:
         """작업 기억을 곱씹은 LLM 통찰 하나 — "이 경험들이 의미하는 것" (ADR-008).
 
         대상 후보는 아는 사람(관계 상대 + 동료 액터)뿐 — 환각 대상은 insight_to_belief가
@@ -1483,11 +1541,14 @@ class ActorPhases:
         if output is None:
             return None
         belief = insight_to_belief(output, set(known))
-        if belief is not None:
-            logger.info("LLM 통찰: %s [%s] conf=%.2f", actor_id, belief.kind, belief.confidence)
-        return belief
+        if belief is None:
+            return None
+        logger.info("LLM 통찰: %s [%s] conf=%.2f", actor_id, belief.kind, belief.confidence)
+        return belief, Provenance.generated(bundle.trace_id)
 
-    async def _store_belief(self, ctx: TickContext, actor_id: str, belief: Belief) -> None:
+    async def _store_belief(
+        self, ctx: TickContext, actor_id: str, belief: Belief, provenance: Provenance
+    ) -> None:
         head = await current_head(ctx.conn, ctx.world_id, "actor", actor_id)
         [stored] = await append(
             ctx.conn, PRINCIPAL,
@@ -1500,6 +1561,7 @@ class ActorPhases:
                     tick=ctx.tick,
                     actor_id=actor_id,
                     causation_id=belief.source_event_ids[0] if belief.source_event_ids else None,
+                    provenance=provenance,
                     payload={
                         "statement": belief.statement,
                         "kind": belief.kind,
@@ -1549,7 +1611,7 @@ class ActorPhases:
             materials = TickMaterials(
                 interactions=self._inbox.get(actor_id, []),
                 replies=[
-                    (env, text) for a, env, text in self._resolved_replies if a == actor_id
+                    (env, text) for a, env, text, _ in self._resolved_replies if a == actor_id
                 ],
                 action_envelope=actions_by_actor.get(actor_id),
                 emotion_peak=peaks.get(actor_id, 0.0),
@@ -1575,6 +1637,7 @@ class ActorPhases:
                     actor_id=actor_id,
                     causation_id=episode.causation_id,
                     correlation_id=episode.correlation_id,
+                    provenance=_episode_provenance(episode),
                     payload={
                         "summary": episode.summary,
                         "importance": episode.importance,
@@ -1692,6 +1755,7 @@ class ActorPhases:
                     actor_id=event.from_id,
                     causation_id=event.causation_id,
                     correlation_id=event.correlation_id,
+                    provenance=Provenance.derived("relationship.engine"),
                     payload=event.payload,
                 )
                 for event in by_edge[(from_id, to_id)]

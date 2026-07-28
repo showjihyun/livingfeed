@@ -5,7 +5,7 @@ PG 통합은 season_retrospective가 그 날의 스트림만 접는지 확인한
 """
 
 from lf_director.retrospect import fold_report, season_retrospective, tune_pacing
-from lf_eventstore import NewEvent, append
+from lf_eventstore import NewEvent, Provenance, append
 
 WORLD = "w_test"
 
@@ -128,6 +128,7 @@ async def test_season_retrospective_folds_only_that_day(conn):
             [NewEvent(
                 world_id=WORLD, stream="system", stream_key=head_key,
                 type="system.director.intervened", tick=tick, event_id=event_id,
+                provenance=Provenance.derived(f"director.rules:{tool}"),
                 payload={"tool": tool, "reason": "회고 시드",
                          "signals": {"selector": "rule"},
                          "target_correlation_id": None, "budget_remaining": 1},

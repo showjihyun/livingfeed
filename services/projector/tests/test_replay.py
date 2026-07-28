@@ -7,7 +7,7 @@
    프로젝션을 원천과 정합하게 되세운다 — verify 3종이 그 증인이다.
 """
 
-from lf_eventstore import NewEvent, append
+from lf_eventstore import NewEvent, Provenance, append
 from lf_eventstore.migrate import migrate
 from lf_projector.config import Config
 from lf_projector.kuzu_projector import KuzuProjector
@@ -69,6 +69,7 @@ async def _append_sample(pg, principal: str, envelope: dict, *, expected_head: i
             world_id=envelope["world_id"], stream=envelope["stream"],
             stream_key=key, type=envelope["type"], tick=envelope["tick"],
             actor_id=envelope.get("actor_id"), payload=envelope["payload"],
+            provenance=Provenance.from_json(envelope["provenance"]),
         )],
         expected_head=expected_head,
     )
@@ -97,6 +98,7 @@ async def test_replay_filters_and_keeps_global_order(pg):
             world_id=rel["world_id"], stream="relationship",
             stream_key=f"{rel['payload']['from_id']}|{rel['payload']['to_id']}",
             type=rel["type"], tick=rel["tick"], payload=rel["payload"],
+            provenance=Provenance.from_json(rel["provenance"]),
         )],
         expected_head=0,
     )
@@ -120,6 +122,7 @@ async def test_pg_from_es_rebuild_restores_integrity(pg):
         [NewEvent(
             world_id=arc["world_id"], stream="system", stream_key="arc",
             type=arc["type"], tick=arc["tick"], payload=arc["payload"],
+            provenance=Provenance.from_json(arc["provenance"]),
         )],
         expected_head=0,
     )
@@ -145,6 +148,7 @@ async def test_redis_from_es_rebuild_restores_integrity(pg, redis):
                 world_id=follow["world_id"], stream="player",
                 stream_key=payload["player_id"], type=follow["type"],
                 tick=follow["tick"] + head, payload=payload,
+                provenance=Provenance.from_json(follow["provenance"]),
             )],
             expected_head=head,
         )
@@ -175,6 +179,7 @@ async def test_kuzu_from_es_rebuild_restores_integrity(pg, tmp_path):
                 world_id=rel["world_id"], stream="relationship",
                 stream_key=f"{p['from_id']}|{p['to_id']}", type=rel["type"],
                 tick=rel["tick"], payload=p,
+                provenance=Provenance.from_json(rel["provenance"]),
             )],
             expected_head=0,
         )

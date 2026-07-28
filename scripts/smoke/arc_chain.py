@@ -15,7 +15,7 @@ import nats
 from lf_director.retrospect import season_retrospective
 from lf_dispatcher.relay import relay_once
 from lf_dispatcher.streams import ensure_streams
-from lf_eventstore import NewEvent, append, current_head, read_stream
+from lf_eventstore import NewEvent, Provenance, append, current_head, read_stream
 from lf_feed.compose import derive_post_id
 from lf_feed.composer import FeedComposer
 from lf_feed.config import Config as FeedConfig
@@ -51,6 +51,7 @@ async def append_arc(conn, tick: int, stage: str, intention: str) -> str:
         [NewEvent(
             world_id=WORLD, stream="system", stream_key="arc", type=ARC_TYPE,
             tick=tick,
+            provenance=Provenance.derived("smoke:arc_chain"),
             payload={"target_actor_id": "a_minji_kim", "stage": stage,
                      "intention": intention},
         )],

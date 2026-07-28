@@ -46,7 +46,10 @@ CREATE TABLE IF NOT EXISTS read.actor_episodes (
     importance       REAL NOT NULL,
     factors          JSONB NOT NULL,
     tags             TEXT[] NOT NULL,
-    source_event_ids TEXT[] NOT NULL
+    source_event_ids TEXT[] NOT NULL,
+    -- 이 기억이 실제 사건에서 인출된 것인지, 규칙이 빚은 것인지 (ADR-021 §1).
+    -- 화면이 '기억'과 '짐작'을 가르는 근거다.
+    provenance_kind  TEXT NOT NULL
 );
 -- event_id(ULID) 내림차순 = 시간 역순 — /feed recent와 같은 커서 좌표계 (ADR-010)
 CREATE INDEX IF NOT EXISTS actor_episodes_recent
@@ -60,6 +63,8 @@ CREATE TABLE IF NOT EXISTS read.actor_beliefs (
     statement        TEXT NOT NULL,
     confidence       REAL NOT NULL,
     source_event_ids TEXT[] NOT NULL,
+    -- 이 신념이 규칙이 읽어낸 패턴인지, LLM이 곱씹어 지어낸 해석인지 (ADR-021 §1)
+    provenance_kind  TEXT NOT NULL,
     event_id         TEXT NOT NULL,
     first_formed_at  TIMESTAMPTZ NOT NULL,
     updated_at       TIMESTAMPTZ NOT NULL,
@@ -134,8 +139,8 @@ NO_ABOUT = "-"
 _EPISODE_SQL = """
 INSERT INTO read.actor_episodes
     (event_id, world_id, actor_id, tick, occurred_at, summary,
-     importance, factors, tags, source_event_ids)
-VALUES (%s, %s, %s, %s, %s::timestamptz, %s, %s, %s::jsonb, %s, %s)
+     importance, factors, tags, source_event_ids, provenance_kind)
+VALUES (%s, %s, %s, %s, %s::timestamptz, %s, %s, %s::jsonb, %s, %s, %s)
 ON CONFLICT (event_id) DO NOTHING
 """
 
@@ -144,12 +149,13 @@ ON CONFLICT (event_id) DO NOTHING
 _BELIEF_SQL = """
 INSERT INTO read.actor_beliefs
     (world_id, actor_id, kind, about_id, statement, confidence,
-     source_event_ids, event_id, first_formed_at, updated_at, revisions)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::timestamptz, %s::timestamptz, 1)
+     source_event_ids, provenance_kind, event_id, first_formed_at, updated_at, revisions)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::timestamptz, %s::timestamptz, 1)
 ON CONFLICT (world_id, actor_id, kind, about_id) DO UPDATE SET
     statement        = excluded.statement,
     confidence       = excluded.confidence,
     source_event_ids = excluded.source_event_ids,
+    provenance_kind  = excluded.provenance_kind,
     event_id         = excluded.event_id,
     updated_at       = excluded.updated_at,
     revisions        = read.actor_beliefs.revisions + 1
@@ -248,7 +254,16 @@ def episode_params(envelope: dict[str, Any]) -> tuple:
         envelope["event_id"], envelope["world_id"], envelope["actor_id"],
         envelope["tick"], envelope["occurred_at"], p["summary"],
         p["importance"], json.dumps(p["factors"]), p["tags"], p["source_event_ids"],
+        _provenance_kind(envelope),
     )
+
+
+def _provenance_kind(envelope: dict[str, Any]) -> str:
+    """봉투의 출처 등급 — 없으면 unknown (ADR-021 이전 적재분).
+
+    추정해서 채우지 않는다: 모른다는 사실 자체가 화면이 알아야 할 정보다.
+    """
+    return (envelope.get("provenance") or {}).get("kind") or "unknown"
 
 
 def belief_params(envelope: dict[str, Any]) -> tuple:
@@ -256,7 +271,7 @@ def belief_params(envelope: dict[str, Any]) -> tuple:
     return (
         envelope["world_id"], envelope["actor_id"], p["kind"],
         p["about_id"] or NO_ABOUT, p["statement"], p["confidence"],
-        p["source_event_ids"], envelope["event_id"],
+        p["source_event_ids"], _provenance_kind(envelope), envelope["event_id"],
         envelope["occurred_at"], envelope["occurred_at"],
     )
 
@@ -330,6 +345,21 @@ PROJECTIONS: dict[str, tuple[tuple[str, Any], ...]] = {
 }
 
 
+#: 스키마 드리프트 감지선 — 나중에 추가된 컬럼들. DDL은 CREATE TABLE IF NOT EXISTS라
+#: 이미 있는 표에는 아무것도 더하지 않으므로, 구 스키마 위에서 ensure()는 조용히
+#: 통과하고 첫 apply()가 UndefinedColumn으로 터진다. 프로젝션은 소모품이라
+#: 마이그레이션 도구를 두지 않는 것이 규약이므로(모듈 docstring), 대신 시작 시점에
+#: 무엇을 해야 하는지와 함께 크게 실패한다. 투영 컬럼을 추가하면 여기에도 적는다.
+_REQUIRED_COLUMNS = {
+    "actor_episodes": ("provenance_kind",),
+    "actor_beliefs": ("provenance_kind",),
+}
+
+
+class StaleReadSchema(RuntimeError):
+    """read 스키마가 코드보다 낡았다 — drop() 후 --rebuild가 필요하다 (ADR-003 계약 3)."""
+
+
 class ReadStore:
     """read 스키마에 대한 최소 클라이언트 — ensure/drop/apply (ADR-003 계약 1·3)."""
 
@@ -338,6 +368,32 @@ class ReadStore:
 
     async def ensure(self) -> None:
         await self._conn.execute(DDL)
+        await self._assert_not_stale()
+
+    async def _assert_not_stale(self) -> None:
+        """구 스키마 위에서 도는 것을 시작 시점에 잡는다 — 첫 이벤트에서가 아니라."""
+        cur = await self._conn.execute(
+            "SELECT table_name, column_name FROM information_schema.columns"
+            " WHERE table_schema = 'read' AND table_name = ANY(%s)",
+            (list(_REQUIRED_COLUMNS),),
+        )
+        live: dict[str, set[str]] = {}
+        for table, column in await cur.fetchall():
+            live.setdefault(table, set()).add(column)
+
+        missing = [
+            f"read.{table}.{column}"
+            for table, columns in _REQUIRED_COLUMNS.items()
+            for column in columns
+            # 표 자체가 없으면 방금 DDL이 최신으로 만들었다 — 드리프트가 아니다
+            if table in live and column not in live[table]
+        ]
+        if missing:
+            raise StaleReadSchema(
+                f"read 스키마에 {', '.join(missing)}이(가) 없다 — 코드보다 낡은 프로젝션이다."
+                " 프로젝션은 소모품이므로 재구축으로 고친다:"
+                " python -m lf_projector.main --kind pg --rebuild"
+            )
 
     async def drop(self) -> None:
         for table in TABLES:

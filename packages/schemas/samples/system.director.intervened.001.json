@@ -9,13 +9,23 @@
   "occurred_at": "2026-07-11T09:59:59Z",
   "causation_id": null,
   "correlation_id": "01JZK7Q3W0000000000000000Q",
+  "provenance": {
+    "kind": "derived",
+    "rule_id": "director.rules:inject_incident"
+  },
   "payload": {
     "tool": "inject_incident",
     "reason": "침체 감지 — drama 이동평균 0.08이 32 tick 지속 (임계 0.2/30)",
     "signals": {
       "drama_ma": 0.08,
       "quiet_ticks": 32,
-      "tension_top": [["a_junho_park", "a_aria_kim", 0.42]]
+      "tension_top": [
+        [
+          "a_junho_park",
+          "a_aria_kim",
+          0.42
+        ]
+      ]
     },
     "target_correlation_id": null,
     "budget_remaining": 1

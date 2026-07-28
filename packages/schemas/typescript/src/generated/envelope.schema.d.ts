@@ -6,6 +6,13 @@
  */
 
 /**
+ * 출처 등급 — 이 이벤트의 내용이 어디서 왔는가 (ADR-021 §1). 이 구분이 없으면 '인물이 기억한 것'과 'LLM이 방금 지어낸 것'이 같은 통에 담겨 창발 주장이 검증 불가능해진다. 등급마다 근거 필드가 필수이며, 근거를 대지 못하는 이벤트는 append가 거부한다.
+ *
+ * 등급별 변형을 oneOf로 나눈 것은 두 가지를 동시에 얻기 위해서다: 런타임 검증은 각 변형의 required가 집행하고, 코드젠(Python/TypeScript)은 이 구조를 판별 유니온으로 옮긴다 — 하나의 객체에 if/then을 얹으면 json2ls·datamodel-code-generator가 조건을 버려 '아무 키나 허용'하는 타입이 나온다. 소비자가 kind로 좁히면 근거 필드가 타입으로 따라오는 것이 목적이다.
+ */
+export type Provenance = Recalled | Derived | Generated | Authored | UnknownProvenance;
+
+/**
  * 모든 Living Feed 도메인 이벤트의 공통 봉투 (ADR-002)
  */
 export interface EventEnvelope {
@@ -37,10 +44,59 @@ export interface EventEnvelope {
    * 하나의 서사적 사건 단위 — 드라마 추적용 (ADR-013)
    */
   correlation_id: string;
+  provenance: Provenance;
   /**
    * 타입별 payload — events/<type>.schema.json 으로 검증
    */
   payload: {
     [k: string]: unknown;
   };
+}
+/**
+ * 기존 사건에서 인출된 사실 — 근거 사건이 반드시 있다.
+ */
+export interface Recalled {
+  kind: "recalled";
+  /**
+   * 이 내용이 인출된 근거 사건들. 비어 있으면 '기억'이라 부를 수 없다.
+   *
+   * @minItems 1
+   */
+  source_event_ids: [string, ...string[]];
+}
+/**
+ * 규칙에서 결정적으로 파생 — rule_id가 L2 규칙 재실행의 진입점이다 (ADR-021 §4).
+ */
+export interface Derived {
+  kind: "derived";
+  /**
+   * 이 내용을 파생시킨 규칙 식별자 (예: emotion.appraise)
+   */
+  rule_id: string;
+}
+/**
+ * LLM이 이번 호출에서 생성한 해석 — 재현 보증이 없다 (ADR-021 §4 L3).
+ */
+export interface Generated {
+  kind: "generated";
+  /**
+   * 이 내용을 생성한 LLM 호출의 ContextBundle trace_id (ADR-009/018). 결정 기록과 이벤트를 잇는 유일한 고리다. ULID 패턴을 강제하지 않는다: 액터는 new_ulid()를, Director는 결정적 합성 id(director-<world>-<tick>)를 쓰며, actor.action.performed의 decision_trace.trace_id도 패턴 없는 문자열이다 — 여기서만 좁히면 같은 값이 한쪽에서만 통과한다.
+   */
+  trace_id: string;
+}
+/**
+ * 사람이 저작 — 스튜디오 페르소나, 플레이어 개입, 시드 저작물.
+ */
+export interface Authored {
+  kind: "authored";
+  /**
+   * 저작한 사람 (플레이어 id, 스튜디오 사용자, 시드 저작자). 사람이 쓴 것과 LLM이 지어낸 것이 섞이면 창발 주장의 가장 흔한 오염원이 된다.
+   */
+  author_id: string;
+}
+/**
+ * 출처 미상 — ADR-021 이전 적재분에만 존재하는 읽기 전용 값이다. 쓰기 경로(store._validate)가 거부한다. 근거 필드가 없는 것이 이 등급의 정의다: 모른다는 사실 자체를 기록한다.
+ */
+export interface UnknownProvenance {
+  kind: "unknown";
 }

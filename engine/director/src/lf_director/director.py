@@ -19,11 +19,11 @@ from typing import Any
 
 import nats
 import nats.errors
-from lf_eventstore import NewEvent, append, current_head, new_ulid, read_stream
+from lf_eventstore import NewEvent, Provenance, append, current_head, new_ulid, read_stream
 from lf_projector.graph_api import GraphQueryClient
 from psycopg import AsyncConnection
 
-from lf_director.client import DirectorAiClient
+from lf_director.client import DirectorAiClient, director_trace_id
 from lf_director.config import Config
 from lf_director.loop_health import loop_health
 from lf_director.planner import (
@@ -167,6 +167,13 @@ class Director:
         """
         cfg = self._cfg
         audit_id = new_ulid()
+        # 개입을 고른 주체가 곧 출처다 (ADR-021 §1) — 감사와 산출 이벤트가 같은 등급을
+        # 갖는다: 산출은 그 결정을 실행한 것일 뿐 별개의 판단이 아니다.
+        provenance = (
+            Provenance.generated(director_trace_id(cfg.world_id, snapshot.tick))
+            if intervention.signals.get("selector") == "llm"
+            else Provenance.derived(f"director.rules:{intervention.tool}")
+        )
         head = await current_head(conn, cfg.world_id, "system", AUDIT_STREAM_KEY)
         await append(
             conn, PRINCIPAL,
@@ -174,6 +181,7 @@ class Director:
                 NewEvent(
                     world_id=cfg.world_id, stream="system", stream_key=AUDIT_STREAM_KEY,
                     type=AUDIT_TYPE, tick=snapshot.tick, event_id=audit_id,
+                    provenance=provenance,
                     payload={
                         "tool": intervention.tool,
                         "reason": intervention.reason,
@@ -194,6 +202,7 @@ class Director:
                     world_id=cfg.world_id, stream=intervention.stream,
                     stream_key=intervention.stream_key, type=intervention.event_type,
                     tick=snapshot.tick, causation_id=audit_id, correlation_id=audit_id,
+                    provenance=provenance,
                     payload=intervention.payload,
                 )
             ],

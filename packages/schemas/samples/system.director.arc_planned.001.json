@@ -9,6 +9,10 @@
   "occurred_at": "2026-07-12T00:00:00Z",
   "causation_id": "01JZK7Q3W0000000000000000Q",
   "correlation_id": "01JZK7Q3W0000000000000000V",
+  "provenance": {
+    "kind": "derived",
+    "rule_id": "director.rules:arc_planned"
+  },
   "payload": {
     "target_actor_id": "a_minji_kim",
     "stage": "settling",

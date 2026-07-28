@@ -8,6 +8,7 @@ import pytest
 from lf_projector.pg_read import (
     NO_ABOUT,
     ReadStore,
+    StaleReadSchema,
     arc_params,
     belief_params,
     episode_params,
@@ -236,6 +237,58 @@ async def test_belief_slot_updates_only_forward(pg):
     assert row[0] == pytest.approx(0.91)
     assert row[1] == 2
     assert row[2] == newer["event_id"]
+
+
+async def test_provenance_reaches_the_read_model(pg):
+    """출처가 프로젝션까지 살아 도착한다 — 여기서 끊기면 화면이 기억과 짐작을 못 가른다.
+
+    (ADR-021 §1 제품 표면: 신념은 규칙이 읽어낸 패턴, 기억은 실제 사건에서 인출)
+    """
+    store = ReadStore(pg)
+    await store.ensure()
+    await store.apply(sample("actor.belief.formed"))
+    await store.apply(sample("actor.memory.consolidated"))
+
+    belief = await (await pg.execute(
+        "SELECT provenance_kind FROM read.actor_beliefs WHERE world_id = 'w_main'"
+    )).fetchone()
+    episode = await (await pg.execute(
+        "SELECT provenance_kind FROM read.actor_episodes WHERE world_id = 'w_main'"
+    )).fetchone()
+    assert belief == ("derived",)
+    assert episode == ("recalled",)
+
+
+async def test_provenance_free_envelope_projects_as_unknown(pg):
+    """ADR-021 이전 적재분을 리플레이해도 프로젝션이 멈추지 않는다 — 미상은 미상으로."""
+    store = ReadStore(pg)
+    await store.ensure()
+    legacy = sample("actor.memory.consolidated")
+    del legacy["provenance"]
+    await store.apply(legacy)
+
+    row = await (await pg.execute(
+        "SELECT provenance_kind FROM read.actor_episodes WHERE world_id = 'w_main'"
+    )).fetchone()
+    assert row == ("unknown",)
+
+
+async def test_stale_read_schema_fails_loudly(pg):
+    """구 스키마 위에서 도는 프로젝터는 첫 이벤트가 아니라 기동에서 멈춘다.
+
+    CREATE TABLE IF NOT EXISTS는 이미 있는 표를 손대지 않으므로, 이 가드가 없으면
+    ensure()가 조용히 통과하고 한참 뒤 UndefinedColumn으로 터진다 (ADR-003 계약 3).
+    """
+    store = ReadStore(pg)
+    await store.ensure()
+    await pg.execute("ALTER TABLE read.actor_beliefs DROP COLUMN provenance_kind")
+
+    with pytest.raises(StaleReadSchema, match="--rebuild"):
+        await store.ensure()
+
+    # 규약대로 재구축하면 풀린다 — 마이그레이션이 아니라 폐기·재생성이다
+    await store.drop()
+    await store.ensure()
 
 
 async def test_drop_supports_rebuild(pg):

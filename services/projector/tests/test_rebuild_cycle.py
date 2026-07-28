@@ -9,7 +9,7 @@
 import logging
 
 from lf_dispatcher.relay import relay_once
-from lf_eventstore import NewEvent, append
+from lf_eventstore import NewEvent, Provenance, append
 from lf_eventstore.migrate import migrate
 from lf_projector.config import Config
 from lf_projector.graph import RelGraph
@@ -47,6 +47,7 @@ async def test_pg_rebuild_cycle_restores_integrity(pg, js, caplog):
             world_id=identity["world_id"], stream="actor", stream_key=identity["actor_id"],
             type=identity["type"], tick=identity["tick"], actor_id=identity["actor_id"],
             payload=identity["payload"],
+            provenance=Provenance.from_json(identity["provenance"]),
         )],
         expected_head=0,
     )
@@ -80,6 +81,7 @@ async def test_redis_rebuild_cycle_restores_integrity(pg, redis, js):
             world_id=follow["world_id"], stream="player",
             stream_key=follow["payload"]["player_id"], type=follow["type"],
             tick=follow["tick"], payload=follow["payload"],
+            provenance=Provenance.from_json(follow["provenance"]),
         )],
         expected_head=0,
     )
@@ -108,6 +110,7 @@ async def test_kuzu_rebuild_cycle_restores_integrity(pg, js, tmp_path):
             world_id=rel["world_id"], stream="relationship",
             stream_key=f"{payload['from_id']}|{payload['to_id']}", type=rel["type"],
             tick=rel["tick"], actor_id=payload["from_id"], payload=payload,
+            provenance=Provenance.from_json(rel["provenance"]),
         )],
         expected_head=0,
     )

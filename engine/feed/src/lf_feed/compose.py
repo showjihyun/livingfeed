@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from lf_eventstore import NewEvent
+from lf_eventstore import NewEvent, Provenance
 
 from lf_feed.scoring import RarityTracker, ScoringConfig, drama_score, worthiness
 
@@ -158,6 +158,9 @@ def build_post_event(
         causation_id=envelope["event_id"],
         # 서사 사슬 승계 — 아크 링킹과 다양성 보정의 키 (ADR-013/014)
         correlation_id=envelope["correlation_id"],
+        # 승격은 원본을 옮겨 담을 뿐이다 — 본문이 곧 원본의 intent라, 그것이
+        # LLM 생성물이면 포스트도 생성물이다 (ADR-021 §1 세탁 금지)
+        provenance=Provenance.inherit(envelope, rule_id="feed.compose:action"),
         event_id=post_id,
         payload={
             "visibility": "world",
@@ -233,6 +236,7 @@ def build_arc_post_event(
         actor_id=target_id,  # 장이 넘어간 건 그 인물의 삶이다
         causation_id=envelope["event_id"],
         correlation_id=envelope["correlation_id"],  # Director 계획의 사슬을 잇는다
+        provenance=Provenance.inherit(envelope, rule_id="feed.compose:arc"),
         event_id=post_id,
         payload={
             "visibility": "world",
@@ -282,6 +286,9 @@ def build_debut_post_event(
         actor_id=author_id,
         causation_id=envelope["event_id"],
         correlation_id=envelope["correlation_id"],
+        # 데뷔 소개문은 사람이 빚은 페르소나에서 온다 — 선언이 authored면
+        # 포스트도 authored로 남아 '창발한 성격'과 구분된다 (ADR-021 §1)
+        provenance=Provenance.inherit(envelope, rule_id="feed.compose:debut"),
         event_id=post_id,
         payload={
             "visibility": "world",
@@ -327,6 +334,7 @@ def build_goal_post_event(
         actor_id=author_id,
         causation_id=envelope["event_id"],
         correlation_id=envelope["correlation_id"],  # 목표를 이룬 행동의 사슬을 잇는다
+        provenance=Provenance.inherit(envelope, rule_id="feed.compose:goal"),
         event_id=post_id,
         payload={
             "visibility": "world",
@@ -398,6 +406,7 @@ def build_incident_post_event(
         actor_id=None,  # 세계 사건 — 주체 액터가 없다
         causation_id=envelope["event_id"],
         correlation_id=envelope["correlation_id"],  # Director가 시작한 사슬을 잇는다
+        provenance=Provenance.inherit(envelope, rule_id="feed.compose:incident"),
         event_id=post_id,
         payload={
             "visibility": "world",

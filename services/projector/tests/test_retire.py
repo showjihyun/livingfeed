@@ -17,7 +17,7 @@ import os
 
 import httpx
 import pytest
-from lf_eventstore import NewEvent, append, current_head
+from lf_eventstore import NewEvent, Provenance, append, current_head
 from lf_eventstore.migrate import migrate
 from lf_projector.config import Config
 from lf_projector.graph import RelGraph
@@ -162,6 +162,7 @@ async def _append_envelope(pg, principal: str, envelope: dict, *, stream_key=Non
             type=envelope["type"], tick=envelope["tick"],
             actor_id=envelope.get("actor_id"), payload=envelope["payload"],
             event_id=envelope["event_id"],
+            provenance=Provenance.from_json(envelope["provenance"]),
         )],
         expected_head=head,
     )

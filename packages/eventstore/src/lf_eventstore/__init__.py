@@ -6,6 +6,9 @@ outbox 행이 같은 트랜잭션으로 남아 relay가 JetStream으로 발행�
 """
 
 from lf_eventstore.model import (
+    UNKNOWN_KIND as UNKNOWN_KIND,
+)
+from lf_eventstore.model import (
     ConcurrencyConflict as ConcurrencyConflict,
 )
 from lf_eventstore.model import (
@@ -19,6 +22,9 @@ from lf_eventstore.model import (
 )
 from lf_eventstore.model import (
     PermissionDenied as PermissionDenied,
+)
+from lf_eventstore.model import (
+    Provenance as Provenance,
 )
 from lf_eventstore.model import (
     StoredEvent as StoredEvent,

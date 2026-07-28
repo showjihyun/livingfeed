@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 import pytest
-from lf_eventstore import ConcurrencyConflict, NewEvent, append, read_stream
+from lf_eventstore import ConcurrencyConflict, NewEvent, Provenance, append, read_stream
 from lf_feed.compose import derive_post_id
 from lf_feed.composer import FeedComposer
 from lf_feed.config import Config
@@ -205,6 +205,7 @@ async def seed_arc(conn, envelope: dict, head: int) -> None:
                 world_id=envelope["world_id"], stream="system", stream_key="arc",
                 type="system.director.arc_planned", tick=envelope["tick"],
                 event_id=envelope["event_id"], payload=envelope["payload"],
+                provenance=Provenance.from_json(envelope["provenance"]),
             )
         ],
         expected_head=head,

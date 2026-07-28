@@ -49,7 +49,7 @@ def split_patterns(patterns: tuple[str, ...]) -> tuple[list[str], list[str]]:
 
 _REPLAY_SQL = """
 SELECT global_seq, event_id, stream, type, schema_version, world_id, actor_id,
-       tick, occurred_at, causation_id, correlation_id, payload
+       tick, occurred_at, causation_id, correlation_id, provenance, payload
 FROM es.events
 WHERE global_seq > %s AND (type LIKE ANY(%s::text[]) OR type = ANY(%s::text[]))
 ORDER BY global_seq
@@ -75,7 +75,10 @@ def _envelope(row: tuple) -> dict[str, Any]:
         "occurred_at": _isoformat_z(row[8]),
         "causation_id": row[9],
         "correlation_id": row[10],
-        "payload": row[11],
+        # ADR-021 이전 적재분은 마이그레이션 0004가 unknown으로 백필했다 — 추정으로
+        # 채우지 않는 것이 계약이므로, 리플레이도 그 미상을 그대로 옮긴다
+        "provenance": row[11],
+        "payload": row[12],
     }
 
 
@@ -138,7 +141,7 @@ RETURN_SCOPES: dict[str, str] = {
 
 _RETURN_SQL = """
 SELECT global_seq, event_id, stream, type, schema_version, world_id, actor_id,
-       tick, occurred_at, causation_id, correlation_id, payload
+       tick, occurred_at, causation_id, correlation_id, provenance, payload
 FROM es.events e
 WHERE e.world_id = %(w)s AND e.event_id < %(boundary)s AND e.global_seq > %(last)s
   AND ({scope})

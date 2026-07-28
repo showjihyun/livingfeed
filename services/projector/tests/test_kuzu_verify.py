@@ -4,7 +4,7 @@
 Kuzu는 임베디드(tmp_path)라 별도 인프라가 없다.
 """
 
-from lf_eventstore import NewEvent, append
+from lf_eventstore import NewEvent, Provenance, append
 from lf_eventstore.migrate import migrate
 from lf_projector.graph import RelGraph
 from lf_projector.kuzu_verify import compare, verify_worlds
@@ -40,6 +40,7 @@ async def test_verify_detects_projection_gap_and_recovery(pg, tmp_path):
                 stream_key=f"{p['from_id']}|{p['to_id']}",
                 type="relationship.state.changed", tick=5,
                 actor_id=p["from_id"], payload=p,
+                provenance=Provenance.derived("relationship.engine"),
             )],
             expected_head=0,
         )

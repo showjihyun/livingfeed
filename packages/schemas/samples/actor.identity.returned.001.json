@@ -9,6 +9,10 @@
   "occurred_at": "2026-07-19T09:00:00Z",
   "causation_id": null,
   "correlation_id": "01JZK7Q3W4000000000000000T",
+  "provenance": {
+    "kind": "authored",
+    "author_id": "p_observer_0417"
+  },
   "payload": {
     "actor_id": "a_aria_kim",
     "name": "김아리",
