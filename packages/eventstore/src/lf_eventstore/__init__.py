@@ -59,4 +59,19 @@ from lf_eventstore.store import (
 from lf_eventstore.store import (
     read_stream as read_stream,
 )
+from lf_eventstore.traces import (
+    DecisionTrace as DecisionTrace,
+)
+from lf_eventstore.traces import (
+    TracePolicy as TracePolicy,
+)
+from lf_eventstore.traces import (
+    purge_expired as purge_expired,
+)
+from lf_eventstore.traces import (
+    read_trace as read_trace,
+)
+from lf_eventstore.traces import (
+    store_trace as store_trace,
+)
 from lf_eventstore.ulid import new_ulid as new_ulid

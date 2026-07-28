@@ -10,6 +10,7 @@
 import asyncio
 from datetime import UTC, datetime
 
+from lf_actor.client import Inference
 from lf_actor.memory import WorkingMemory
 from lf_actor.phases import ActorPhases
 from lf_actor.shard_barrier import RedisShardBarrier
@@ -30,13 +31,13 @@ NUM_SHARDS = 2
 
 class _SilentAi:
     async def decide_action(self, *args, **kwargs):
-        return None
+        return Inference(None)
 
     async def converse(self, *args, **kwargs):
-        return None
+        return Inference(None)
 
     async def reflect(self, *args, **kwargs):
-        return None
+        return Inference(None)
 
 
 def split_pair():

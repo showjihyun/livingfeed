@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import dataclass
 from typing import Any
 
 import nats.errors
@@ -17,6 +18,23 @@ from nats.aio.client import Client as NatsClient
 from lf_actor.context import Bundle
 
 logger = logging.getLogger("lf.actor.ai_client")
+
+
+@dataclass(frozen=True)
+class Inference:
+    """AI Runtime 응답 — 결과와 그것을 만든 모델.
+
+    model을 함께 돌려주는 이유는 결정 기록이다 (ADR-021 §2): 어떤 모델이 이
+    판단을 지어냈는지가 없으면, 모델을 바꾼 뒤의 행동 변화를 데이터에서 설명할
+    수 없다. value가 None이면 실패이며(호출자가 규칙 폴백), 그때도 model은 있을
+    수 있다 — 응답은 왔는데 내용이 무효인 경우다.
+    """
+
+    value: Any | None = None
+    model: str | None = None
+
+    def __bool__(self) -> bool:
+        return self.value is not None
 
 #: DECIDE 응답 예산 — 상호작용 p95 4s(ADR-020)보다 여유 있게, tick 예산(60s) 안에서
 DEFAULT_TIMEOUT_S = 10.0
@@ -61,8 +79,8 @@ class AiRuntimeClient:
         tier: str,
         actor_id: str,
         tick: int,
-    ) -> dict[str, Any] | None:
-        """구조화 행동 의도를 요청한다. 실패는 None — 호출자가 규칙 폴백한다 (ADR-012)."""
+    ) -> Inference:
+        """구조화 행동 의도를 요청한다. 빈 Inference는 실패 — 호출자가 규칙 폴백한다 (ADR-012)."""
         request = {
             "task": "decide_action",
             "bundle": {"system": bundle.system, "user": bundle.user, "trace_id": bundle.trace_id},
@@ -78,16 +96,17 @@ class AiRuntimeClient:
             )
         except (nats.errors.NoRespondersError, nats.errors.TimeoutError) as e:
             logger.warning("AI Runtime 응답 없음 (actor=%s tick=%d): %s", actor_id, tick, e)
-            return None
+            return Inference()
 
         response = json.loads(reply.data)
+        model = response.get("model")
         if not response.get("ok"):
             logger.warning(
                 "추론 실패 (actor=%s tick=%d): %s", actor_id, tick, response.get("error")
             )
-            return None
+            return Inference(model=model)
         output = response.get("output")
-        return output if isinstance(output, dict) else None
+        return Inference(output if isinstance(output, dict) else None, model)
 
     async def reflect(
         self,
@@ -96,7 +115,7 @@ class AiRuntimeClient:
         *,
         actor_id: str,
         tick: int,
-    ) -> dict[str, Any] | None:
+    ) -> Inference:
         """경험을 곱씹은 통찰 하나를 요청한다 (ADR-008 LLM reflection, tier=warm 고정).
 
         실패는 None — 호출자가 통찰을 조용히 생략한다 (규칙 신념이 바닥을 지킨다).
@@ -117,14 +136,15 @@ class AiRuntimeClient:
             )
         except (nats.errors.NoRespondersError, nats.errors.TimeoutError) as e:
             logger.warning("AI Runtime 응답 없음 (reflect actor=%s): %s", actor_id, e)
-            return None
+            return Inference()
 
         response = json.loads(reply.data)
+        model = response.get("model")
         if not response.get("ok"):
             logger.info("reflect 생략 (actor=%s): %s", actor_id, response.get("error"))
-            return None
+            return Inference(model=model)
         output = response.get("output")
-        return output if isinstance(output, dict) else None
+        return Inference(output if isinstance(output, dict) else None, model)
 
     async def converse(
         self,
@@ -133,8 +153,8 @@ class AiRuntimeClient:
         tier: str,
         actor_id: str,
         tick: int,
-    ) -> str | None:
-        """플레이어 응답 텍스트를 요청한다. 실패는 None — 호출자가 규칙 답장으로 폴백한다.
+    ) -> Inference:
+        """플레이어 응답 텍스트를 요청한다. 빈 Inference는 실패 — 호출자가 규칙 답장으로 폴백한다.
 
         상호작용은 Hot 승격 대상이다 (ADR-011 §개입) — 기본 tier=hot으로 호출된다.
         rule 프로바이더는 converse를 지원하지 않으므로 dev 기본 환경에서는
@@ -155,14 +175,15 @@ class AiRuntimeClient:
             )
         except (nats.errors.NoRespondersError, nats.errors.TimeoutError) as e:
             logger.warning("AI Runtime 응답 없음 (converse actor=%s): %s", actor_id, e)
-            return None
+            return Inference()
 
         response = json.loads(reply.data)
+        model = response.get("model")
         if not response.get("ok"):
             logger.info("converse 폴백 (actor=%s): %s", actor_id, response.get("error"))
-            return None
+            return Inference(model=model)
         output = response.get("output")
         text = output.get("text") if isinstance(output, dict) else None
         if not isinstance(text, str) or not text.strip():
-            return None
-        return sanitize_reply(text)
+            return Inference(model=model)
+        return Inference(sanitize_reply(text), model)

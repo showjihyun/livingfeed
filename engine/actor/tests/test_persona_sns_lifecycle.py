@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from lf_actor.arc import ArcStore
-from lf_actor.client import AiRuntimeClient
+from lf_actor.client import AiRuntimeClient, Inference
 from lf_actor.emotion import EmotionAdapter
 from lf_actor.goal import GoalAdapter
 from lf_actor.mailbox import Mailbox
@@ -88,20 +88,22 @@ class _ScriptedAi:
         self._targets = targets
 
     async def decide_action(self, bundle, schema, *, tier, actor_id, tick):
-        return {
-            "action_kind": "speak",
-            "intent": "같은 날 들어온 동료에게 먼저 인사를 건넨다",
-            "target_actor_id": self._targets.get(actor_id),
-            "location_id": None,
-            "params": {},
-            "decision_trace": {"trace_id": f"scripted-{actor_id}-{tick}", "tier": tier},
-        }
+        return Inference(
+    {
+                "action_kind": "speak",
+                "intent": "같은 날 들어온 동료에게 먼저 인사를 건넨다",
+                "target_actor_id": self._targets.get(actor_id),
+                "location_id": None,
+                "params": {},
+                "decision_trace": {"trace_id": f"scripted-{actor_id}-{tick}", "tier": tier},
+            }
+        )
 
     async def converse(self, *args, **kwargs):
-        return None
+        return Inference(None)
 
     async def reflect(self, *args, **kwargs):
-        return None
+        return Inference(None)
 
 
 async def test_multiple_new_characters_form_a_society(conn, redis):
@@ -182,13 +184,14 @@ class _RecordingAi:
 
     async def decide_action(self, bundle, schema, *, tier, actor_id, tick):
         self.bundles.append(bundle.user)
-        return None  # 규칙 폴백 — 행동은 결정적으로, 관측은 컨텍스트로
+        # 규칙 폴백 — 행동은 결정적으로, 관측은 컨텍스트로
+        return Inference(None)
 
     async def converse(self, *args, **kwargs):
-        return None
+        return Inference(None)
 
     async def reflect(self, *args, **kwargs):
-        return None
+        return Inference(None)
 
 
 async def test_arc_shapes_a_characters_life(conn, redis):

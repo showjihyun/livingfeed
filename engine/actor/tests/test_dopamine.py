@@ -13,6 +13,7 @@ PG+Redis 필요 (conftest 게이트).
 
 from datetime import UTC, datetime
 
+from lf_actor.client import Inference
 from lf_actor.conversation import conversation_turns
 from lf_actor.mailbox import Mailbox
 from lf_actor.memory import WorkingMemory
@@ -80,13 +81,13 @@ class _SilentAi:
     """LLM 없는 세계 — 규칙 폴백만 돈다 (dev 결정성)."""
 
     async def decide_action(self, bundle, schema, *, tier, actor_id, tick):
-        return None
+        return Inference(None)
 
     async def converse(self, bundle, *, tier, actor_id, tick):
-        return None
+        return Inference(None)
 
     async def reflect(self, *args, **kwargs):
-        return None
+        return Inference(None)
 
 
 class _ConverseAi(_SilentAi):
@@ -99,18 +100,20 @@ class _ConverseAi(_SilentAi):
 
     async def decide_action(self, bundle, schema, *, tier, actor_id, tick):
         self.decide_calls += 1
-        return {
-            "action_kind": "share",
-            "intent": "오늘 있었던 일을 짧은 근황으로 남긴다",
-            "target_actor_id": None,
-            "location_id": None,
-            "params": {},
-            "decision_trace": {"trace_id": f"stub-{actor_id}-{tick}", "tier": tier},
-        }
+        return Inference(
+    {
+                "action_kind": "share",
+                "intent": "오늘 있었던 일을 짧은 근황으로 남긴다",
+                "target_actor_id": None,
+                "location_id": None,
+                "params": {},
+                "decision_trace": {"trace_id": f"stub-{actor_id}-{tick}", "tier": tier},
+            }
+        )
 
     async def converse(self, bundle, *, tier, actor_id, tick):
         self.converse_bundles.append(bundle.user)
-        return self._text
+        return Inference(self._text)
 
 
 def make_phases(redis, ai, *, mailbox=None, outreach=None) -> ActorPhases:

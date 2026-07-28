@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://livingfeed.dev/schemas/events/actor.decision.made.schema.json",
+  "title": "ActorDecisionMade",
+  "description": "결정의 입력 기록 — 이 인물이 결정할 때 무엇을 알고 있었는가 (ADR-009 §3, ADR-021 §2). ADR-009가 '모든 ContextBundle의 section → source ids가 이 이벤트 payload에 기록된다'고 단언한 그 이벤트다. actor.action.performed가 '무엇을 했는가'라면 이쪽은 '무엇을 보고 그렇게 했는가'이며, 둘은 trace_id로 이어진다. 프롬프트 원문은 여기 싣지 않는다 — 이벤트는 영구 보존이고 트레이스는 소모품이라 수명 주기가 다르다 (ADR-021 §5, 별도 저장소에 trace_id로 참조).",
+  "type": "object",
+  "properties": {
+    "trace_id": {
+      "type": "string",
+      "description": "이 결정을 만든 ContextBundle·LLM 호출의 trace_id. 산출 이벤트의 provenance.trace_id와 같은 값이라, 어떤 행동이든 그 결정의 입력으로 되짚을 수 있다 (ADR-018 Langfuse와도 같은 축).",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "purpose": {
+      "type": "string",
+      "description": "무엇을 결정하려 했는가 — Task Frame 이름 (decide_action, reply_to_player, reflect, ...). 같은 액터의 결정이라도 목적이 다르면 다른 실험 단위다.",
+      "pattern": "^[a-z_]+$"
+    },
+    "tier": {
+      "type": "string",
+      "description": "이 결정이 받은 인지 등급 (ADR-011 LOD). cold_rule은 LLM을 부르지 않은 결정적 경로다.",
+      "enum": ["hot", "warm", "cold_rule"]
+    },
+    "sections": {
+      "type": "array",
+      "description": "프롬프트에 실제로 들어간 섹션들 — 접히기 전의 구조 (ADR-021 §2). 예산에 잘려 나간 재료는 여기 없다: 기록되는 것은 '주려던 것'이 아니라 '실제로 들어간 것'이다.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "섹션 이름 — ADR-009의 고정 순서에서 온다 (identity, arc, relationships, episodes, conversation, working, seen_posts, world, task_frame)",
+            "pattern": "^[a-z_]+$"
+          },
+          "source_ids": {
+            "type": "array",
+            "description": "이 섹션에 들어간 사건들. 비어 있을 수 있다 — 작업 기억·대화는 평문 줄이라 사건 id가 없다. 없는 근거를 지어내지 않는다.",
+            "items": { "type": "string" }
+          },
+          "token_count": {
+            "type": "integer",
+            "description": "섹션이 쓴 토큰 근사 — 예산 집행과 같은 자(CHARS_PER_TOKEN)를 쓴다",
+            "minimum": 0
+          }
+        },
+        "required": ["kind", "source_ids", "token_count"],
+        "additionalProperties": false
+      }
+    },
+    "bundle_digest": {
+      "type": "string",
+      "description": "번들의 결정적 지문 — '<조립기버전>:sha256:<hex>' (ADR-021 §4 L1). 리플레이 때 같은 입력으로 재조립해 대조하면 결정 시점의 컨텍스트가 증명된다. 조립기 버전이 접두인 이유는 검증 실패와 검증 불가를 가르기 위해서다 — 조립 로직이 바뀌면 과거 지문은 전부 달라지고, 그것을 실패로 읽으면 없는 사고를 보고하게 된다.",
+      "pattern": "^[a-z0-9.]+:sha256:[0-9a-f]{64}$"
+    },
+    "model": {
+      "type": ["string", "null"],
+      "description": "응답한 모델 이름. 규칙 경로(cold_rule)면 null — 부른 모델이 없다.",
+      "maxLength": 120
+    },
+    "sampling": {
+      "type": ["object", "null"],
+      "description": "샘플링 파라미터 — L3(LLM 재실행)를 보증하지는 않지만(ADR-021 §4), 재현이 안 될 때 무엇이 달랐는지 좁히는 데 필요하다. 규칙 경로면 null.",
+      "properties": {
+        "temperature": { "type": ["number", "null"], "minimum": 0 },
+        "top_p": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "seed": { "type": ["integer", "null"] },
+        "max_output_tokens": { "type": ["integer", "null"], "minimum": 0 }
+      },
+      "required": ["temperature", "top_p", "seed", "max_output_tokens"],
+      "additionalProperties": false
+    },
+    "outcome": {
+      "type": "string",
+      "description": "결정이 어떻게 끝났는가. acted=결정이 행동이 됐다, hesitated=LLM이 답하지 않아 이번 tick은 머뭇거렸다, fallback=규칙이 대신 정했다. 강등·실패가 데이터에 남아야 '조용한 성공 위장'이 불가능해진다 (ADR-018 §4).",
+      "enum": ["acted", "hesitated", "fallback"]
+    },
+    "trace_retained": {
+      "type": "boolean",
+      "description": "프롬프트 원문이 트레이스 저장소에 남았는가 (ADR-021 §5). 기본 모드는 샘플링이라 대부분 false다 — 이 값이 없으면 '트레이스가 없다'와 '트레이스를 안 남겼다'를 구분할 수 없어, 사후에 빈 조회를 유실로 오해하게 된다."
+    }
+  },
+  "required": [
+    "trace_id",
+    "purpose",
+    "tier",
+    "sections",
+    "bundle_digest",
+    "model",
+    "sampling",
+    "outcome",
+    "trace_retained"
+  ],
+  "additionalProperties": false
+}

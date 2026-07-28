@@ -1,4 +1,4 @@
-﻿"""tick 파이프라인의 Actor Runtime 구현 (ADR-011/012).
+"""tick 파이프라인의 Actor Runtime 구현 (ADR-011/012).
 
 인지 루프의 Phase 절단면:
   perceive(메일박스 drain) → (appraise/emotion은 ADR-015 단계에서)
@@ -11,11 +11,20 @@ decide는 Context Fabric 조립 → AI Runtime 호출, 실패 시 규칙 폴백 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Callable
 from typing import Any
 
-from lf_eventstore import NewEvent, Provenance, append, current_head
+from lf_eventstore import (
+    DecisionTrace,
+    NewEvent,
+    Provenance,
+    TracePolicy,
+    append,
+    current_head,
+    store_trace,
+)
 from lf_relationship import STAGE_ACTION_KINDS
 from lf_schemas import registry
 from lf_tick.lod import (
@@ -42,7 +51,7 @@ from lf_actor.consolidation import (
     build_episode,
     describe_interaction,
 )
-from lf_actor.context import WorldContext, build
+from lf_actor.context import Bundle, WorldContext, build
 from lf_actor.conversation import conversation_turns
 from lf_actor.emotion import PRINCIPAL as EMOTION_PRINCIPAL
 from lf_actor.emotion import SHIFT_TYPE, EmotionAdapter, PendingShift
@@ -73,13 +82,15 @@ from lf_actor.rules import (
     fallback_reply,
     routine_action,
 )
-from lf_actor.semantic import SemanticMemory
+from lf_actor.semantic import Recollection, SemanticMemory
 from lf_actor.social import extract_comment, with_comment_path
 
 logger = logging.getLogger("lf.actor.phases")
 
 PRINCIPAL = "engine.actor"
 ACTION_TYPE = "actor.action.performed"
+#: 결정의 입력 기록 — ADR-009 §3이 약속한 이벤트 (ADR-021 §2)
+DECISION_TYPE = "actor.decision.made"
 MESSAGE_TYPE = "actor.message.sent"
 MEMORY_TYPE = "actor.memory.consolidated"
 BELIEF_TYPE = "actor.belief.formed"
@@ -215,6 +226,7 @@ class ActorPhases:
         hot_start_cap: int | None = None,
         hot_floor: int = 0,
         decide_concurrency: int = 8,
+        trace_policy: TracePolicy | None = None,
     ) -> None:
         if not personas:
             raise ValueError("액터가 없다 — 최소 1명의 페르소나가 필요하다")
@@ -234,6 +246,10 @@ class ActorPhases:
         # 꽉 채우되, NATS request의 10s 타임아웃을 태우는 깊은 대기열은 만들지 않는다
         # (기본 8 = 4 처리 + 4 대기). 봉투 순서는 gather가 제출 순서로 돌려줘 보존된다.
         self._decide_sem = asyncio.Semaphore(max(1, decide_concurrency))
+        #: 결정 원문의 보존 정책 (ADR-021 §5) — 기본은 1% 샘플링·7일.
+        #: 정책이 무엇이든 actor.decision.made 이벤트 자체는 언제나 남는다
+        #: (L1 재조립 보증의 근거라 샘플링 대상이 아니다).
+        self._trace_policy = trace_policy or TracePolicy()
         self._memory = memory
         #: Director의 인생 아크 저장 — 있으면 decide 컨텍스트에 방향을 주입한다 (ADR-013)
         self._arc = arc
@@ -279,6 +295,9 @@ class ActorPhases:
         self._intents: list[tuple[Any, ...]] = []
         #: 이번 tick에 응답할 상호작용: (actor_id, 원인 봉투, 답장 텍스트)
         self._replies: list[tuple[str, dict[str, Any], str, Provenance]] = []
+        #: 이번 tick의 결정 기록 — actor_id → payload들 (ADR-021 §2).
+        #: RESOLVE에서 그 액터의 스트림에 함께 적재된다.
+        self._decisions: dict[str, list[dict[str, Any]]] = {}
         #: 선제 DM 빈도 장부 — 없으면 선제 DM 경로 자체가 없다 (후방 호환)
         self._outreach = outreach
         #: 여운 저장소 (드라마 재생산, plan/02) — 없으면 경로 자체가 없다 (후방 호환)
@@ -519,6 +538,7 @@ class ActorPhases:
     async def decide(self, ctx: TickContext) -> dict[str, int]:
         self._intents = []
         self._replies = []
+        self._decisions = {}
         self._pending_comments = []
         self._proactive_dms = []
         decided = {"hot": 0, "warm": 0, "cold": 0}
@@ -686,12 +706,17 @@ class ActorPhases:
             episodes=episodes, conversation=conversation, arc=arc,
             relationships=relationships,
         )
-        text = await self._ai.converse(bundle, tier="hot", actor_id=actor_id, tick=ctx.tick)
+        res = await self._ai.converse(bundle, tier="hot", actor_id=actor_id, tick=ctx.tick)
+        text = res.value
         if text is None:
             text = fallback_reply(persona, envelope["payload"]["text"])
             provenance = Provenance.derived("actor.rules:fallback_reply")
         else:
             provenance = Provenance.generated(bundle.trace_id)
+        await self._record_decision(
+            ctx, actor_id, bundle, purpose=bundle.purpose, tier="hot",
+            outcome="acted" if res else "fallback", model=res.model, output=res.value,
+        )
         return (actor_id, envelope, text, provenance)
 
     async def _reply_to_comment(
@@ -712,12 +737,17 @@ class ActorPhases:
             episodes=await self._recall(ctx.world_id, actor_id, working),
             arc=arc, relationships=relationships,
         )
-        text = await self._ai.converse(bundle, tier="hot", actor_id=actor_id, tick=ctx.tick)
+        res = await self._ai.converse(bundle, tier="hot", actor_id=actor_id, tick=ctx.tick)
+        text = res.value
         if text is None:
             text = fallback_reply(persona, envelope["payload"]["text"])
             provenance = Provenance.derived("actor.rules:fallback_reply")
         else:
             provenance = Provenance.generated(bundle.trace_id)
+        await self._record_decision(
+            ctx, actor_id, bundle, purpose=bundle.purpose, tier="hot",
+            outcome="acted" if res else "fallback", model=res.model, output=res.value,
+        )
         return (actor_id, envelope, text, provenance)
 
     async def _greet_first_reaction(
@@ -735,12 +765,17 @@ class ActorPhases:
             persona, working, world, purpose="greet_reaction",
             relationships=await self._relationship_summary(ctx.world_id, actor_id),
         )
-        text = await self._ai.converse(bundle, tier="warm", actor_id=actor_id, tick=ctx.tick)
+        res = await self._ai.converse(bundle, tier="warm", actor_id=actor_id, tick=ctx.tick)
+        text = res.value
         if text is None:
             text = fallback_greeting(persona, envelope["payload"]["player_id"])
             provenance = Provenance.derived("actor.rules:fallback_greeting")
         else:
             provenance = Provenance.generated(bundle.trace_id)
+        await self._record_decision(
+            ctx, actor_id, bundle, purpose=bundle.purpose, tier="warm",
+            outcome="acted" if res else "fallback", model=res.model, output=res.value,
+        )
         logger.info(
             "첫 접촉 인사: %s → %s tick=%d (plan/03 첫 개입)",
             actor_id, envelope["payload"]["player_id"], ctx.tick,
@@ -781,7 +816,12 @@ class ActorPhases:
             arc=await self._arc_of(ctx.world_id, actor_id),
             relationships=await self._relationship_summary(ctx.world_id, actor_id),
         )
-        text = await self._ai.converse(bundle, tier="warm", actor_id=actor_id, tick=ctx.tick)
+        res = await self._ai.converse(bundle, tier="warm", actor_id=actor_id, tick=ctx.tick)
+        text = res.value
+        await self._record_decision(
+            ctx, actor_id, bundle, purpose=bundle.purpose, tier="warm",
+            outcome="acted" if res else "hesitated", model=res.model, output=res.value,
+        )
         if text is None:
             return False  # 조용히 생략 — 쿨다운도 소모하지 않는다 (다음 모먼트에 다시)
         await self._outreach.mark(ctx.world_id, actor_id, target, ctx.tick)
@@ -826,8 +866,15 @@ class ActorPhases:
             arc=await self._arc_of(ctx.world_id, actor_id),
             relationships=await self._relationship_summary(ctx.world_id, actor_id),
         )
-        payload = await self._ai.decide_action(
+        # res는 여운(Resonance)이다 — 추론 결과는 따로 받는다 (이름이 겹치면 조용히 샌다)
+        inference = await self._ai.decide_action(
             bundle, schema, tier=Tier.WARM.value, actor_id=actor_id, tick=ctx.tick
+        )
+        payload = inference.value
+        await self._record_decision(
+            ctx, actor_id, bundle, purpose=bundle.purpose, tier=Tier.WARM.value,
+            outcome="acted" if inference else "fallback", model=inference.model,
+            output=json.dumps(payload, ensure_ascii=False) if payload else None,
         )
         if payload is None:
             payload = fallback_follow_up(
@@ -931,10 +978,17 @@ class ActorPhases:
         bundle = build(
             persona, working, world, purpose=purpose,
             episodes=episodes, arc=arc, relationships=relationships,
-            seen_posts=[self._post_line(e) for e in seen] or None,
+            # (post_id, 표시줄) — 본 글은 사건이라 결정의 근거로 기록된다 (ADR-021 §2)
+            seen_posts=[(e["event_id"], self._post_line(e)) for e in seen] or None,
         )
-        payload = await self._ai.decide_action(
+        res = await self._ai.decide_action(
             bundle, schema, tier=tier, actor_id=actor_id, tick=ctx.tick
+        )
+        payload = res.value
+        await self._record_decision(
+            ctx, actor_id, bundle, purpose=bundle.purpose, tier=tier,
+            outcome="acted" if res else "hesitated", model=res.model,
+            output=json.dumps(payload, ensure_ascii=False) if payload else None,
         )
         if payload is None:
             return None, bundle.trace_id  # 머뭇거림 — 본 글은 다음 decide로 넘어간다
@@ -979,7 +1033,70 @@ class ActorPhases:
                 edges[author] = state.dimensions
         return edges
 
-    async def _recall(self, world_id: str, actor_id: str, working: list[str]) -> list[str]:
+    async def _record_decision(
+        self,
+        ctx: TickContext,
+        actor_id: str,
+        bundle: Bundle,
+        *,
+        purpose: str,
+        tier: str,
+        outcome: str,
+        model: str | None,
+        output: str | None = None,
+    ) -> None:
+        """결정의 입력을 기록한다 — "무엇을 보고 그렇게 했는가" (ADR-021 §2).
+
+        원문은 정책이 허락할 때만 별도 저장소에 남고(§5), 섹션 구조와 digest는
+        언제나 이벤트로 남는다 — 그것이 L1 재조립 보증의 근거다. 트레이스 저장이
+        실패해도 결정 기록은 남긴다: 관측이 시뮬레이션을 멈춰서는 안 된다.
+        """
+        try:
+            retained = await store_trace(
+                ctx.conn,
+                DecisionTrace(
+                    trace_id=bundle.trace_id,
+                    world_id=ctx.world_id,
+                    actor_id=actor_id,
+                    tick=ctx.tick,
+                    purpose=purpose,
+                    system_prompt=bundle.system,
+                    user_prompt=bundle.user,
+                    output=output,
+                    model=model,
+                ),
+                self._trace_policy,
+            )
+        except Exception as e:  # noqa: BLE001 — 관측 실패가 tick을 멈추면 안 된다
+            logger.warning("결정 트레이스 저장 실패(기록은 계속): %s", e)
+            retained = False
+
+        self._decisions.setdefault(actor_id, []).append(
+            {
+                "trace_id": bundle.trace_id,
+                "purpose": purpose,
+                "tier": tier,
+                "sections": [
+                    {
+                        "kind": section.kind,
+                        "source_ids": list(section.source_ids),
+                        "token_count": section.token_count,
+                    }
+                    for section in bundle.sections
+                ],
+                "bundle_digest": bundle.digest,
+                "model": model,
+                # 샘플링 파라미터는 AI Runtime이 아직 응답에 싣지 않는다 —
+                # 스키마는 null을 허용하며, 에코가 붙는 단계에서 채워진다 (ADR-018).
+                "sampling": None,
+                "outcome": outcome,
+                "trace_retained": retained,
+            }
+        )
+
+    async def _recall(
+        self, world_id: str, actor_id: str, working: list[str]
+    ) -> list[Recollection]:
         """장기 기억 회상 — 최신 지각을 질의로 유사 에피소드 top-k (ADR-008)."""
         if self._semantic is None or not working:
             return []
@@ -1174,6 +1291,27 @@ class ActorPhases:
         events_by_actor: dict[str, list[NewEvent]] = {}
         memos: dict[str, list[str]] = {}
 
+        # 결정 기록이 먼저다 — 같은 스트림에서 stream_seq가 순서를 정하므로,
+        # 결정이 그 결과보다 앞에 놓여야 인과가 읽는 순서와 어긋나지 않는다.
+        # 출처는 derived다: 이 이벤트는 조립기가 남긴 사실이지 LLM의 해석이 아니다
+        # (그 안에 실린 model·outcome이 LLM 쪽을 가리킬 뿐이다, ADR-021 §1).
+        for actor_id in sorted(self._decisions):
+            for payload in self._decisions[actor_id]:
+                events_by_actor.setdefault(actor_id, []).append(
+                    NewEvent(
+                        world_id=ctx.world_id,
+                        stream="actor",
+                        stream_key=actor_id,
+                        type=DECISION_TYPE,
+                        tick=ctx.tick,
+                        actor_id=actor_id,
+                        provenance=Provenance.derived(
+                            f"context.assemble:{payload['purpose']}"
+                        ),
+                        payload=payload,
+                    )
+                )
+
         for actor_id, envelope, text, provenance in self._replies:
             events_by_actor.setdefault(actor_id, []).append(
                 self._reply_event(ctx, actor_id, envelope, text, provenance)
@@ -1306,7 +1444,10 @@ class ActorPhases:
                     target = env["payload"].get("target_actor_id")
                     if target and target != actor_id:
                         self._resolved_messages.append((actor_id, env))
-            for memo in memos[actor_id]:
+            # 결정 기록만 있고 산출이 없는 액터도 있다(머뭇거림) — 남길 메모가 없다.
+            # 작업 기억은 '무엇을 했나'의 기록이라, 안 한 일을 적으면 다음 tick의
+            # 컨텍스트가 오염된다 (ADR-021 §결과 "관측이 시뮬레이션을 바꿀 위험").
+            for memo in memos.get(actor_id, ()):
                 # 자기 행동/응답 → Working Memory 유입 (지각의 최소 형태, ADR-008)
                 await self._memory.add(ctx.world_id, actor_id, memo)
             logger.info(
@@ -1535,8 +1676,14 @@ class ActorPhases:
             self._personas[actor_id], [f"아는 사람들: {roster}", *working],
             world, purpose="reflect",
         )
-        output = await self._ai.reflect(
+        res = await self._ai.reflect(
             bundle, insight_schema(known), actor_id=actor_id, tick=ctx.tick
+        )
+        output = res.value
+        await self._record_decision(
+            ctx, actor_id, bundle, purpose=bundle.purpose, tier="warm",
+            outcome="acted" if res else "hesitated", model=res.model,
+            output=json.dumps(output, ensure_ascii=False) if output else None,
         )
         if output is None:
             return None

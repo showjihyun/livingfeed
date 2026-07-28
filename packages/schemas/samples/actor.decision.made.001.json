@@ -1,0 +1,43 @@
+{
+  "event_id": "01JZK7Q3W0000000000000000W",
+  "stream": "actor",
+  "type": "actor.decision.made",
+  "schema_version": 1,
+  "world_id": "w_main",
+  "actor_id": "a_aria_kim",
+  "tick": 42,
+  "occurred_at": "2026-07-11T09:00:41Z",
+  "causation_id": null,
+  "correlation_id": "01JZK7Q3W0000000000000000B",
+  "provenance": {
+    "kind": "derived",
+    "rule_id": "context.assemble:decide_action"
+  },
+  "payload": {
+    "trace_id": "01JZK7Q3W0000000000000000C",
+    "purpose": "decide_action",
+    "tier": "hot",
+    "sections": [
+      { "kind": "identity", "source_ids": [], "token_count": 118 },
+      { "kind": "relationships", "source_ids": [], "token_count": 47 },
+      {
+        "kind": "episodes",
+        "source_ids": ["01JZK7Q3W0000000000000000G"],
+        "token_count": 39
+      },
+      { "kind": "working", "source_ids": [], "token_count": 62 },
+      { "kind": "world", "source_ids": [], "token_count": 31 },
+      { "kind": "task_frame", "source_ids": [], "token_count": 144 }
+    ],
+    "bundle_digest": "v1:sha256:3b0c2e1a7d4f95886c1f0a2b5d3e47c9a8f6021d4e7b93c5a0182f6d4b9e7c30",
+    "model": "claude-sonnet-5",
+    "sampling": {
+      "temperature": 0.8,
+      "top_p": 1.0,
+      "seed": null,
+      "max_output_tokens": 600
+    },
+    "outcome": "acted",
+    "trace_retained": false
+  }
+}

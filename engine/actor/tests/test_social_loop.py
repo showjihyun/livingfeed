@@ -8,6 +8,7 @@ PG+Redis 필요 (conftest 게이트).
 from datetime import UTC, datetime
 
 import pytest
+from lf_actor.client import Inference
 from lf_actor.emotion import EmotionAdapter
 from lf_actor.mailbox import Mailbox
 from lf_actor.memory import WorkingMemory
@@ -87,13 +88,13 @@ class _SilentAi:
     """LLM 없는 세계 — 규칙 폴백만 돈다 (dev 결정성)."""
 
     async def decide_action(self, bundle, schema, *, tier, actor_id, tick):
-        return None
+        return Inference(None)
 
     async def converse(self, bundle, *, tier, actor_id, tick):
-        return None
+        return Inference(None)
 
     async def reflect(self, *args, **kwargs):
-        return None
+        return Inference(None)
 
 
 async def test_feed_post_is_perceived_without_waking_sleeper(conn, redis):
@@ -144,23 +145,26 @@ class _CommentingAi:
         self.schemas.append(schema)
         comment_path = schema.get("properties", {}).get("comment")
         if comment_path is None:
-            return None  # 본 글이 없으면 댓글 경로 자체가 없어야 한다
+            # 본 글이 없으면 댓글 경로 자체가 없어야 한다
+            return Inference(None)
         post_id = comment_path["properties"]["post_id"]["enum"][0]
-        return {
-            "action_kind": "observe",
-            "intent": "피드를 훑다가 아는 얼굴의 글에 마음이 멈춘다",
-            "target_actor_id": None,
-            "location_id": None,
-            "params": {},
-            "decision_trace": {"trace_id": f"c-{actor_id}-{tick}", "tier": tier},
-            "comment": {"post_id": post_id, "text": "새 글 반갑다. 그 시작, 응원할게!"},
-        }
+        return Inference(
+            {
+                "action_kind": "observe",
+                "intent": "피드를 훑다가 아는 얼굴의 글에 마음이 멈춘다",
+                "target_actor_id": None,
+                "location_id": None,
+                "params": {},
+                "decision_trace": {"trace_id": f"c-{actor_id}-{tick}", "tier": tier},
+                "comment": {"post_id": post_id, "text": "새 글 반갑다. 그 시작, 응원할게!"},
+            }
+        )
 
     async def converse(self, bundle, *, tier, actor_id, tick):
-        return None
+        return Inference(None)
 
     async def reflect(self, *args, **kwargs):
-        return None
+        return Inference(None)
 
 
 async def test_moved_actor_leaves_a_comment_through_llm_decide(conn, redis):
