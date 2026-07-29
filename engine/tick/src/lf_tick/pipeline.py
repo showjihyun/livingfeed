@@ -26,6 +26,18 @@ class TickContext:
     world_time: datetime
     #: 이벤트 적재용 연결 (autocommit) — 단계들은 append()로만 역사를 쓴다 (ADR-002)
     conn: AsyncConnection
+    #: 인물이 아는 세계의 이름 — 기본은 world_id와 같다.
+    #:
+    #: 재생·분기 세계에서만 갈린다 (ADR-021 §4): 역사는 새 world_id에 쌓지만,
+    #: 그 세계의 주민은 자기가 원본 세계에 산다고 안다. world_id는 기록용 라벨이지
+    #: 인물이 지각하는 것이 아니기 때문이다 — 갈라 두지 않으면 재생된 컨텍스트가
+    #: 라벨 하나 때문에 원본과 달라져, 대조가 영원히 어긋난다.
+    perceived_world_id: str | None = None
+
+    @property
+    def known_world_id(self) -> str:
+        """결정 컨텍스트에 실리는 세계 이름 (ADR-009 World 섹션)."""
+        return self.perceived_world_id or self.world_id
 
 
 class TickPhases(Protocol):
