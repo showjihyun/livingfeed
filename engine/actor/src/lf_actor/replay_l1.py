@@ -32,9 +32,14 @@ resolver가 이벤트 로그(+ 호출자가 준 페르소나 명부)에서 복�
                  만든다 (memo.py) — 포맷을 두 곳에서 쓰면 갈리는 순간 러너가
                  없는 회귀를 보고한다. 지각이 없었던 구간에서만 완결된다:
                  배달된 봉투의 서술과 감정 줄은 배달 이력·감정 상태에 달려 있다.
-                 배달 판정은 mailbox.route_targets가 유일한 지점이고 네 규칙 중
-                 셋이 봉투만으로 닫히지만, 피드 팬아웃은 관계 상태를 봐야 해서
-                 피드 포스트가 하나라도 있으면 단정하지 않는다.
+                 배달 판정은 mailbox.route_targets가 유일한 지점이다. 네 규칙 중
+                 셋은 봉투만으로 닫히고, 남는 피드 팬아웃도 **값 없이 닫히는 경우가
+                 있다**: 작성자와 엣지를 가진 독자가 없으면 해시 선정(순수)이고,
+                 관련 독자가 상한 이하면 순위가 결과를 바꾸지 않아 전원이 대상이다.
+                 상한을 넘을 때만 salience 순위가 필요해 포기한다.
+    relationships  섹션 자체는 아직 열지 않았다 — describe_edges가 salience와 차원
+                 값을 그대로 쓰는데, 그 값은 임계 미만 변화와 감쇠로 이벤트 없이
+                 흔들린다. 엣지의 **존재**는 단조라 정확하지만 **값**은 아니다.
 
 복원되지 않는 것: relationships, conversation, seen_posts (전부 Redis 상태이거나
 그 파생). 그 섹션이 기록에 있으면 그 결정은 검증 불가다.
@@ -68,7 +73,9 @@ from lf_actor.context import DigestVerdict, WorldContext, build, verify_digest
 from lf_actor.memo import memo_for_own_event
 from lf_actor.memory import DEFAULT_MAX_ENTRIES
 from lf_actor.persona import Persona
+from lf_actor.rhythm import default_params
 from lf_actor.semantic import Recollection
+from lf_actor.social import fanout_targets
 
 logger = logging.getLogger("lf.actor.replay_l1")
 
@@ -121,10 +128,19 @@ WHERE world_id = %s AND global_seq < %s AND (
 LIMIT 1
 """
 
-_ANY_FEED_SQL = """
-SELECT 1 FROM es.events
+#: 세계에 순환된 글들 — 팬아웃 대상을 우리가 다시 고른다
+_FEED_SQL = """
+SELECT global_seq, event_id, type, tick, actor_id, payload FROM es.events
 WHERE world_id = %s AND global_seq < %s AND type = 'feed.post.published'
-LIMIT 1
+ORDER BY global_seq
+"""
+
+#: 엣지의 **존재**는 이벤트로 단조 증가한다 (sparse 생성 시 first_met, 이후 변화).
+#: 값(salience)과 달리 존재는 임계·감쇠로 흔들리지 않아 정확히 복원된다.
+_EDGES_SQL = """
+SELECT DISTINCT split_part(stream_key, '|', 1) FROM es.events
+WHERE world_id = %s AND stream = 'relationship' AND global_seq < %s
+  AND split_part(stream_key, '|', 2) = %s
 """
 
 #: 이 액터에게 배달됐을 봉투들 — 순수 규칙으로 닫히는 셋만 (피드는 별도 판정)
@@ -242,16 +258,49 @@ async def _resolve_arc(
     return None if row is None else Arc(stage=row[0], intention=row[1])
 
 
-async def _feed_posts_exist(
-    conn: AsyncConnection, world_id: str, global_seq: int
-) -> bool:
-    """피드 포스트가 하나라도 있는가 — 있으면 팬아웃 대상을 알 수 없다.
+async def _feed_deliveries(
+    conn: AsyncConnection, world_id: str, global_seq: int, roster: list[str]
+) -> dict[str, list[dict[str, Any]]] | None:
+    """순환된 글의 배달 대상을 다시 고른다 — 정확히 고를 수 있을 때만 (아니면 None).
 
-    route_targets의 네 규칙 중 셋은 봉투만으로 닫히지만 피드 팬아웃은 관계
-    상태를 본다. 모르는 것을 '없었다'로 세면 복원이 조용히 틀린다.
+    fanout_targets는 순수하지만 입력으로 '독자→작성자' salience를 받는다. salience는
+    임계 미만 변화와 감쇠로 이벤트 없이 흔들려 정확한 복원이 안 된다. 그러나 선정
+    규칙을 보면 **값이 필요 없는 경우가 있다**:
+
+      · 작성자와 엣지를 가진 독자가 하나도 없으면 → (post_id, 독자) 해시 선정.
+        관계를 전혀 보지 않으므로 순수 함수다.
+      · 관련 독자가 상한(feed_fanout) 이하이면 → 그들 전원이 대상이다.
+        순위가 결과를 바꾸지 않으므로 salience가 필요 없다.
+
+    관련 독자가 상한을 넘을 때만 순위가 결과를 가르고, 그때는 포기한다 —
+    모르는 순서로 고른 대상 집합은 조용히 틀린 작업 기억을 만든다.
     """
-    cur = await conn.execute(_ANY_FEED_SQL, (world_id, global_seq))
-    return await cur.fetchone() is not None
+    limit = int(default_params()["social"]["feed_fanout"])
+    cur = await conn.execute(_FEED_SQL, (world_id, global_seq))
+    posts = await cur.fetchall()
+    if not posts:
+        return {}
+
+    delivered: dict[str, list[dict[str, Any]]] = {}
+    for _, event_id, kind, tick, author, payload in posts:
+        if payload.get("visibility") != "world" or not author:
+            continue  # 비공개·세계 뉴스는 순환하지 않는다 (FeedFanout과 같은 규약)
+        cur = await conn.execute(_EDGES_SQL, (world_id, global_seq, author))
+        related = sorted({r for (r,) in await cur.fetchall()} & set(roster) - {author})
+        if len(related) > limit:
+            return None  # 순위가 결과를 가른다 — salience 없이는 못 고른다
+        targets = (
+            related
+            if related
+            else fanout_targets(author, event_id, roster, {}, limit=limit)
+        )
+        envelope = {
+            "type": kind, "tick": tick, "payload": payload,
+            "event_id": event_id, "actor_id": author,
+        }
+        for target in targets:
+            delivered.setdefault(target, []).append(envelope)
+    return delivered
 
 
 async def _rebuild_working(
@@ -270,31 +319,35 @@ async def _rebuild_working(
     이벤트는 남기지 않기 때문이다. 그래서 지각 하나하나가 shift를 낳았을 때만
     (causation_id로 대조) 복원을 주장한다.
     """
-    if await _feed_posts_exist(conn, world_id, global_seq):
-        return None
+    feed = await _feed_deliveries(conn, world_id, global_seq, sorted(roster))
+    if feed is None:
+        return None  # 순환 글의 대상을 정확히 고르지 못했다
 
     cur = await conn.execute(_PERCEIVED_SQL, (world_id, global_seq, actor_id, actor_id))
-    perceived = await cur.fetchall()
+    perceived = [
+        {"event_id": eid, "type": kind, "tick": tick, "payload": payload}
+        for _, eid, kind, tick, payload in await cur.fetchall()
+    ]
+    # 순환으로 닿은 글도 지각이다 — 서술과 감정 한 줄이 함께 들어간다
+    perceived += feed.get(actor_id, [])
     cur = await conn.execute(_SHIFTS_SQL, (world_id, actor_id, global_seq))
     shifts = await cur.fetchall()
 
     if perceived:
         # 모든 지각이 shift를 낳았는가 — 아니면 최종 상태를 모른다
         caused = {c for _, _, c, _ in shifts if c}
-        if caused != {event_id for _, event_id, _, _, _ in perceived}:
+        if caused != {e["event_id"] for e in perceived}:
             return None
 
     # 지각을 tick별로 묶는다: 그 봉투가 언제 지각됐는지는 shift의 tick이 말해 준다
     # (드레인 시점은 로그에 없지만, 그 지각이 만든 감정 변화는 남는다)
     tick_of = {c: t for _, t, c, _ in shifts if c}
     by_tick: dict[int, list[dict[str, Any]]] = {}
-    for _, event_id, kind, tick, payload in perceived:
-        perceive_tick = tick_of.get(event_id)
+    for envelope in perceived:
+        perceive_tick = tick_of.get(envelope["event_id"])
         if perceive_tick is None:
             return None  # 언제 지각됐는지 모른다
-        by_tick.setdefault(perceive_tick, []).append(
-            {"type": kind, "tick": tick, "payload": payload, "event_id": event_id}
-        )
+        by_tick.setdefault(perceive_tick, []).append(envelope)
 
     # 그 tick의 마지막 shift가 PERCEIVE 종료 시점의 상태다
     mood_at: dict[int, str] = {}
