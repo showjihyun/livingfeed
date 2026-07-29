@@ -40,6 +40,56 @@ class Usage:
 
 
 @dataclass(frozen=True)
+class Sampling:
+    """이번 호출이 **실제로 보낸** 샘플링 파라미터 (ADR-021 §2).
+
+    None은 "우리가 지정하지 않았다 = 프로바이더 기본값"이라는 뜻이다. '모른다'가
+    아니라 '보내지 않았다'로 읽어야 한다 — 재현이 안 될 때 무엇이 달랐는지
+    좁히려면 그 둘의 구분이 결정적이다.
+
+    지정하지 않는 것이 기본인 이유: 온도를 우리가 박아 넣으면 프로바이더가
+    모델별로 고른 기본값을 덮어써 세계의 결이 조용히 달라진다. 실험이 필요할
+    때만 LF_AI_TEMPERATURE 등으로 명시해 고정한다 (그 고정 자체가 기록에 남는다).
+    """
+
+    temperature: float | None = None
+    top_p: float | None = None
+    seed: int | None = None
+    max_output_tokens: int | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "seed": self.seed,
+            "max_output_tokens": self.max_output_tokens,
+        }
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any] | None) -> Sampling | None:
+        if data is None:
+            return None
+        return cls(
+            temperature=data.get("temperature"),
+            top_p=data.get("top_p"),
+            seed=data.get("seed"),
+            max_output_tokens=data.get("max_output_tokens"),
+        )
+
+    def sent_kwargs(self) -> dict[str, Any]:
+        """프로바이더 호출에 실을 인자 — 지정된 것만 (None은 아예 보내지 않는다)."""
+        return {
+            name: value
+            for name, value in (
+                ("temperature", self.temperature),
+                ("top_p", self.top_p),
+                ("seed", self.seed),
+            )
+            if value is not None
+        }
+
+
+@dataclass(frozen=True)
 class Completion:
     """프로바이더 한 호출의 결과 — 스키마 검증 전 구조화 출력 후보 + 계량기.
 
@@ -49,6 +99,8 @@ class Completion:
 
     output: dict[str, Any]
     usage: Usage = Usage()
+    #: 이 호출이 실제로 보낸 샘플링 — 규칙 프로바이더는 부른 모델이 없어 None
+    sampling: Sampling | None = None
 
 
 @dataclass(frozen=True)
@@ -109,9 +161,17 @@ class InferenceResponse:
     output: dict[str, Any] | None = None
     model: str | None = None
     error: str | None = None
+    #: 결정 기록(actor.decision.made.sampling)의 원천 — 엔진이 그대로 싣는다
+    sampling: Sampling | None = None
 
     def to_json(self) -> dict[str, Any]:
-        return {"ok": self.ok, "output": self.output, "model": self.model, "error": self.error}
+        return {
+            "ok": self.ok,
+            "output": self.output,
+            "model": self.model,
+            "error": self.error,
+            "sampling": None if self.sampling is None else self.sampling.to_json(),
+        }
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> InferenceResponse:
@@ -120,6 +180,7 @@ class InferenceResponse:
             output=data.get("output"),
             model=data.get("model"),
             error=data.get("error"),
+            sampling=Sampling.from_json(data.get("sampling")),
         )
 
 

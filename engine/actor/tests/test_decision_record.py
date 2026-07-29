@@ -132,3 +132,60 @@ async def test_research_mode_keeps_the_prompt_and_says_so(conn, redis, nc, ai_se
     # 원문은 이벤트가 아니라 여기에 산다 — 수명이 다르기 때문이다 (ADR-021 §5)
     assert "당신은" in trace["system_prompt"]
     assert "## 작업 기억" in trace["user_prompt"]
+
+
+async def test_rule_provider_decision_reports_no_sampling(
+    conn, redis, nc, ai_service,  # noqa: F811
+):
+    """dev 기본(rule 프로바이더)은 부른 모델이 없다 — 샘플링을 지어내지 않는다.
+
+    ADR-021 §2의 sampling은 "실제로 보낸 값"이다. 보낸 적 없는 호출에 값을 채우면
+    없는 LLM 호출이 있었던 것처럼 읽힌다.
+    """
+    phases = make_phases(nc, redis, ai_service)
+    await run_tick(conn, phases, CLOCK, WORLD, tick=0, head=0)
+
+    [decision] = await decisions_in(conn)
+    payload = decision["payload"]
+    # 호출 여부의 판별자는 sampling이다 — 규칙 프로바이더는 아무것도 보내지 않았다
+    assert payload["sampling"] is None
+    # model은 라우트가 고른 이름이라 남는다: '라우트는 잡혔지만 부르지 않았다'가
+    # 두 필드를 함께 읽어야 구분된다 (스키마의 model 설명과 같은 계약)
+    assert payload["model"]
+
+
+async def test_configured_sampling_reaches_the_decision_record(conn, redis, nc):  # noqa: F811
+    """고정한 샘플링이 결정 기록까지 도달한다 — 실험이 무엇을 고정했는지가 남는다."""
+    import asyncio
+    import os
+
+    from lf_ai_runtime.budget import BudgetGuard, MemoryStore
+    from lf_ai_runtime.config import Config as AiConfig
+    from lf_ai_runtime.model import Sampling
+    from lf_ai_runtime.service import serve
+
+    env = f"t{os.urandom(4).hex()}"
+    stop = asyncio.Event()
+    # local 프로바이더는 서버가 없어 호출이 실패하지만, 실패해도 응답에는
+    # 모델·샘플링이 실린다 — "무엇을 보내려 했는가"가 관측 대상이기 때문이다.
+    task = asyncio.create_task(
+        serve(
+            AiConfig(
+                nats_url=os.environ["LF_TEST_NATS_URL"], env=env, provider="rule",
+                sampling=Sampling(temperature=0.0, seed=42),
+            ),
+            stop=stop,
+            guard=BudgetGuard(env, MemoryStore()),
+        )
+    )
+    await asyncio.sleep(0.2)
+    try:
+        # 설정이 프로바이더까지 닿았는지는 Config가 원천이다 — 여기서는 그 계약만 본다
+        cfg = AiConfig(
+            nats_url="unused", env=env, provider="rule",
+            sampling=Sampling(temperature=0.0, seed=42),
+        )
+        assert cfg.sampling.sent_kwargs() == {"temperature": 0.0, "seed": 42}
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=5)

@@ -514,3 +514,44 @@ async def test_world_decisions_have_no_actor_bucket():
     day = "2026-07-27"
     assert await store.get(spend_key(ENV, WORLD, day)) is not None
     assert await store.get(spend_key(ENV, WORLD, day, "None")) is None
+
+
+# ── 샘플링 에코 — 실제로 보낸 값이 기록의 원천이다 (ADR-021 §2) ─────────────────
+
+
+def test_sampling_defaults_to_sending_nothing():
+    """미설정이 기본이다 — 온도를 우리가 박으면 프로바이더 기본값을 덮어써
+    세계의 결이 조용히 달라진다. 지정할 때만 고정한다."""
+    from lf_ai_runtime.config import sampling_from_env
+
+    assert sampling_from_env({}).sent_kwargs() == {}
+    # 빈 문자열도 미설정이다 — compose의 `LF_AI_TEMPERATURE=`를 0.0으로 읽으면 안 된다
+    assert sampling_from_env({"LF_AI_TEMPERATURE": ""}).sent_kwargs() == {}
+    # 읽지 못하는 값이 가드를 죽이지 않는다
+    assert sampling_from_env({"LF_AI_SEED": "abc"}).sent_kwargs() == {}
+
+
+def test_configured_sampling_is_actually_sent():
+    from lf_ai_runtime.config import sampling_from_env
+
+    sampling = sampling_from_env({"LF_AI_TEMPERATURE": "0", "LF_AI_SEED": "42"})
+    assert sampling.sent_kwargs() == {"temperature": 0.0, "seed": 42}
+    assert sampling.top_p is None  # 주지 않은 것은 여전히 프로바이더 몫
+
+
+def test_sampling_survives_the_wire():
+    """엔진이 받는 것은 JSON이다 — 왕복에서 값이 새면 기록이 비어 버린다."""
+    from lf_ai_runtime.model import InferenceResponse, Sampling
+
+    sent = Sampling(temperature=0.0, seed=42, max_output_tokens=600)
+    restored = InferenceResponse.from_json(
+        InferenceResponse(ok=True, output={}, model="m", sampling=sent).to_json()
+    )
+    assert restored.sampling == sent
+
+
+def test_rule_provider_reports_no_sampling():
+    """규칙 경로는 부른 모델이 없다 — 샘플링을 지어내면 없는 호출을 있는 것처럼 만든다."""
+    from lf_ai_runtime.model import InferenceResponse
+
+    assert InferenceResponse(ok=True, output={}, model=None).to_json()["sampling"] is None

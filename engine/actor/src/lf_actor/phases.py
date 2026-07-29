@@ -741,7 +741,8 @@ class ActorPhases:
             provenance = Provenance.generated(bundle.trace_id)
         await self._record_decision(
             ctx, actor_id, bundle, purpose=bundle.purpose, tier="hot",
-            outcome="acted" if res else "fallback", model=res.model, output=res.value,
+            outcome="acted" if res else "fallback", model=res.model,
+            sampling=res.sampling, output=res.value,
         )
         return (actor_id, envelope, text, provenance)
 
@@ -773,7 +774,8 @@ class ActorPhases:
             provenance = Provenance.generated(bundle.trace_id)
         await self._record_decision(
             ctx, actor_id, bundle, purpose=bundle.purpose, tier="hot",
-            outcome="acted" if res else "fallback", model=res.model, output=res.value,
+            outcome="acted" if res else "fallback", model=res.model,
+            sampling=res.sampling, output=res.value,
         )
         return (actor_id, envelope, text, provenance)
 
@@ -802,7 +804,8 @@ class ActorPhases:
             provenance = Provenance.generated(bundle.trace_id)
         await self._record_decision(
             ctx, actor_id, bundle, purpose=bundle.purpose, tier="warm",
-            outcome="acted" if res else "fallback", model=res.model, output=res.value,
+            outcome="acted" if res else "fallback", model=res.model,
+            sampling=res.sampling, output=res.value,
         )
         logger.info(
             "첫 접촉 인사: %s → %s tick=%d (plan/03 첫 개입)",
@@ -849,7 +852,8 @@ class ActorPhases:
         text = res.value
         await self._record_decision(
             ctx, actor_id, bundle, purpose=bundle.purpose, tier="warm",
-            outcome="acted" if res else "hesitated", model=res.model, output=res.value,
+            outcome="acted" if res else "hesitated", model=res.model,
+            sampling=res.sampling, output=res.value,
         )
         if text is None:
             return False  # 조용히 생략 — 쿨다운도 소모하지 않는다 (다음 모먼트에 다시)
@@ -902,6 +906,7 @@ class ActorPhases:
         await self._record_decision(
             ctx, actor_id, bundle, purpose=bundle.purpose, tier=Tier.WARM.value,
             outcome="acted" if inference else "fallback", model=inference.model,
+            sampling=inference.sampling,
             output=json.dumps(payload, ensure_ascii=False) if payload else None,
         )
         if payload is None:
@@ -1015,6 +1020,7 @@ class ActorPhases:
         await self._record_decision(
             ctx, actor_id, bundle, purpose=bundle.purpose, tier=tier,
             outcome="acted" if res else "hesitated", model=res.model,
+            sampling=res.sampling,
             output=json.dumps(payload, ensure_ascii=False) if payload else None,
         )
         if payload is None:
@@ -1121,6 +1127,7 @@ class ActorPhases:
         tier: str,
         outcome: str,
         model: str | None,
+        sampling: dict[str, Any] | None = None,
         output: str | None = None,
     ) -> None:
         """결정의 입력을 기록한다 — "무엇을 보고 그렇게 했는가" (ADR-021 §2).
@@ -1166,7 +1173,9 @@ class ActorPhases:
                 "model": model,
                 # 샘플링 파라미터는 AI Runtime이 아직 응답에 싣지 않는다 —
                 # 스키마는 null을 허용하며, 에코가 붙는 단계에서 채워진다 (ADR-018).
-                "sampling": None,
+                # 프로바이더에 실제로 보낸 값 (ADR-021 §2). null 필드는 "지정하지
+                # 않음 = 프로바이더 기본값"이며 규칙 경로는 통째로 None이다.
+                "sampling": sampling,
                 # 어떤 인지 예산으로 내린 결정인지 (ADR-021 §3) — 실험 결과를
                 # 예산과 이어 읽으려면 결정마다 그 값이 함께 있어야 한다
                 "cognitive_budget": self._budget_for(actor_id).to_json(),
@@ -1768,6 +1777,7 @@ class ActorPhases:
         await self._record_decision(
             ctx, actor_id, bundle, purpose=bundle.purpose, tier="warm",
             outcome="acted" if res else "hesitated", model=res.model,
+            sampling=res.sampling,
             output=json.dumps(output, ensure_ascii=False) if output else None,
         )
         if output is None:
