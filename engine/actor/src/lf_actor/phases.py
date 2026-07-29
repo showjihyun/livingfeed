@@ -48,7 +48,6 @@ from lf_actor.consolidation import (
     Episode,
     ImportanceWeights,
     TickMaterials,
-    action_label,
     build_episode,
     describe_interaction,
 )
@@ -60,6 +59,14 @@ from lf_actor.goal import PRINCIPAL as GOAL_PRINCIPAL
 from lf_actor.goal import GoalAdapter, PendingGoalEvent
 from lf_actor.ledger import DecayLedger
 from lf_actor.mailbox import Mailbox
+from lf_actor.memo import (
+    action_memo,
+    belief_memo,
+    proactive_dm_memo,
+    reply_to_actor_memo,
+    reply_to_player_memo,
+    spontaneous_comment_memo,
+)
 from lf_actor.memory import WorkingMemory
 from lf_actor.outreach import OutreachLedger, pick_dm_target
 from lf_actor.persona import Persona
@@ -1414,10 +1421,10 @@ class ActorPhases:
             if envelope["type"] == MESSAGE_TYPE:
                 commenter = envelope["actor_id"]
                 who = self._roster.get(commenter, commenter)
-                memo = f"tick {ctx.tick}: 나는 {who}의 댓글에 답했다 — \"{text}\""
+                memo = reply_to_actor_memo(ctx.tick, who, text)
             else:
                 player = envelope["payload"]["player_id"]
-                memo = f"tick {ctx.tick}: 나는 플레이어 {player}에게 답했다 — \"{text}\""
+                memo = reply_to_player_memo(ctx.tick, player, text)
             memos.setdefault(actor_id, []).append(memo)
 
         # 여운 기록 (드라마 재생산, plan/02) — 강렬했던 플레이어 댓글 교환은
@@ -1447,8 +1454,7 @@ class ActorPhases:
                 )
             )
             memos.setdefault(actor_id, []).append(
-                f"tick {ctx.tick}: 나는 플레이어 {player_id}에게 먼저 안부를 건넸다"
-                f" — \"{text}\""
+                proactive_dm_memo(ctx.tick, player_id, text)
             )
 
         # 자발 댓글 (액터 소셜 루프) — 응답 뒤·행동 앞: 사회적 반응이 일과보다 앞선다
@@ -1459,7 +1465,7 @@ class ActorPhases:
             author = post["actor_id"]
             name = self._roster.get(author, author)
             memos.setdefault(actor_id, []).append(
-                f"tick {ctx.tick}: 나는 {name}의 글에 댓글을 남겼다 — \"{text}\""
+                spontaneous_comment_memo(ctx.tick, name, text)
             )
 
         for intent in self._intents:
@@ -1483,10 +1489,7 @@ class ActorPhases:
                     payload=payload,
                 )
             )
-            memos.setdefault(actor_id, []).append(
-                f"tick {ctx.tick}: 나는 {action_label(payload['action_kind'])}"
-                f" — {payload['intent']}"
-            )
+            memos.setdefault(actor_id, []).append(action_memo(ctx.tick, payload))
 
         # 감정 변화 먼저 — 응답·행동의 원인 상태가 앞서 기록된다 (ADR-015)
         shifts_by_actor: dict[str, list[PendingShift]] = {}
@@ -1827,7 +1830,7 @@ class ActorPhases:
                 source_event_ids=belief.source_event_ids,
                 point_key=belief_point_key(actor_id, belief),
             )
-        await self._memory.add(ctx.world_id, actor_id, f"곱씹은 생각: {belief.statement}")
+        await self._memory.add(ctx.world_id, actor_id, belief_memo(belief.statement))
         logger.info(
             "신념 형성: %s [%s→%s] conf=%.2f tick=%d",
             actor_id, belief.kind, belief.about_id, belief.confidence, ctx.tick,
