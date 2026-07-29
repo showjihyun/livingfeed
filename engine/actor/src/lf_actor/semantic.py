@@ -116,7 +116,12 @@ class SemanticMemory:
         try:
             await self._ensure(world_id)
             r = await self._client.put(
-                f"/collections/{self._collection(world_id)}/points",
+                # wait=true — 색인이 끝난 뒤 응답한다. 기본(false)은 접수만 확인하므로
+                # remember()가 True를 돌려준 직후의 회상이 그 기억을 못 볼 수 있다:
+                # "저장됐다"가 "회상 가능하다"를 뜻하지 않는 반쪽 계약이 된다.
+                # 응고는 tick당 한 번이라 대기 비용은 무해하고, 갓 기동한 서버에서
+                # 드러나는 경합(CI에서 실제로 실패했다)이 여기서 닫힌다.
+                f"/collections/{self._collection(world_id)}/points?wait=true",
                 json={
                     "points": [
                         {
