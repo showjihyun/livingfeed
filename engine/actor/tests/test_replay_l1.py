@@ -222,3 +222,91 @@ async def test_perceived_dm_is_verified_through_emotion_fold(conn, redis, nc, ai
     assert report.mismatched == []
     # tick 1의 결정은 tick 0의 지각(서술+감정)을 작업 기억에 담고 있다 — 그것이 복원된다
     assert report.verified >= 1, report.summary()
+
+
+async def test_feed_post_no_longer_blocks_every_decision(conn, redis, nc, ai_service):  # noqa: F811
+    """세계에 순환된 글이 있어도 결정이 검증된다 — 배달 대상을 정확히 다시 고른다.
+
+    이전에는 피드 포스트가 하나만 있어도 배달 대상을 알 수 없어 **모든** 결정이
+    검증 불가였다 (글이 도는 실세계 세계는 전부 여기 걸렸다). 이제 fanout_targets를
+    다시 돌려 대상을 고른다: 자기 글은 자신에게 오지 않으므로(작성자 제외) 이
+    인물의 작업 기억은 흔들리지 않았음이 증명된다.
+    """
+    from lf_eventstore import NewEvent, Provenance, append, new_ulid
+
+    post_id = new_ulid()
+    await append(
+        conn, "engine.feed",
+        [NewEvent(
+            world_id=WORLD, stream="feed", stream_key=post_id,
+            type="feed.post.published", tick=0, actor_id=aria().id, event_id=post_id,
+            provenance=Provenance.derived("feed.compose:action"),
+            payload={
+                "visibility": "world", "title": "아리아의 글", "body": "오늘부터 다시 쓴다",
+                "narration_kind": "template", "participants": [aria().id],
+                "community_id": None, "location_id": None,
+                "drama_score": 0.2, "worthiness": 0.4,
+                "source_event_type": "actor.action.performed", "tags": ["work"], "media": [],
+            },
+        )],
+        expected_head=0,
+    )
+
+    phases = make_phases(nc, redis, ai_service)
+    head = 0
+    for tick in range(2):
+        head = await run_tick(conn, phases, CLOCK, WORLD, tick=tick, head=head)
+
+    report = await verify_world(conn, WORLD, [aria()], world_time_at=CLOCK.world_time_at)
+    assert report.mismatched == []
+    assert report.verified == report.total, report.summary()
+
+
+async def test_unrankable_fanout_stays_unverifiable(conn, redis, nc, ai_service):  # noqa: F811
+    """관련 독자가 상한을 넘으면 순위가 결과를 가른다 — salience 없이는 포기한다.
+
+    모르는 순서로 고른 대상 집합은 조용히 틀린 작업 기억을 만든다. 그 경우를
+    통과로 세지 않는 것이 이 판정의 경계다.
+    """
+    from lf_actor.replay_l1 import _feed_deliveries
+    from lf_eventstore import NewEvent, Provenance, append, new_ulid
+
+    author = "a_author"
+    readers = [f"a_reader{i}" for i in range(4)]  # 상한(3)보다 많다
+    for i, reader in enumerate(readers):
+        await append(
+            conn, "engine.relationship",
+            [NewEvent(
+                world_id=WORLD, stream="relationship", stream_key=f"{reader}|{author}",
+                type="relationship.state.changed", tick=0, actor_id=reader,
+                provenance=Provenance.derived("relationship.engine"),
+                payload={
+                    "from_id": reader, "to_id": author,
+                    "dimensions": {"trust": 0.1 * i, "intimacy": 0.1, "respect": 0.0,
+                                   "attraction": 0.0, "resentment": 0.0},
+                    "deltas": {"trust": 0.1, "intimacy": 0.1, "respect": 0.0,
+                               "attraction": 0.0, "resentment": 0.0},
+                    "stage": "acquaintance", "salience": 0.1 * i, "reason": "테스트",
+                },
+            )],
+            expected_head=0,
+        )
+    post_id = new_ulid()
+    await append(
+        conn, "engine.feed",
+        [NewEvent(
+            world_id=WORLD, stream="feed", stream_key=post_id,
+            type="feed.post.published", tick=0, actor_id=author, event_id=post_id,
+            provenance=Provenance.derived("feed.compose:action"),
+            payload={
+                "visibility": "world", "title": "t", "body": "b",
+                "narration_kind": "template", "participants": [author],
+                "community_id": None, "location_id": None,
+                "drama_score": 0.2, "worthiness": 0.4,
+                "source_event_type": "actor.action.performed", "tags": ["work"], "media": [],
+            },
+        )],
+        expected_head=0,
+    )
+
+    assert await _feed_deliveries(conn, WORLD, 10_000, [author, *readers]) is None
