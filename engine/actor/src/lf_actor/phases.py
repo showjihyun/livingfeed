@@ -575,7 +575,9 @@ class ActorPhases:
         self._proactive_dms = []
         decided = {"hot": 0, "warm": 0, "cold": 0}
         due = due_by_tier(self._lods, ctx.tick)
-        world = WorldContext(world_id=ctx.world_id, tick=ctx.tick, world_time=ctx.world_time)
+        world = WorldContext(
+            world_id=ctx.known_world_id, tick=ctx.tick, world_time=ctx.world_time
+        )
         schema = registry.payload_schema(ACTION_TYPE)
 
         # Hot/Warm 행동 — 액터 간 독립이라 tick 안에서 유계 병렬로 낸다. asyncio.gather는
@@ -1769,7 +1771,9 @@ class ActorPhases:
             return None
         known = sorted(counterparts | (set(self._roster) - {actor_id}))
         roster = ", ".join(f"{names.get(a, a)}({a})" for a in known) or "(없음)"
-        world = WorldContext(world_id=ctx.world_id, tick=ctx.tick, world_time=ctx.world_time)
+        world = WorldContext(
+            world_id=ctx.known_world_id, tick=ctx.tick, world_time=ctx.world_time
+        )
         bundle = build(
             self._personas[actor_id], [f"아는 사람들: {roster}", *working],
             world, purpose="reflect",

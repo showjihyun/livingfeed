@@ -87,6 +87,7 @@ async def run_tick(
     *,
     barrier: Any | None = None,
     ack_timeout_s: float = 600.0,
+    perceived_world_id: str | None = None,
 ) -> int:
     """단일 tick 파이프라인을 완주한다. 반환: 새 stream head.
 
@@ -97,7 +98,9 @@ async def run_tick(
     started_at = datetime.now(UTC)
     t0 = time.monotonic()
     ctx = TickContext(
-        world_id=world_id, tick=tick, world_time=clock.world_time_at(tick), conn=conn
+        world_id=world_id, tick=tick, world_time=clock.world_time_at(tick), conn=conn,
+        # 재생 세계의 주민은 자기가 원본에 산다고 안다 (ADR-021 §4)
+        perceived_world_id=perceived_world_id,
     )
 
     scheduled = await phases.schedule(ctx)
