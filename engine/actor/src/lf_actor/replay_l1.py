@@ -57,11 +57,13 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from lf_emotion import EmotionState, describe
 from lf_eventstore.tiers import ReplayTier, assert_verifiable
 from psycopg import AsyncConnection
 
 from lf_actor.arc import Arc
 from lf_actor.cognition import DEFAULT_MEMORY_TOKENS
+from lf_actor.consolidation import describe_interaction
 from lf_actor.context import DigestVerdict, WorldContext, build, verify_digest
 from lf_actor.memo import memo_for_own_event
 from lf_actor.memory import DEFAULT_MAX_ENTRIES
@@ -123,6 +125,24 @@ _ANY_FEED_SQL = """
 SELECT 1 FROM es.events
 WHERE world_id = %s AND global_seq < %s AND type = 'feed.post.published'
 LIMIT 1
+"""
+
+#: 이 액터에게 배달됐을 봉투들 — 순수 규칙으로 닫히는 셋만 (피드는 별도 판정)
+_PERCEIVED_SQL = """
+SELECT global_seq, event_id, type, tick, payload FROM es.events
+WHERE world_id = %s AND global_seq < %s AND (
+      payload ->> 'target_actor_id' = %s
+   OR (type = 'world.incident.occurred' AND payload -> 'affected_actor_ids' ? %s)
+)
+ORDER BY global_seq
+"""
+
+#: 이 액터의 감정 변화 — payload에 mood와 top_emotions가 실려 describe를 되살린다
+_SHIFTS_SQL = """
+SELECT global_seq, tick, causation_id, payload FROM es.events
+WHERE world_id = %s AND actor_id = %s AND type = 'actor.emotion.shifted'
+  AND global_seq < %s
+ORDER BY global_seq
 """
 
 
@@ -222,19 +242,14 @@ async def _resolve_arc(
     return None if row is None else Arc(stage=row[0], intention=row[1])
 
 
-async def _perceived_anything(
-    conn: AsyncConnection, world_id: str, actor_id: str, global_seq: int
+async def _feed_posts_exist(
+    conn: AsyncConnection, world_id: str, global_seq: int
 ) -> bool:
-    """이 지점 이전에 이 액터에게 배달됐을 봉투가 있는가 (또는 알 수 없는가).
+    """피드 포스트가 하나라도 있는가 — 있으면 팬아웃 대상을 알 수 없다.
 
-    지각이 있었다면 작업 기억에 describe_interaction 줄과 mood_line이 들어갔고,
-    그 둘은 각각 배달 이력과 감정 상태에 달려 있어 로그만으로 복원되지 않는다.
-    피드 포스트가 하나라도 있으면 팬아웃 대상을 알 수 없어 "없었다"를 단정할 수
-    없다 — 모르는 것을 없다고 세면 복원이 조용히 틀린다.
+    route_targets의 네 규칙 중 셋은 봉투만으로 닫히지만 피드 팬아웃은 관계
+    상태를 본다. 모르는 것을 '없었다'로 세면 복원이 조용히 틀린다.
     """
-    cur = await conn.execute(_DELIVERED_SQL, (world_id, global_seq, actor_id, actor_id))
-    if await cur.fetchone() is not None:
-        return True
     cur = await conn.execute(_ANY_FEED_SQL, (world_id, global_seq))
     return await cur.fetchone() is not None
 
@@ -242,21 +257,66 @@ async def _perceived_anything(
 async def _rebuild_working(
     conn: AsyncConnection, world_id: str, actor_id: str, global_seq: int,
     roster: dict[str, str],
-) -> list[str]:
-    """자기 기록만으로 작업 기억을 되짚는다 (지각이 없었음이 확인된 경우).
+) -> list[str] | None:
+    """작업 기억을 로그에서 되짚는다 — 증명하지 못하면 None (검증 불가).
 
-    엔진과 **같은 함수**로 문장을 만든다 (memo.py) — 포맷을 여기서 다시 쓰면
-    갈리는 순간 러너가 없는 회귀를 보고한다. 최신 우선·상한 절단도 WorkingMemory의
-    쓰기 규칙(LPUSH + LTRIM)과 같아야 같은 컨텍스트가 나온다.
+    엔진의 쓰기 순서를 그대로 따른다: tick마다 PERCEIVE(지각 서술들 → 감정 한 줄)
+    다음에 RESOLVE·CONSOLIDATE(자기 기록). 결정은 DECIDE에서 나므로 그 tick의
+    PERCEIVE까지만 포함된다.
+
+    감정 한 줄(mood_line)은 `describe(최종 상태)`인데, shift 이벤트 payload에
+    mood와 top_emotions가 실려 있어 되살릴 수 있다. 단 **마지막 shift의 상태가
+    최종 상태와 같음을 증명해야** 한다: 유의미하지 않은 지각도 상태를 바꾸면서
+    이벤트는 남기지 않기 때문이다. 그래서 지각 하나하나가 shift를 낳았을 때만
+    (causation_id로 대조) 복원을 주장한다.
     """
-    cur = await conn.execute(_OWN_SQL, (world_id, actor_id, global_seq))
-    entries: list[str] = []
-    for kind, tick, payload in await cur.fetchall():
-        memo = memo_for_own_event(
-            {"type": kind, "tick": tick, "payload": payload}, roster
+    if await _feed_posts_exist(conn, world_id, global_seq):
+        return None
+
+    cur = await conn.execute(_PERCEIVED_SQL, (world_id, global_seq, actor_id, actor_id))
+    perceived = await cur.fetchall()
+    cur = await conn.execute(_SHIFTS_SQL, (world_id, actor_id, global_seq))
+    shifts = await cur.fetchall()
+
+    if perceived:
+        # 모든 지각이 shift를 낳았는가 — 아니면 최종 상태를 모른다
+        caused = {c for _, _, c, _ in shifts if c}
+        if caused != {event_id for _, event_id, _, _, _ in perceived}:
+            return None
+
+    # 지각을 tick별로 묶는다: 그 봉투가 언제 지각됐는지는 shift의 tick이 말해 준다
+    # (드레인 시점은 로그에 없지만, 그 지각이 만든 감정 변화는 남는다)
+    tick_of = {c: t for _, t, c, _ in shifts if c}
+    by_tick: dict[int, list[dict[str, Any]]] = {}
+    for _, event_id, kind, tick, payload in perceived:
+        perceive_tick = tick_of.get(event_id)
+        if perceive_tick is None:
+            return None  # 언제 지각됐는지 모른다
+        by_tick.setdefault(perceive_tick, []).append(
+            {"type": kind, "tick": tick, "payload": payload, "event_id": event_id}
         )
+
+    # 그 tick의 마지막 shift가 PERCEIVE 종료 시점의 상태다
+    mood_at: dict[int, str] = {}
+    for _, tick, causation, payload in shifts:
+        if causation:
+            mood_at[tick] = describe(EmotionState.from_json(payload))
+
+    cur = await conn.execute(_OWN_SQL, (world_id, actor_id, global_seq))
+    own_by_tick: dict[int, list[str]] = {}
+    for kind, tick, payload in await cur.fetchall():
+        memo = memo_for_own_event({"type": kind, "tick": tick, "payload": payload}, roster)
         if memo is not None:
-            entries.append(memo)
+            own_by_tick.setdefault(tick, []).append(memo)
+
+    entries: list[str] = []  # 쓰기 순서 (오래된 것부터)
+    for tick in sorted(set(by_tick) | set(own_by_tick)):
+        for envelope in by_tick.get(tick, []):
+            entries.append(describe_interaction(envelope, roster))
+        if tick in mood_at:
+            entries.append(mood_at[tick])
+        entries += own_by_tick.get(tick, [])
+
     entries.reverse()  # 최신 우선 (LPUSH와 같은 순서)
     return entries[:DEFAULT_MAX_ENTRIES]
 
@@ -308,14 +368,13 @@ async def check_decision(
     # 작업 기억의 자기 기록 부분은 로그에서 접을 수 있다 (memo.py). 지각이 있었다면
     # describe_interaction 줄과 mood_line이 섞이는데 그 둘은 배달 이력·감정 상태에
     # 달려 있어 복원되지 않는다 — 그때만 포기한다.
-    working: list[str] = []
-    if await _perceived_anything(conn, world_id, actor_id, global_seq):
+    working = await _rebuild_working(
+        conn, world_id, actor_id, global_seq,
+        {pid: p.name for pid, p in personas.items()},
+    )
+    if working is None:
         unresolved.append("working")
-    else:
-        working = await _rebuild_working(
-            conn, world_id, actor_id, global_seq,
-            {pid: p.name for pid, p in personas.items()},
-        )
+        working = []
 
     if unresolved:
         return DecisionCheck(

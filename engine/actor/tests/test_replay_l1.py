@@ -174,3 +174,51 @@ async def test_reconstruction_gap_is_never_reported_as_drift(conn, redis, nc, ai
     assert report.ok
     # 작업 기억의 크기가 어긋나 그 섹션이 이름으로 지목된다
     assert "working" in report.summary()["blocked_by"]
+
+
+async def test_perceived_dm_is_verified_through_emotion_fold(conn, redis, nc, ai_service):  # noqa: F811
+    """플레이어 개입을 받은 인물도 검증된다 — 감정 한 줄을 shift 이벤트에서 되살린다.
+
+    작업 기억의 지각 부분은 (a) 봉투의 서술 (b) 감정 한 줄이다. (a)는 순수 함수고,
+    (b)는 `describe(최종 상태)`인데 shift payload에 mood와 top_emotions가 실려 있어
+    되살릴 수 있다 — 그 지각이 실제로 감정을 흔들었을 때에 한해.
+    """
+    from lf_actor.emotion import EmotionAdapter
+    from lf_actor.mailbox import Mailbox
+    from lf_eventstore import NewEvent, Provenance, append, new_ulid
+
+    event_id = new_ulid()
+    dm = {
+        "event_id": event_id, "stream": "player", "type": "player.dm.sent",
+        "schema_version": 1, "world_id": WORLD, "actor_id": None, "tick": 0,
+        "occurred_at": "2026-03-01T00:00:00Z", "causation_id": None,
+        "correlation_id": event_id,
+        "provenance": {"kind": "authored", "author_id": "p_watcher"},
+        "payload": {"player_id": "p_watcher", "target_actor_id": aria().id,
+                    "text": "기획안 얘기 봤어요. 응원해요."},
+    }
+    # 운영과 같은 경로: 개입은 로그에 남고, 라우터가 그것을 메일박스로 옮긴다
+    await append(
+        conn, "services.gateway",
+        [NewEvent(
+            world_id=WORLD, stream="player", stream_key="p_watcher",
+            type="player.dm.sent", tick=0, event_id=event_id,
+            provenance=Provenance.authored("p_watcher"), payload=dm["payload"],
+        )],
+        expected_head=0,
+    )
+    mailbox = Mailbox(redis)
+    await mailbox.push(WORLD, aria().id, dm)
+
+    phases = ActorPhases(
+        [aria()], ai=AiRuntimeClient(nc, ai_service, timeout_s=5),
+        memory=WorkingMemory(redis), mailbox=mailbox, emotion=EmotionAdapter(redis),
+    )
+    # player 스트림과 tick 스트림은 별개다 — tick head는 여전히 0에서 시작한다
+    head = await run_tick(conn, phases, CLOCK, WORLD, tick=0, head=0)
+    await run_tick(conn, phases, CLOCK, WORLD, tick=1, head=head)
+
+    report = await verify_world(conn, WORLD, [aria()], world_time_at=CLOCK.world_time_at)
+    assert report.mismatched == []
+    # tick 1의 결정은 tick 0의 지각(서술+감정)을 작업 기억에 담고 있다 — 그것이 복원된다
+    assert report.verified >= 1, report.summary()
