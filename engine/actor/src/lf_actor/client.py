@@ -32,6 +32,9 @@ class Inference:
 
     value: Any | None = None
     model: str | None = None
+    #: 이 호출이 실제로 보낸 샘플링 (ADR-021 §2) — None은 프로바이더 기본값에
+    #: 맡겼다는 뜻이다. 결정 기록이 그대로 싣는다.
+    sampling: dict[str, Any] | None = None
 
     def __bool__(self) -> bool:
         return self.value is not None
@@ -106,7 +109,11 @@ class AiRuntimeClient:
             )
             return Inference(model=model)
         output = response.get("output")
-        return Inference(output if isinstance(output, dict) else None, model)
+        return Inference(
+            output if isinstance(output, dict) else None,
+            model,
+            response.get("sampling"),
+        )
 
     async def reflect(
         self,
@@ -144,7 +151,11 @@ class AiRuntimeClient:
             logger.info("reflect 생략 (actor=%s): %s", actor_id, response.get("error"))
             return Inference(model=model)
         output = response.get("output")
-        return Inference(output if isinstance(output, dict) else None, model)
+        return Inference(
+            output if isinstance(output, dict) else None,
+            model,
+            response.get("sampling"),
+        )
 
     async def converse(
         self,
@@ -186,4 +197,4 @@ class AiRuntimeClient:
         text = output.get("text") if isinstance(output, dict) else None
         if not isinstance(text, str) or not text.strip():
             return Inference(model=model)
-        return Inference(sanitize_reply(text), model)
+        return Inference(sanitize_reply(text), model, response.get("sampling"))

@@ -69,9 +69,10 @@ def make_providers(cfg: Config) -> dict[str, Provider]:
         max_tokens=1024,
         # qwen3 계열의 thinking을 기본으로 끈다(지연 6배) — LF_LOCAL_THINK=1로 켠다
         no_think=os.environ.get("LF_LOCAL_THINK", "0") != "1",
+        sampling=cfg.sampling,
     )
     if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
-        providers["anthropic"] = AnthropicProvider()
+        providers["anthropic"] = AnthropicProvider(sampling=cfg.sampling)
     for name, (key_envs, base_url, token_param, max_tokens) in _COMPAT_SPECS.items():
         api_key = next((os.environ[e] for e in key_envs if os.environ.get(e)), None)
         if api_key is None:
@@ -86,6 +87,7 @@ def make_providers(cfg: Config) -> dict[str, Provider]:
             reasoning_effort=os.environ.get("LF_OPENAI_REASONING_EFFORT", "low")
             if name == "openai"
             else None,
+            sampling=cfg.sampling,
         )
     return providers
 

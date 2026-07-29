@@ -180,7 +180,13 @@ class AiRuntime:
                     error="출력 스키마 위반 (재시도 후에도): " + "; ".join(errors),
                 )
 
-        return InferenceResponse(ok=True, output=completion.output, model=model)
+        return InferenceResponse(
+            ok=True,
+            output=completion.output,
+            model=model,
+            # 프로바이더가 **실제로 보낸** 값 — 결정 기록의 sampling 원천 (ADR-021 §2)
+            sampling=completion.sampling,
+        )
 
     async def _call(
         self,

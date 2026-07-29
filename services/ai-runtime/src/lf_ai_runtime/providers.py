@@ -13,7 +13,7 @@ import json
 import zlib
 from typing import Any, Protocol
 
-from lf_ai_runtime.model import Completion, InferenceRequest, Usage
+from lf_ai_runtime.model import Completion, InferenceRequest, Sampling, Usage
 
 
 class ProviderError(Exception):
@@ -194,7 +194,7 @@ class AnthropicProvider:
 
     name = "anthropic"
 
-    def __init__(self, max_tokens: int = 1024) -> None:
+    def __init__(self, max_tokens: int = 1024, *, sampling: Sampling | None = None) -> None:
         import anthropic
 
         self._anthropic = anthropic
@@ -202,6 +202,8 @@ class AnthropicProvider:
         # 동시 사용 안전 + 커넥션 풀(max_connections=1000)이라 LF_AI_CONCURRENCY에 여유롭다
         self._client = anthropic.AsyncAnthropic()
         self._max_tokens = max_tokens  # 출력 예산 ≤600 tokens (ADR-009) + 여유
+        #: 지정된 것만 실제로 전송한다 — 미설정은 프로바이더 기본값에 맡긴다
+        self._sampling = sampling or Sampling()
 
     async def complete(
         self,
@@ -217,10 +219,14 @@ class AnthropicProvider:
                 "\n\n[수정 요청] 직전 응답이 출력 스키마를 위반했다. 위반 사항을 고쳐 "
                 "스키마에 맞는 JSON만 다시 출력하라:\n- " + "\n- ".join(repair_errors)
             )
+        budget = _token_budget(self._max_tokens, max_output_tokens)
+        sent = self._sampling.sent_kwargs()
+        sampling = Sampling(**sent, max_output_tokens=budget)
         try:
             response = await self._client.messages.create(
                 model=model,
-                max_tokens=_token_budget(self._max_tokens, max_output_tokens),
+                max_tokens=budget,
+                **sent,
                 system=[
                     {
                         "type": "text",
@@ -253,7 +259,11 @@ class AnthropicProvider:
             raise ProviderError(f"JSON 파싱 실패: {e}") from e
         if not isinstance(output, dict):
             raise ProviderError("구조화 출력이 객체가 아니다")
-        return Completion(output=output, usage=anthropic_usage(response.usage))
+        return Completion(
+            output=output,
+            usage=anthropic_usage(response.usage),
+            sampling=sampling,
+        )
 
 
 def extract_json_object(text: str) -> dict[str, Any]:
@@ -298,6 +308,7 @@ class OpenAICompatProvider:
         max_tokens: int = 1024,
         reasoning_effort: str | None = None,
         no_think: bool = False,
+        sampling: Sampling | None = None,
     ) -> None:
         import openai
 
@@ -311,6 +322,7 @@ class OpenAICompatProvider:
         self._max_tokens = max_tokens
         self._reasoning_effort = reasoning_effort
         self._no_think = no_think
+        self._sampling = sampling or Sampling()
 
     async def complete(
         self,
@@ -339,9 +351,10 @@ class OpenAICompatProvider:
         # 끈다 — qwen3 계열에만 적용(다른 로컬 모델엔 무의미한 토큰이라 건드리지 않는다).
         if self._no_think and model.startswith("qwen3"):
             system_content = f"{system_content} /no_think"
-        kwargs: dict[str, Any] = {
-            self._token_param: _token_budget(self._max_tokens, max_output_tokens)
-        }
+        budget = _token_budget(self._max_tokens, max_output_tokens)
+        sent = self._sampling.sent_kwargs()
+        sampling = Sampling(**sent, max_output_tokens=budget)
+        kwargs: dict[str, Any] = {self._token_param: budget, **sent}
         if self._json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         # reasoning 모델의 지연 통제 — decide류는 깊은 추론이 불필요하다 (tick 예산, ADR-020)
@@ -369,4 +382,5 @@ class OpenAICompatProvider:
         return Completion(
             output=extract_json_object(text),
             usage=openai_usage(getattr(response, "usage", None)),
+            sampling=sampling,
         )
