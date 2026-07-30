@@ -149,6 +149,12 @@ export function humanize(text: string): string {
       .replaceAll("당신이(가)", "당신이")
       .replaceAll("당신을(를)", "당신을")
       .replaceAll("당신과(와)", "당신과")
+      // 엔진이 받침 없는 id를 보고 고른 조사도 마찬가지로 다시 정해진다 —
+      // "p_observer_0417가" → "당신가"가 화면에 그대로 나가지 않게 한다
+      .replaceAll("당신는", "당신은")
+      .replaceAll("당신가", "당신이")
+      .replaceAll("당신를", "당신을")
+      .replaceAll("당신와", "당신과")
   );
 }
 
