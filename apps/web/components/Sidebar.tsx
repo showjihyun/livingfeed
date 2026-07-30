@@ -12,6 +12,7 @@ import { Face } from "./Face";
 import { Icon } from "./Icon";
 import { Pressable } from "./Pressable";
 import { SettingsPanel } from "./SettingsPanel";
+import { WorldClockDial } from "./WorldClockDial";
 import styles from "./lf.module.css";
 
 const en = {
@@ -242,12 +243,21 @@ function SidebarInner({
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Icon d={ICON.clock} size={14} color={COLOR.faint} />
+            {/* 멈춘 시계 아이콘 대신 도는 바늘 — 숫자는 세계 1분(실시간 15초)마다
+                한 번 바뀌어서, 그 사이 흐름이 보이지 않았다 */}
+            <WorldClockDial size={15} />
             <div style={{ fontSize: 12, fontWeight: WEIGHT.heavy, color: COLOR.faint }}>
               {t.worldTime}
             </div>
           </div>
-          <div style={{ fontSize: 19, fontWeight: WEIGHT.heavy }}>{clock}</div>
+          {/* key로 분이 바뀔 때마다 다시 마운트해 강세를 재생한다 — 넘어간 순간이 보인다 */}
+          <div
+            key={clock}
+            className="lf-tickover"
+            style={{ fontSize: 19, fontWeight: WEIGHT.heavy }}
+          >
+            {clock}
+          </div>
           <div style={{ fontSize: 12, color: COLOR.faint, fontWeight: WEIGHT.semibold }}>
             {t.speedNote}
           </div>

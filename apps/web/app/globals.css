@@ -72,3 +72,29 @@ input {
     opacity: 0.85;
   }
 }
+
+/* 세계 시계 — 분이 넘어가는 순간의 작은 강세. 세계 1분은 실시간 15초마다
+   소리 없이 지나갔다: 바늘이 흐름을 보여 준다면 이건 '방금 넘어갔다'를 보여 준다 */
+@keyframes lf-tickover {
+  from {
+    transform: translateY(-2px);
+    opacity: 0.45;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.lf-tickover {
+  animation: lf-tickover 320ms ease-out;
+}
+
+/* 동작 최소화 — 흐름을 알리는 움직임은 취향이 아니라 접근성 문제이기도 하다.
+   인라인 style로 걸면 이 규칙이 밀리므로 애니메이션은 클래스에만 둔다.
+   시계 바늘은 컴포넌트가 따로 1초 간격으로 낮춘다 (WorldClockDial) */
+@media (prefers-reduced-motion: reduce) {
+  .lf-tickover {
+    animation: none;
+  }
+}
