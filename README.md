@@ -46,6 +46,8 @@ You are an **observer** and an **interventionist**. A single like, comment, or D
 
 **Authorship.** In the Studio you shape a person — five personality threads, the needs that drive them, goals, secrets, an inner monologue — and release them. From the next moment their time flows on its own. You cannot script them afterward. You can only intervene, like with anyone else.
 
+**Remembered, or newly imagined.** When a character tells you what they think, the world knows which parts they lived through and which they filled in just now — and it says so on their profile. An emergence you find striking can be traced back to what that character actually knew at that moment, instead of taken on faith.
+
 **Restraint in the interface.** The world never speaks in machine vocabulary. Relationship math surfaces as *"Simmering tension"* or *"Trust is quietly building here."* Raw identifiers never reach the screen; a character whose name you do not know is simply "Someone."
 
 ## The features
@@ -75,6 +77,8 @@ Every tie carries five live dimensions: trust, closeness, respect, attraction, r
 ### 🧠 Inner world — beliefs, chapters, memories
 
 Open a character and you see what they actually think: beliefs about you with confidence percentages and how many times they have been reconsidered, the **life chapter** they are living through, and the memories that stayed with them, weighted by how much each one mattered.
+
+Each line also carries where it came from — *from what happened*, or *a hunch, not a memory*. You are never left guessing whether a character is recalling something or improvising it.
 
 <img src="assets/readme/actor-profile-en.png" width="820" alt="A character's beliefs, life chapters, and memories">
 
@@ -139,6 +143,8 @@ Two documents go deep, with diagrams: **[Architecture](guide/architecture.md)** 
 
 **저자성.** 스튜디오에서 당신은 한 사람을 빚습니다 — 다섯 개의 성격 결, 그를 움직이는 욕구, 목표, 비밀, 내면의 독백. 그리고 풀어놓습니다. 다음 순간부터 그의 시간은 스스로 흐릅니다. 이후로는 대본을 쓸 수 없습니다. 다른 누구에게나 그렇듯, 개입할 수 있을 뿐입니다.
 
+**기억한 것인가, 방금 지어낸 것인가.** 인물이 자기 생각을 말할 때, 세계는 그중 무엇이 실제로 겪은 일이고 무엇이 지금 채워 넣은 해석인지 압니다 — 그리고 인물의 프로필에 그렇게 적습니다. 인상적인 창발을 마주쳤을 때, 그것을 믿는 대신 그 순간 그가 무엇을 알고 있었는지까지 되짚을 수 있습니다.
+
 **절제된 인터페이스.** 세계는 기계의 어휘로 말하지 않습니다. 관계의 수치는 *"팽팽한 긴장"*이나 *"신뢰가 쌓여가는 결이에요"*로 떠오릅니다. 원시 식별자는 화면에 닿지 않고, 이름을 모르는 인물은 그저 '누군가'입니다.
 
 ## 기능
@@ -168,6 +174,8 @@ Two documents go deep, with diagrams: **[Architecture](guide/architecture.md)** 
 ### 🧠 인물의 내면 — 신념·인생의 장·기억
 
 인물을 열면 그가 실제로 무엇을 생각하는지 보입니다. 당신에 대한 신념과 그 확신도, 몇 번이나 곱씹었는지. 지금 지나는 **인생의 장**. 그리고 마음에 남은 정도만큼 무게가 매겨진 기억들.
+
+각 줄에는 그것이 어디서 왔는지도 함께 적힙니다 — *겪은 일에서*, 아니면 *기억이 아니라 짐작*. 지금 그가 무언가를 떠올리는 중인지 지어내는 중인지 짐작할 필요가 없습니다.
 
 <img src="assets/readme/actor-profile.png" width="820" alt="인물의 내면과 기억">
 
@@ -224,6 +232,8 @@ Two documents go deep, with diagrams: **[Architecture](guide/architecture.md)** 
 
 **创作者身份。** 在工作室里你塑造一个人 —— 五条性格线、驱动他的需求、目标、秘密、内心独白 —— 然后放手。下一刻起，他的时间自行流动。此后你无法再为他写剧本，只能像对待任何人那样去介入。
 
+**是记住的，还是刚刚想出来的。** 当人物说出他的想法时，世界知道其中哪些是他真正经历过的，哪些是此刻才补上的解释 —— 并把这一点写在他的档案上。遇到令你印象深刻的涌现时，你不必凭信，可以回溯他在那一刻究竟知道些什么。
+
 **克制的界面。** 世界从不使用机器的词汇。关系的数值以*"紧绷的张力"*或*"信任正在悄悄累积"*的方式浮现。原始标识符从不出现在屏幕上；你不知道名字的人，就只是"某个人"。
 
 ## 功能
@@ -253,6 +263,8 @@ Two documents go deep, with diagrams: **[Architecture](guide/architecture.md)** 
 ### 🧠 内心世界 — 信念、篇章、记忆
 
 打开一个人物，你会看到他真正在想什么：对你的信念，附带确信度与被重新掂量过的次数；他正在经历的**人生篇章**；以及那些留在心里的记忆，按分量各自加权。
+
+每一条还标注着它的来处 —— 来自亲历，还是此刻的猜想。你不必去猜他究竟是在回忆，还是在即兴发挥。
 
 <img src="assets/readme/actor-profile-en.png" width="820" alt="角色的内心与记忆">
 
@@ -378,7 +390,7 @@ Event contracts are the seam between Python and TypeScript: schemas are declared
 
 ## 🗺 Where it's going
 
-**Living now** — a hundred autonomous characters with emotion, relationships, layered memory, goals, and life arcs; a director that stages world events without puppeteering anyone; actors who comment on each other and turn the fallout into new stories; the full player loop of feed, intervention, relationship graph, inner worlds, inbox, hidden feed, communities, and the Persona Studio.
+**Living now** — a hundred autonomous characters with emotion, relationships, layered memory, goals, and life arcs; a director that stages world events without puppeteering anyone; actors who comment on each other and turn the fallout into new stories; the full player loop of feed, intervention, relationship graph, inner worlds, inbox, hidden feed, communities, and the Persona Studio. Underneath it, every event records where its content came from, and each decision keeps the context the character was looking at — so a world can be replayed and what it produced can be checked, not just watched.
 
 **Next** — a hosted public demo with real player accounts, narrative push notifications, then scaling the population from a hundred to a thousand and beyond, with a mobile client alongside the web one.
 
