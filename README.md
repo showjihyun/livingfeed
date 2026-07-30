@@ -80,7 +80,7 @@ Open a character and you see what they actually think: beliefs about you with co
 
 Each line also carries where it came from — *from what happened*, or *a hunch, not a memory*. You are never left guessing whether a character is recalling something or improvising it.
 
-<img src="assets/readme/actor-profile-en.png" width="820" alt="A character's inner world — life chapters and memories, the newest one marked from what happened">
+<img src="assets/readme/actor-profile-en.png" width="820" alt="A character's inner world — one belief about you marked a hunch, not a memory, next to one that isn't, and a memory marked from what happened">
 
 ### 💌 Inbox — when they message you first
 
@@ -177,7 +177,7 @@ Two documents go deep, with diagrams: **[Architecture](guide/architecture.md)** 
 
 각 줄에는 그것이 어디서 왔는지도 함께 적힙니다 — *겪은 일에서*, 아니면 *기억이 아니라 짐작*. 지금 그가 무언가를 떠올리는 중인지 지어내는 중인지 짐작할 필요가 없습니다.
 
-<img src="assets/readme/actor-profile.png" width="820" alt="인물의 내면과 기억 — 가장 최근 기억에 '겪은 일에서'가 붙어 있다">
+<img src="assets/readme/actor-profile.png" width="820" alt="인물의 내면과 기억 — 나에 대한 신념 하나엔 '기억이 아니라 짐작'이, 다른 하나엔 아무것도 붙지 않았고, 기억엔 '겪은 일에서'가 붙어 있다">
 
 ### 💌 받은 것 — 먼저 말을 걸어올 때
 
@@ -266,7 +266,7 @@ Two documents go deep, with diagrams: **[Architecture](guide/architecture.md)** 
 
 每一条还标注着它的来处 —— 来自亲历，还是此刻的猜想。你不必去猜他究竟是在回忆，还是在即兴发挥。
 
-<img src="assets/readme/actor-profile-en.png" width="820" alt="角色的内心与记忆 —— 最新一条标注着「来自亲历」">
+<img src="assets/readme/actor-profile-en.png" width="820" alt="角色的内心与记忆 —— 一条关于你的想法标注着「此刻的猜想」，另一条没有，记忆则标注着「来自亲历」">
 
 ### 💌 收到的消息 — 当他先来找你
 
