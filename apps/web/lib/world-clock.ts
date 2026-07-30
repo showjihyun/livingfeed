@@ -81,6 +81,23 @@ export function currentTick(): number | null {
   return anchor?.tick ?? null;
 }
 
+/** 세계 1분 = 60,000 세계ms. 4배속이라 실시간으로는 15초다 (스윕 한 바퀴). */
+export const WORLD_MS_PER_MINUTE = 60_000;
+
+/**
+ * 지금 세계 '분'의 진행도 [0,1) — 시계 바늘이 한 바퀴 도는 좌표다.
+ *
+ * worldNow()에서 파생되므로 클램프를 그대로 물려받는다: 엔진이 미루기 정책으로
+ * tick을 늦추면 바늘도 그 자리에 선다. 바늘이 계속 돌면 "세계가 흐르고 있다"는
+ * 거짓말이 되므로, 멈춤도 사실대로 보인다.
+ *
+ * 앵커 전(연결 전)에는 null — 그때는 보간할 진실이 없다.
+ */
+export function worldMinuteProgress(nowMs: number = Date.now()): number | null {
+  const now = worldNow(nowMs);
+  return now === null ? null : (now % WORLD_MS_PER_MINUTE) / WORLD_MS_PER_MINUTE;
+}
+
 /** 표시 형식은 기존 데모 시계(data.ts)와 동일한 결 — UI 언어를 따른다 */
 export function formatWorldClock(utcMs: number): string {
   const d = new Date(utcMs);

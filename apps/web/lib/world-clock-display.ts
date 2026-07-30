@@ -54,6 +54,17 @@ function subscribe(onChange: () => void): () => void {
 const getSnapshot = (): number => worldMin;
 const getServerSnapshot = (): number => WORLD_MIN_START; // SSR 결정적 값
 
+/**
+ * 데모 폴백 시계의 '분' 진행도 [0,1) — 시계 바늘의 앵커 전 좌표다.
+ *
+ * 이 시계는 3초마다 4분씩 **건너뛴다**. 그래서 바늘도 건너뛴다 — 앵커 전에
+ * 매끄럽게 돌리면 화면의 숫자와 다른 속도로 흐르는 셈이라, 없는 정밀도를
+ * 지어내게 된다 (world-clock의 클램프 규율과 같은 이유).
+ */
+export function demoMinuteProgress(): number {
+  return (worldMin % 60) / 60;
+}
+
 /** 데모 폴백 세계시각 문자열. useWorldClock(fallback)의 fallback 인자로 쓴다. */
 export function useDemoWorldTime(): string {
   const min = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
